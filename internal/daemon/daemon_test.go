@@ -283,7 +283,7 @@ func TestDaemon(t *testing.T) {
 	eventually(t, "failover to de", routedVia(euPeer.IP, "lm-up-de"))
 	eventually(t, "nl-only peer blocked", func() bool { _, ok := h.dp.RouteOf(nlPeer.IP); return !ok })
 	st := h.d.Status()
-	if st[0].State != health.Down || st[1].State != health.Up || st[1].Peers != 1 {
+	if st[0].State != health.Down || st[1].State != health.Up || st[1].Clients != 1 {
 		t.Errorf("status = %+v", st)
 	}
 

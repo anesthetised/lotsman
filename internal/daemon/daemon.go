@@ -235,7 +235,7 @@ type UpstreamStatus struct {
 	State         health.State
 	Latency       time.Duration
 	LastHandshake time.Time
-	Peers         int
+	Clients       int // Lotsman peers currently routed through this upstream
 }
 
 func (d *Daemon) Status() []UpstreamStatus {
@@ -249,7 +249,7 @@ func (d *Daemon) Status() []UpstreamStatus {
 		}
 		for _, name := range d.assignments {
 			if name == u.Name {
-				s.Peers++
+				s.Clients++
 			}
 		}
 		out = append(out, s)

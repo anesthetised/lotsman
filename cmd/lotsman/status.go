@@ -50,13 +50,13 @@ func upstreamStatus(configPath string) error {
 	}
 	fmt.Printf("updated %s ago, client MTU %d\n", time.Since(s.UpdatedAt).Round(time.Second), s.ClientMTU)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "UPSTREAM\tINTERFACE\tSTATE\tLATENCY\tLAST HANDSHAKE\tPEERS")
+	fmt.Fprintln(w, "UPSTREAM\tINTERFACE\tSTATE\tLATENCY\tLAST HANDSHAKE\tCLIENTS")
 	for _, u := range s.Upstreams {
 		hs := "never"
 		if !u.LastHandshake.IsZero() {
 			hs = time.Since(u.LastHandshake).Round(time.Second).String() + " ago"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\n", u.Name, u.Interface, u.State, u.Latency.Round(time.Millisecond), hs, u.Peers)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\n", u.Name, u.Interface, u.State, u.Latency.Round(time.Millisecond), hs, u.Clients)
 	}
 	return w.Flush()
 }
