@@ -42,6 +42,20 @@ func ParseKey(s string) (Key, error) {
 	return k, nil
 }
 
+// ParseHexKey reads the hex form used by UAPI.
+func ParseHexKey(s string) (Key, error) {
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		return Key{}, fmt.Errorf("key is not hex: %w", err)
+	}
+	if len(b) != 32 {
+		return Key{}, fmt.Errorf("key is %d bytes, want 32", len(b))
+	}
+	var k Key
+	copy(k[:], b)
+	return k, nil
+}
+
 func (k Key) String() string { return base64.StdEncoding.EncodeToString(k[:]) }
 func (k Key) Hex() string    { return hex.EncodeToString(k[:]) }
 func (k Key) IsZero() bool   { return k == Key{} }

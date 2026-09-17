@@ -205,7 +205,10 @@ func TestKeys(t *testing.T) {
 	if priv.Public() != priv.Public() || priv.Public() == priv {
 		t.Error("public key derivation is not deterministic or equals private key")
 	}
-	if len(priv.Hex()) != 64 {
-		t.Errorf("hex length %d", len(priv.Hex()))
+	if fromHex, err := ParseHexKey(priv.Hex()); err != nil || fromHex != priv {
+		t.Errorf("hex round trip failed: %v", err)
+	}
+	if _, err := ParseHexKey("abcd"); err == nil {
+		t.Error("short hex key accepted")
 	}
 }

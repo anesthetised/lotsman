@@ -25,10 +25,14 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 
 ## AmneziaWG implementation notes (verified 2026-09-17)
 
-- `github.com/amnezia-vpn/amneziawg-go` is pinned to **v0.2.19**. The `v1.0.x` tags are *older*
-  (July 2025, AWG 1.5 only: `i1..i5`, `j1..j3`, `itime`, no `s3`/`s4`, no header ranges). The live
-  line is `v0.2.x`. `master` additionally carries "AWG 3+" knobs (`header_protection_key`,
-  `content_padding_addition`, timing ranges) that are not tagged yet.
+- `github.com/amnezia-vpn/amneziawg-go` is pinned to the **master pseudo-version
+  `v0.2.20-0.20260724121833-457d920a1a7d`**, not a tag. The `v1.0.x` tags are *older* (July 2025,
+  AWG 1.5 only: `i1..i5`, `j1..j3`, `itime`, no `s3`/`s4`, no header ranges); the live line is
+  `v0.2.x`. The latest tag, v0.2.19, has a data race: every `IpcSet` on a running device — including
+  a plain peer add/remove — rewrites `device.headers.*` while the receive goroutine reads them.
+  `master` stores them atomically. It also carries "AWG 3+" knobs (`header_protection_key`,
+  `content_padding_addition`, timing ranges) that Lotsman does not use yet. Move back to a tag once
+  one includes the fix.
 - The public `amneziawg-linux-kernel-module` implements 1.5 parameters only; the 2.0 module is
   distributed as a binary PPA without sources. Not a dependency Lotsman can take.
 - UAPI device keys for 2.0: `jc`, `jmin`, `jmax`, `s1`..`s4` (uint16), `h1`..`h4` (single value or
