@@ -88,26 +88,28 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := migrate(db); err != nil {
+	if err := migrate(db, path); err != nil {
 		db.Close()
 		return nil, err
 	}
 	return &Store{db: db}, nil
 }
 
-func migrate(db *sql.DB) error {
-	var version int
-	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+// migrate brings the schema up to date. When there is anything to apply it
+// first snapshots the database next to itself, so a bad upgrade can be undone
+// by stopping the daemon and moving the backup back.
+func migrate(db *sql.DB, path string) error {
+	version, err := schemaVersion(db)
+	if err != nil {
 		return err
 	}
-	// The first release created the schema without recording a version.
-	if version == 0 {
-		var tables int
-		if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'users'`).Scan(&tables); err != nil {
-			return err
-		}
-		if tables == 1 {
-			version = 1
+	if version >= len(migrations) {
+		return nil
+	}
+	if version > 0 {
+		backup := fmt.Sprintf("%s.v%d-%s.bak", path, version, time.Now().UTC().Format("20060102-150405"))
+		if _, err := db.Exec(`VACUUM INTO ?`, backup); err != nil {
+			return fmt.Errorf("backup before migration: %w", err)
 		}
 	}
 	for i := version; i < len(migrations); i++ {
@@ -128,6 +130,26 @@ func migrate(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+// schemaVersion reads PRAGMA user_version. The first release created the
+// schema without recording one, so a version-0 database with tables is version 1.
+func schemaVersion(db *sql.DB) (int, error) {
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return 0, err
+	}
+	if version != 0 {
+		return version, nil
+	}
+	var tables int
+	if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'users'`).Scan(&tables); err != nil {
+		return 0, err
+	}
+	if tables == 1 {
+		return 1, nil
+	}
+	return 0, nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }

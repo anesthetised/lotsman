@@ -169,6 +169,42 @@ func TestMigrateFromVersion1(t *testing.T) {
 	if version != len(migrations) {
 		t.Errorf("user_version = %d, want %d", version, len(migrations))
 	}
+
+	// The pre-migration database was snapshotted and still has the old schema.
+	backups, _ := filepath.Glob(path + ".v1-*.bak")
+	if len(backups) != 1 {
+		t.Fatalf("backups = %v", backups)
+	}
+	old, err := sql.Open("sqlite", backups[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer old.Close()
+	var cols int
+	old.QueryRow(`SELECT count(*) FROM pragma_table_info('peers') WHERE name = 'device'`).Scan(&cols)
+	var rows int
+	old.QueryRow(`SELECT count(*) FROM peers`).Scan(&rows)
+	if cols != 0 || rows != 1 {
+		t.Errorf("backup has device column: %v, peers: %d", cols != 0, rows)
+	}
+}
+
+func TestFreshDatabaseMakesNoBackup(t *testing.T) {
+	dir := t.TempDir()
+	s, err := Open(filepath.Join(dir, "new.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	if backups, _ := filepath.Glob(filepath.Join(dir, "*.bak")); len(backups) != 0 {
+		t.Errorf("fresh database produced backups: %v", backups)
+	}
+	if _, err := Open(filepath.Join(dir, "new.db")); err != nil {
+		t.Fatal(err)
+	}
+	if backups, _ := filepath.Glob(filepath.Join(dir, "*.bak")); len(backups) != 0 {
+		t.Errorf("reopening an up-to-date database produced backups: %v", backups)
+	}
 }
 
 func TestSubnetFull(t *testing.T) {

@@ -57,6 +57,23 @@ docker exec lotsman lotsman user add alice -profile nl
 The two `--sysctl` flags matter: `/proc/sys` is read-only inside the container, so Lotsman can
 only verify them, not set them.
 
+## Upgrading
+
+```bash
+just build
+scp dist/lotsman-linux-amd64 server:/tmp/lotsman
+sudo /tmp/lotsman config check              # the new binary must accept the current config
+sudo install -m 0755 /tmp/lotsman /usr/local/bin/lotsman
+sudo systemctl restart lotsman              # clients reconnect on their own within seconds
+sudo lotsman upstream status
+```
+
+If the new version changes the database schema, the daemon snapshots the old database to
+`state_dir/lotsman.db.v<N>-<timestamp>.bak` before migrating. To roll back: stop the service,
+reinstall the previous binary, move the backup over `lotsman.db`, start. The unit runs
+`config check` before `serve` and stops retrying after five failed starts in five minutes, so a
+broken upgrade shows up in `systemctl status lotsman` instead of crash-looping.
+
 ## Configuration
 
 `/etc/lotsman/lotsman.yaml` — see `deploy/lotsman.example.yaml` for a commented example.

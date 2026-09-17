@@ -3,9 +3,14 @@ Description=Lotsman AmneziaWG 2.0 gateway
 Documentation=https://github.com/anesthetised/lotsman
 After=network-online.target
 Wants=network-online.target
+# A daemon that cannot start (bad config, failed migration) must not restart forever.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
+# Refuse to start on a config that would not load; the error lands in the journal once, not in a loop.
+ExecStartPre=/usr/local/bin/lotsman config check
 ExecStart=/usr/local/bin/lotsman serve
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
