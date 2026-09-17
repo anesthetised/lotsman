@@ -20,22 +20,43 @@ var (
 	ErrSubnetFull = errors.New("no free address in subnet")
 )
 
-const schema = `
-CREATE TABLE IF NOT EXISTS users (
-	id         INTEGER PRIMARY KEY,
-	name       TEXT NOT NULL UNIQUE,
-	created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS peers (
-	id          INTEGER PRIMARY KEY,
-	user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-	profile     TEXT NOT NULL,
-	private_key TEXT NOT NULL,
-	public_key  TEXT NOT NULL UNIQUE,
-	ip          TEXT NOT NULL UNIQUE,
-	created_at  TEXT NOT NULL,
-	UNIQUE (user_id, profile)
-);`
+// DefaultDevice is used when a user does not name their device.
+const DefaultDevice = "default"
+
+// migrations run in order; PRAGMA user_version records how many have been applied.
+var migrations = []string{
+	`CREATE TABLE users (
+		id         INTEGER PRIMARY KEY,
+		name       TEXT NOT NULL UNIQUE,
+		created_at TEXT NOT NULL
+	);
+	CREATE TABLE peers (
+		id          INTEGER PRIMARY KEY,
+		user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		profile     TEXT NOT NULL,
+		private_key TEXT NOT NULL,
+		public_key  TEXT NOT NULL UNIQUE,
+		ip          TEXT NOT NULL UNIQUE,
+		created_at  TEXT NOT NULL,
+		UNIQUE (user_id, profile)
+	);`,
+	// A user may have several devices; WireGuard needs one key per device.
+	`CREATE TABLE peers_new (
+		id          INTEGER PRIMARY KEY,
+		user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		device      TEXT NOT NULL,
+		profile     TEXT NOT NULL,
+		private_key TEXT NOT NULL,
+		public_key  TEXT NOT NULL UNIQUE,
+		ip          TEXT NOT NULL UNIQUE,
+		created_at  TEXT NOT NULL,
+		UNIQUE (user_id, device, profile)
+	);
+	INSERT INTO peers_new (id, user_id, device, profile, private_key, public_key, ip, created_at)
+		SELECT id, user_id, '` + DefaultDevice + `', profile, private_key, public_key, ip, created_at FROM peers;
+	DROP TABLE peers;
+	ALTER TABLE peers_new RENAME TO peers;`,
+}
 
 type User struct {
 	ID        int64
@@ -43,12 +64,14 @@ type User struct {
 	CreatedAt time.Time
 }
 
-// Peer is one (user, profile) tunnel. The private key is kept so the client
-// config can be shown again later; anyone with read access to the database can
-// impersonate the peer, so the database must be protected like the server key.
+// Peer is one (user, device, profile) tunnel. The private key is kept so the
+// client config can be shown again later; anyone with read access to the
+// database can impersonate the peer, so the database must be protected like
+// the server key.
 type Peer struct {
 	ID         int64
 	User       string
+	Device     string
 	Profile    string
 	PrivateKey awgconf.Key
 	PublicKey  awgconf.Key
@@ -65,11 +88,36 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec(schema); err != nil {
+	if err := migrate(db); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("apply schema: %w", err)
+		return nil, err
 	}
 	return &Store{db: db}, nil
+}
+
+func migrate(db *sql.DB) error {
+	var version int
+	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
+		return err
+	}
+	for i := version; i < len(migrations); i++ {
+		tx, err := db.Begin()
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(migrations[i]); err != nil {
+			tx.Rollback()
+			return fmt.Errorf("migration %d: %w", i+1, err)
+		}
+		if _, err := tx.Exec(fmt.Sprintf(`PRAGMA user_version = %d`, i+1)); err != nil {
+			tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) Close() error { return s.db.Close() }
@@ -119,7 +167,7 @@ func (s *Store) ListUsers() ([]User, error) {
 
 // AddPeer generates a key pair and allocates the next free address in subnet.
 // The network address and the first host (the gateway) are never handed out.
-func (s *Store) AddPeer(user, profile string, subnet netip.Prefix) (Peer, error) {
+func (s *Store) AddPeer(user, device, profile string, subnet netip.Prefix) (Peer, error) {
 	priv, err := awgconf.GeneratePrivateKey()
 	if err != nil {
 		return Peer{}, err
@@ -146,8 +194,8 @@ func (s *Store) AddPeer(user, profile string, subnet netip.Prefix) (Peer, error)
 		return Peer{}, ErrSubnetFull
 	}
 	now := time.Now().UTC()
-	res, err := tx.Exec(`INSERT INTO peers (user_id, profile, private_key, public_key, ip, created_at) VALUES (?, ?, ?, ?, ?, ?)`,
-		userID, profile, priv.String(), priv.Public().String(), ip.String(), now.Format(time.RFC3339))
+	res, err := tx.Exec(`INSERT INTO peers (user_id, device, profile, private_key, public_key, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		userID, device, profile, priv.String(), priv.Public().String(), ip.String(), now.Format(time.RFC3339))
 	if err != nil {
 		if isUnique(err) {
 			return Peer{}, ErrExists
@@ -158,11 +206,20 @@ func (s *Store) AddPeer(user, profile string, subnet netip.Prefix) (Peer, error)
 		return Peer{}, err
 	}
 	id, _ := res.LastInsertId()
-	return Peer{ID: id, User: user, Profile: profile, PrivateKey: priv, PublicKey: priv.Public(), IP: ip, CreatedAt: now}, nil
+	return Peer{ID: id, User: user, Device: device, Profile: profile, PrivateKey: priv, PublicKey: priv.Public(), IP: ip, CreatedAt: now}, nil
 }
 
-func (s *Store) DeletePeer(user, profile string) error {
-	res, err := s.db.Exec(`DELETE FROM peers WHERE profile = ? AND user_id = (SELECT id FROM users WHERE name = ?)`, profile, user)
+func (s *Store) DeletePeer(user, device, profile string) error {
+	return s.deletePeers(`profile = ? AND device = ? AND user_id = (SELECT id FROM users WHERE name = ?)`, profile, device, user)
+}
+
+// DeleteDevice removes every profile of one of the user's devices.
+func (s *Store) DeleteDevice(user, device string) error {
+	return s.deletePeers(`device = ? AND user_id = (SELECT id FROM users WHERE name = ?)`, device, user)
+}
+
+func (s *Store) deletePeers(where string, args ...any) error {
+	res, err := s.db.Exec(`DELETE FROM peers WHERE `+where, args...)
 	if err != nil {
 		return err
 	}
@@ -172,8 +229,8 @@ func (s *Store) DeletePeer(user, profile string) error {
 	return nil
 }
 
-func (s *Store) Peer(user, profile string) (Peer, error) {
-	peers, err := s.queryPeers(`WHERE u.name = ? AND p.profile = ?`, user, profile)
+func (s *Store) Peer(user, device, profile string) (Peer, error) {
+	peers, err := s.queryPeers(`WHERE u.name = ? AND p.device = ? AND p.profile = ?`, user, device, profile)
 	if err != nil {
 		return Peer{}, err
 	}
@@ -188,8 +245,8 @@ func (s *Store) ListPeers() ([]Peer, error) {
 }
 
 func (s *Store) queryPeers(where string, args ...any) ([]Peer, error) {
-	rows, err := s.db.Query(`SELECT p.id, u.name, p.profile, p.private_key, p.public_key, p.ip, p.created_at
-		FROM peers p JOIN users u ON u.id = p.user_id `+where+` ORDER BY u.name, p.profile`, args...)
+	rows, err := s.db.Query(`SELECT p.id, u.name, p.device, p.profile, p.private_key, p.public_key, p.ip, p.created_at
+		FROM peers p JOIN users u ON u.id = p.user_id `+where+` ORDER BY u.name, p.device, p.profile`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +255,7 @@ func (s *Store) queryPeers(where string, args ...any) ([]Peer, error) {
 	for rows.Next() {
 		var p Peer
 		var priv, pub, ip, created string
-		if err := rows.Scan(&p.ID, &p.User, &p.Profile, &priv, &pub, &ip, &created); err != nil {
+		if err := rows.Scan(&p.ID, &p.User, &p.Device, &p.Profile, &priv, &pub, &ip, &created); err != nil {
 			return nil, err
 		}
 		if p.PrivateKey, err = awgconf.ParseKey(priv); err != nil {

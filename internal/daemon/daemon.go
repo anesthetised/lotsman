@@ -186,14 +186,14 @@ func (d *Daemon) Reconcile() error {
 func (d *Daemon) route(p store.Peer) error {
 	profile, ok := d.cfg.Profile(p.Profile)
 	if !ok {
-		return fmt.Errorf("peer %s/%s: profile %q is not in the config", p.User, p.Profile, p.Profile)
+		return fmt.Errorf("peer %s/%s/%s: profile %q is not in the config", p.User, p.Device, p.Profile, p.Profile)
 	}
 	current := d.assignments[p.IP]
 	want, ok := policy.Select(profile, d.candidates(), current)
 	switch {
 	case !ok && current != "":
 		delete(d.assignments, p.IP)
-		d.log.Warn("no healthy upstream, peer is now blocked", "peer", p.IP, "user", p.User, "profile", p.Profile)
+		d.log.Warn("no healthy upstream, peer is now blocked", "peer", p.IP, "user", p.User, "device", p.Device, "profile", p.Profile)
 		return d.dp.Unroute(p.IP)
 	case !ok:
 		return nil
@@ -204,7 +204,7 @@ func (d *Daemon) route(p store.Peer) error {
 		return err
 	}
 	d.assignments[p.IP] = want
-	d.log.Info("peer routed", "peer", p.IP, "user", p.User, "profile", p.Profile, "from", current, "to", want)
+	d.log.Info("peer routed", "peer", p.IP, "user", p.User, "device", p.Device, "profile", p.Profile, "from", current, "to", want)
 	return nil
 }
 

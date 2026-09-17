@@ -18,7 +18,7 @@ Amnezia app ──AWG2──▶ Lotsman ──AWG2──▶ provider NL ──�
 
 ## What you get
 
-- One server, one config per user per profile, zero custom client software.
+- One server, one config per device per profile, zero custom client software.
 - Automatic failover between upstreams with sticky selection (no flapping).
 - Fail-closed: if no upstream is healthy for a user, their traffic is dropped, never leaked through
   the server's own IP.
@@ -47,7 +47,7 @@ sudo cp deploy/lotsman.example.yaml /etc/lotsman/lotsman.yaml
 sudo lotsman config check
 sudo cp deploy/lotsman.service /etc/systemd/system/
 sudo systemctl enable --now lotsman
-sudo lotsman user add alice -profile nl     # prints the config to import into the Amnezia app
+sudo lotsman user add alice -profile nl -qr # prints the config (and a QR code) for the Amnezia app
 sudo lotsman upstream status
 ```
 

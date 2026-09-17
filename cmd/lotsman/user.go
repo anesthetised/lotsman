@@ -10,15 +10,18 @@ import (
 	"syscall"
 	"text/tabwriter"
 
+	"github.com/mdp/qrterminal/v3"
+
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/store"
 )
 
 func userAdd(configPath string, args []string) error {
-	name, profile, err := nameAndProfile("user add", args, true)
+	a, err := parseUserArgs("user add", args, true)
 	if err != nil {
 		return err
 	}
+	name, device, profile := a.name, a.device, a.profile
 	e, err := openEnv(configPath)
 	if err != nil {
 		return err
@@ -30,14 +33,14 @@ func userAdd(configPath string, args []string) error {
 	if _, err := e.store.CreateUser(name); err != nil && !errors.Is(err, store.ErrExists) {
 		return err
 	}
-	peer, err := e.store.AddPeer(name, profile, e.cfg.Subnet)
+	peer, err := e.store.AddPeer(name, device, profile, e.cfg.Subnet)
 	if errors.Is(err, store.ErrExists) {
-		return fmt.Errorf("%s already has profile %s; use `user show`", name, profile)
+		return fmt.Errorf("%s/%s already has profile %s; use `user show`", name, device, profile)
 	}
 	if err != nil {
 		return err
 	}
-	if err := printClientConfig(e, peer); err != nil {
+	if err := printClientConfig(e, peer, a.qr); err != nil {
 		return err
 	}
 	nudgeDaemon(e)
@@ -45,7 +48,7 @@ func userAdd(configPath string, args []string) error {
 }
 
 func userShow(configPath string, args []string) error {
-	name, profile, err := nameAndProfile("user show", args, true)
+	a, err := parseUserArgs("user show", args, true)
 	if err != nil {
 		return err
 	}
@@ -54,11 +57,11 @@ func userShow(configPath string, args []string) error {
 		return err
 	}
 	defer e.store.Close()
-	peer, err := e.store.Peer(name, profile)
+	peer, err := e.store.Peer(a.name, a.device, a.profile)
 	if err != nil {
-		return fmt.Errorf("%s/%s: %w", name, profile, err)
+		return fmt.Errorf("%s/%s/%s: %w", a.name, a.device, a.profile, err)
 	}
-	return printClientConfig(e, peer)
+	return printClientConfig(e, peer, a.qr)
 }
 
 func userList(configPath string) error {
@@ -72,15 +75,17 @@ func userList(configPath string) error {
 		return err
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "USER\tPROFILE\tADDRESS\tPUBLIC KEY\tCREATED")
+	fmt.Fprintln(w, "USER\tDEVICE\tPROFILE\tADDRESS\tPUBLIC KEY\tCREATED")
 	for _, p := range peers {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", p.User, p.Profile, p.IP, p.PublicKey, p.CreatedAt.Format("2006-01-02"))
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", p.User, p.Device, p.Profile, p.IP, p.PublicKey, p.CreatedAt.Format("2006-01-02"))
 	}
 	return w.Flush()
 }
 
+// userRemove drops one peer (-device and -profile), every profile of a
+// device (-device only), or the whole user (neither).
 func userRemove(configPath string, args []string) error {
-	name, profile, err := nameAndProfile("user rm", args, false)
+	a, err := parseUserArgs("user rm", args, false)
 	if err != nil {
 		return err
 	}
@@ -89,40 +94,62 @@ func userRemove(configPath string, args []string) error {
 		return err
 	}
 	defer e.store.Close()
-	if profile == "" {
-		err = e.store.DeleteUser(name)
-	} else {
-		err = e.store.DeletePeer(name, profile)
+	switch {
+	case a.profile != "":
+		err = e.store.DeletePeer(a.name, a.device, a.profile)
+	case a.deviceSet:
+		err = e.store.DeleteDevice(a.name, a.device)
+	default:
+		err = e.store.DeleteUser(a.name)
 	}
 	if err != nil {
-		return fmt.Errorf("%s: %w", name, err)
+		return fmt.Errorf("%s: %w", a.name, err)
 	}
 	nudgeDaemon(e)
 	return nil
 }
 
-func nameAndProfile(cmd string, args []string, profileRequired bool) (name, profile string, err error) {
-	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-	fs.StringVar(&profile, "profile", "", "profile name from the config")
-	if len(args) == 0 || args[0] == "" || args[0][0] == '-' {
-		return "", "", fmt.Errorf("%s: NAME is required", cmd)
-	}
-	name = args[0]
-	if err := fs.Parse(args[1:]); err != nil {
-		return "", "", err
-	}
-	if profileRequired && profile == "" {
-		return "", "", fmt.Errorf("%s: -profile is required", cmd)
-	}
-	return name, profile, nil
+type userArgs struct {
+	name, device, profile string
+	deviceSet, qr         bool
 }
 
-func printClientConfig(e *env, peer store.Peer) error {
+func parseUserArgs(cmd string, args []string, profileRequired bool) (userArgs, error) {
+	var a userArgs
+	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
+	fs.StringVar(&a.profile, "profile", "", "profile name from the config")
+	fs.StringVar(&a.device, "device", store.DefaultDevice, "the user's device; each device needs its own config")
+	fs.BoolVar(&a.qr, "qr", false, "also print the config as a QR code on stderr")
+	if len(args) == 0 || args[0] == "" || args[0][0] == '-' {
+		return a, fmt.Errorf("%s: NAME is required", cmd)
+	}
+	a.name = args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return a, err
+	}
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "device" {
+			a.deviceSet = true
+		}
+	})
+	if profileRequired && a.profile == "" {
+		return a, fmt.Errorf("%s: -profile is required", cmd)
+	}
+	return a, nil
+}
+
+// printClientConfig writes the config to stdout so it can be redirected to a
+// file; the optional QR code goes to stderr so it never ends up in that file.
+func printClientConfig(e *env, peer store.Peer, qr bool) error {
 	m, err := e.clientMTU(context.Background())
 	if err != nil {
 		return err
 	}
-	fmt.Print(daemon.ClientConfig(e.cfg, e.id, peer, m).String())
+	conf := daemon.ClientConfig(e.cfg, e.id, peer, m).String()
+	fmt.Print(conf)
+	if qr {
+		qrterminal.GenerateHalfBlock(conf, qrterminal.L, os.Stderr)
+	}
 	return nil
 }
 

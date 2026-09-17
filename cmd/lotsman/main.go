@@ -24,10 +24,13 @@ Commands:
   version                     print the build version
   serve                       run the gateway (Linux, root)
   config check                validate the config and the upstream configs
-  user add NAME -profile P    create a peer for NAME with profile P and print its client config
-  user show NAME -profile P   print the client config again
-  user list                   list users and their peers
-  user rm NAME [-profile P]   remove one peer, or the whole user without -profile
+  user add NAME -profile P [-device D] [-qr]
+                              create a config for NAME's device D (default "default") with profile P
+  user show NAME -profile P [-device D] [-qr]
+                              print the config again
+  user list                   list users, devices and profiles
+  user rm NAME [-device D] [-profile P]
+                              remove one config, every config of a device, or the whole user
   upstream status             show upstream health as last written by the daemon
 
 Config file: -config, or $LOTSMAN_CONFIG, or /etc/lotsman/lotsman.yaml

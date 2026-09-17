@@ -78,17 +78,21 @@ user database.
 ## Users
 
 ```bash
-lotsman user add alice -profile nl      # prints a config; paste or QR it into the Amnezia app
-lotsman user show alice -profile nl     # prints it again
-lotsman user add alice -profile eu      # a second config for the same person
+lotsman user add alice -profile nl                   # config for alice's "default" device
+lotsman user add alice -profile nl -device phone -qr # her phone: own key, QR on stderr
+lotsman user add alice -profile eu -device phone     # a second profile on the same phone
+lotsman user show alice -profile nl -device phone
 lotsman user list
-lotsman user rm alice -profile eu
-lotsman user rm alice                   # every profile
+lotsman user rm alice -profile eu -device phone      # one config
+lotsman user rm alice -device phone                  # every config of that device
+lotsman user rm alice                                # everything
 ```
 
-A user has one tunnel per profile; which config they activate decides where they exit. Adding or
-removing a user takes effect immediately when the daemon is running (the CLI nudges it), otherwise
-on the next start.
+WireGuard binds one key to one endpoint, so a config must never be active on two devices at the
+same time — give each device its own with `-device`. A device has one config per profile; which
+config is active decides where the traffic exits. The config goes to stdout (redirect it to a
+file), the QR code to stderr. Adding or removing takes effect immediately when the daemon is
+running (the CLI nudges it), otherwise on the next start.
 
 ## Watching it
 

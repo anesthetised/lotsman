@@ -254,8 +254,8 @@ func eventually(t *testing.T, what string, cond func() bool) {
 func TestDaemon(t *testing.T) {
 	h := newHarness(t)
 	h.st.CreateUser("alice")
-	nlPeer, _ := h.st.AddPeer("alice", "nl", h.cfg.Subnet)
-	euPeer, _ := h.st.AddPeer("alice", "eu", h.cfg.Subnet)
+	nlPeer, _ := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
+	euPeer, _ := h.st.AddPeer("alice", store.DefaultDevice, "eu", h.cfg.Subnet)
 
 	if got := h.d.ClientMTU(); got != 1392 { // min(1500-60-S4, 1400-8, 1420-8)
 		t.Errorf("ClientMTU = %d", got)
@@ -294,7 +294,7 @@ func TestDaemon(t *testing.T) {
 	})
 
 	// Removing a peer from the store removes it from the device and the kernel.
-	h.st.DeletePeer("alice", "nl")
+	h.st.DeletePeer("alice", store.DefaultDevice, "nl")
 	eventually(t, "peer removal", func() bool {
 		peers, _ := h.d.down.Peers()
 		_, routed := h.dp.RouteOf(nlPeer.IP)
@@ -313,7 +313,7 @@ func TestDaemon(t *testing.T) {
 func TestReconcileUnknownProfile(t *testing.T) {
 	h := newHarness(t)
 	h.st.CreateUser("bob")
-	h.st.AddPeer("bob", "gone", h.cfg.Subnet)
+	h.st.AddPeer("bob", store.DefaultDevice, "gone", h.cfg.Subnet)
 	if err := h.d.Reconcile(); err == nil || !strings.Contains(err.Error(), `profile "gone"`) {
 		t.Errorf("expected profile error, got %v", err)
 	}
