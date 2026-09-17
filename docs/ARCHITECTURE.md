@@ -66,6 +66,6 @@ flows on the old upstream while it is still alive) is a v2 item.
 
 ## Open items
 
-- [ ] Confirm the official Amnezia client connects to a Lotsman downstream device on a real host
-      (the end-to-end test uses amneziawg-go on both sides).
+- [x] The official Amnezia client (macOS) connects to a Lotsman downstream device on a real host
+      and exits through a RedShield upstream (2026-09-17).
 - [ ] Throughput numbers through the full chain (`iperf3`).
