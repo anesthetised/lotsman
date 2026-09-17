@@ -29,5 +29,10 @@ fi
 sed -n 's/^path=//p' "$manifest" | awk '{print length, $0}' | sort -rn | cut -d' ' -f2- | while read -r p; do
 	rm -rf "$p"
 done
+pkgs=$(sed -n 's/^package=//p' "$manifest" | tr '\n' ' ')
+if [ -n "$pkgs" ]; then
+	# shellcheck disable=SC2086
+	DEBIAN_FRONTEND=noninteractive apt-get purge -y -q $pkgs >/dev/null
+fi
 systemctl daemon-reload
 echo "lotsman removed"

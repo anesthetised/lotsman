@@ -68,4 +68,24 @@ flows on the old upstream while it is still alive) is a v2 item.
 
 - [x] The official Amnezia client (macOS) connects to a Lotsman downstream device on a real host
       and exits through a RedShield upstream (2026-09-17).
-- [ ] Throughput numbers through the full chain (`iperf3`).
+- [x] Throughput measured (below).
+
+## Throughput (2026-09-17)
+
+Host: Selectel VPS, 2 vCPU Xeon E5-2630 v4 @ 2.2 GHz, Debian 13, one RedShield upstream (LT).
+Client: macOS with the Amnezia app over a residential line. `iperf3 -P 4`, 8 s; HTTPS via Cloudflare
+speed endpoints, 50 MB.
+
+| Leg | Down | Up |
+|---|---|---|
+| A. Client → host directly, no VPN (`iperf3`) | 78 Mbit/s | 331 Mbit/s |
+| B. Client → host through the Lotsman tunnel, one encapsulation (`iperf3` to `lm0`) | 46 Mbit/s | 133 Mbit/s |
+| C. Client → internet through the whole chain (HTTPS) | 11 Mbit/s | 66 Mbit/s |
+| Host → internet through the RedShield upstream only (HTTPS, source bound to the tunnel address) | 17 Mbit/s | 82 Mbit/s |
+| Host → internet directly (HTTPS) | 594 Mbit/s | — |
+
+Reading: the provider leg is the bottleneck (17 Mbit/s down through RedShield against 594 direct
+from the same host); Lotsman adds no measurable limit on top of it. The daemon peaked at 4 % of one
+core during the tests, so userspace double encryption is far from being the constraint at these
+rates. Leg A shows the residential line itself caps downloads below 80 Mbit/s. Client MTU in this
+setup is 1260 because of the provider's own MTU and S4.
