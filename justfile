@@ -13,5 +13,6 @@ lint:
     gofmt -l .
     GOOS=linux go vet -tags integration ./...
 
-build:
-    CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o dist/lotsman ./cmd/lotsman
+# Static Linux binary. `just build arm64` for another architecture.
+build arch="amd64":
+    CGO_ENABLED=0 GOOS=linux GOARCH={{arch}} go build -trimpath -ldflags="-s -w -X main.version=$(git describe --tags --always --dirty)" -o dist/lotsman-linux-{{arch}} ./cmd/lotsman

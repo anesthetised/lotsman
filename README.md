@@ -39,8 +39,8 @@ Amnezia app ──AWG2──▶ Lotsman ──AWG2──▶ provider NL ──�
 Needs Linux with nftables, root, and Go 1.27 to build (or a release binary).
 
 ```bash
-just build                       # dist/lotsman
-sudo install -m 0755 dist/lotsman /usr/local/bin/lotsman
+just build                       # dist/lotsman-linux-amd64 (or: just build arm64)
+sudo install -m 0755 dist/lotsman-linux-amd64 /usr/local/bin/lotsman
 sudo mkdir -p /etc/lotsman/upstreams
 sudo cp deploy/lotsman.example.yaml /etc/lotsman/lotsman.yaml
 # put your provider configs into /etc/lotsman/upstreams/ and edit lotsman.yaml

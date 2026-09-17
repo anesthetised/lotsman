@@ -11,7 +11,7 @@
 
 ```bash
 just build
-sudo install -m 0755 dist/lotsman /usr/local/bin/lotsman
+sudo install -m 0755 dist/lotsman-linux-amd64 /usr/local/bin/lotsman
 sudo mkdir -p /etc/lotsman/upstreams
 sudo cp deploy/lotsman.example.yaml /etc/lotsman/lotsman.yaml
 sudo cp deploy/lotsman.service /etc/systemd/system/

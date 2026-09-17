@@ -15,9 +15,13 @@ import (
 	"github.com/anesthetised/lotsman/internal/store"
 )
 
+// version is set at build time from git (see justfile).
+var version = "dev"
+
 const usage = `Usage: lotsman [-config FILE] <command> [args]
 
 Commands:
+  version                     print the build version
   serve                       run the gateway (Linux, root)
   config check                validate the config and the upstream configs
   user add NAME -profile P    create a peer for NAME with profile P and print its client config
@@ -56,6 +60,9 @@ func run(args []string) error {
 	rest = rest[1:]
 
 	switch cmd {
+	case "version":
+		fmt.Println(version)
+		return nil
 	case "serve":
 		return serve(context.Background(), *configPath)
 	case "config check":
