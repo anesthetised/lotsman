@@ -63,6 +63,18 @@ func TestTracker(t *testing.T) {
 	}
 }
 
+func TestSetThresholdsKeepsState(t *testing.T) {
+	tr := NewTracker(3, 3)
+	tr.Observe(true, 0)
+	tr.SetThresholds(1, 1)
+	if tr.State() != Up {
+		t.Errorf("state lost: %v", tr.State())
+	}
+	if !tr.Observe(false, 0) || tr.State() != Down {
+		t.Error("new downAfter=1 not applied")
+	}
+}
+
 func TestTrackerLatencyKeepsLastSuccess(t *testing.T) {
 	tr := NewTracker(2, 2)
 	tr.Observe(true, 10*time.Millisecond)

@@ -14,6 +14,11 @@ type Dataplane interface {
 	// installs the firewall rules (NAT, MSS clamp, fail-closed drop). It is
 	// idempotent so a restart can reconcile leftovers from a previous run.
 	Setup(down Interface, ups []Interface, mtu int) error
+	// SetUpstreams makes the set of upstreams equal to ups without touching
+	// the firewall table or the routes of upstreams that stay: new ones get a
+	// table, route and probe rule, removed ones lose theirs. Peers routed
+	// through a removed upstream must be unrouted first. Also applies mtu.
+	SetUpstreams(ups []Interface, mtu int) error
 	// Route makes traffic from peer leave through the upstream interface with
 	// that name (one of the names given to Setup), replacing any earlier choice.
 	Route(peer netip.Addr, upstreamInterface string) error

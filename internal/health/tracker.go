@@ -55,6 +55,11 @@ func (t *Tracker) Observe(ok bool, latency time.Duration) bool {
 	return t.state != before
 }
 
+// SetThresholds changes the hysteresis without losing the current state.
+func (t *Tracker) SetThresholds(downAfter, upAfter int) {
+	t.downAfter, t.upAfter = downAfter, upAfter
+}
+
 func (t *Tracker) State() State { return t.state }
 
 // Latency is the most recent successful probe time.

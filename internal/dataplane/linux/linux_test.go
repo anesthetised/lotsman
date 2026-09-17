@@ -76,7 +76,7 @@ func foreignRules(t *testing.T) int {
 }
 
 func TestDataplane(t *testing.T) {
-	for _, n := range []string{"lm0", "lm-up-a", "lm-up-b"} {
+	for _, n := range []string{"lm0", "lm-up-a", "lm-up-b", "lm-up-c"} {
 		dummy(t, n)
 	}
 	// A Docker-style host firewall: iptables-nft FORWARD chain with policy drop.
@@ -191,6 +191,50 @@ func TestDataplane(t *testing.T) {
 	if got := peerRules(t, peer); len(got) != 0 {
 		t.Fatalf("after Unroute: %v", got)
 	}
+
+	// Reload: a leaves, c arrives, b keeps its table; a peer on a is unrouted first.
+	d.Route(peer, "lm-up-a")
+	d.Unroute(peer)
+	tableB := d.tables["lm-up-b"]
+	newUps := []dataplane.Interface{ups[1], {Name: "lm-up-c", Addr: netip.MustParsePrefix("10.10.0.2/32")}}
+	if err := d.SetUpstreams(newUps, 1300); err != nil {
+		t.Fatal(err)
+	}
+	if d.tables["lm-up-b"] != tableB {
+		t.Errorf("table of a kept upstream changed: %d -> %d", tableB, d.tables["lm-up-b"])
+	}
+	if _, gone := d.tables["lm-up-a"]; gone {
+		t.Error("removed upstream still has a table")
+	}
+	if routes, _ := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Table: tableBase}, netlink.RT_FILTER_TABLE); len(routes) != 0 {
+		t.Errorf("routes of removed upstream survived: %v", routes)
+	}
+	if got := rulesAt(t, probeRulePriority); len(got) != 2 {
+		t.Errorf("probe rules after reload = %v", got)
+	}
+	if err := d.Route(peer, "lm-up-c"); err != nil {
+		t.Fatal(err)
+	}
+	if got := peerRules(t, peer); len(got) != 1 || got[0].Table != d.tables["lm-up-c"] {
+		t.Errorf("route via new upstream: %v", got)
+	}
+	if err := d.Route(peer, "lm-up-a"); err == nil {
+		t.Error("removed upstream still routable")
+	}
+	link, _ := netlink.LinkByName("lm0")
+	if link.Attrs().MTU != 1300 {
+		t.Errorf("mtu after reload = %d", link.Attrs().MTU)
+	}
+	elems, _ = c.GetSetElements(set)
+	names = nil
+	for _, e := range elems {
+		names = append(names, string(bytes.TrimRight(e.Key, "\x00")))
+	}
+	sort.Strings(names)
+	if !reflect.DeepEqual(names, []string{"lm-up-b", "lm-up-c"}) {
+		t.Errorf("upstreams set after reload = %q", names)
+	}
+	d.Unroute(peer)
 
 	if err := d.Teardown(); err != nil {
 		t.Fatal(err)

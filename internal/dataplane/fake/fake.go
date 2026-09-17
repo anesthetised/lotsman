@@ -32,6 +32,14 @@ func (f *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, m
 	return nil
 }
 
+func (f *Dataplane) SetUpstreams(ups []dataplane.Interface, mtu int) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Ups, f.MTU = ups, mtu
+	f.Log = append(f.Log, fmt.Sprintf("set-upstreams mtu=%d ups=%d", mtu, len(ups)))
+	return nil
+}
+
 func (f *Dataplane) Route(peer netip.Addr, upstream string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

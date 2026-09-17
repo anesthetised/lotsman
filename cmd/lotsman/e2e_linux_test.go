@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -190,19 +191,34 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 		return err == nil && got == "nl"
 	})
 
-	// NL provider disappears: traffic moves to DE without the client reconnecting.
-	nl.dev.Close()
-	eventually(t, "failover to de", 15*time.Second, func() bool {
+	// NL is removed from the config and the daemon reloaded on SIGHUP:
+	// traffic moves to DE without the client reconnecting, and the NL TUN is gone.
+	os.WriteFile(cfgPath, []byte(`
+listen: 127.0.0.1:51820
+endpoint: 127.0.0.1:51820
+state_dir: `+filepath.Join(dir, "state")+`
+upstreams:
+  - {name: de, conf: `+filepath.Join(dir, "de.conf")+`, geo: DE}
+profiles:
+  - {name: eu, prefer: [{geo: DE}]}
+health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
+`), 0o600)
+	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	eventually(t, "reroute to de after reload", 15*time.Second, func() bool {
 		got, err := c.exitVia(2 * time.Second)
 		return err == nil && got == "de"
 	})
+	if _, err := netlink.LinkByName("lm-up-nl"); err == nil {
+		t.Error("lm-up-nl still exists after being removed from the config")
+	}
+	nl.dev.Close()
 
 	// Every upstream is gone: the daemon must drop the peer's rule so the
 	// firewall blocks it instead of letting it out through the host uplink.
 	de.dev.Close()
-	eventually(t, "both upstreams down", 15*time.Second, func() bool {
+	eventually(t, "remaining upstream down", 15*time.Second, func() bool {
 		status, _ := capture(t, "-config", cfgPath, "upstream", "status")
-		return strings.Count(status, "down") == 2
+		return strings.Count(status, "down") == 1 && !strings.Contains(status, "up ")
 	})
 	eventually(t, "peer rule removed", 5*time.Second, func() bool {
 		rules, err := netlink.RuleList(netlink.FAMILY_V4)

@@ -12,6 +12,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/amnezia-vpn/amneziawg-go/tun"
+
 	"github.com/anesthetised/lotsman/internal/awgconf"
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/dataplane"
@@ -27,32 +29,54 @@ const DownstreamInterface = "lm0"
 
 type ProbeFunc func(ctx context.Context, source netip.Addr, target netip.AddrPort, timeout time.Duration) (time.Duration, error)
 
-type Daemon struct {
-	cfg   *config.Config
-	id    Identity
-	store *store.Store
-	dp    dataplane.Dataplane
-	down  *tunnel.Device
-	ups   []*Upstream
-	probe ProbeFunc
-	log   *slog.Logger
+// TUNFunc creates the interface a device runs on: a kernel TUN in production,
+// a netstack one in tests.
+type TUNFunc func(name string, mtu int) (tun.Device, error)
 
-	mu          sync.Mutex
-	assignments map[netip.Addr]string      // peer address → upstream name
-	devicePeers map[awgconf.Key]netip.Addr // peers currently added to the downstream device
+type Deps struct {
+	Config    *config.Config
+	Identity  Identity
+	Store     *store.Store
+	Dataplane dataplane.Dataplane
+	NewTUN    TUNFunc
+	Probe     ProbeFunc
+	Log       *slog.Logger
 }
 
-func New(cfg *config.Config, id Identity, st *store.Store, dp dataplane.Dataplane,
-	down *tunnel.Device, ups []*Upstream, probe ProbeFunc, log *slog.Logger) *Daemon {
+type Daemon struct {
+	id     Identity
+	store  *store.Store
+	dp     dataplane.Dataplane
+	newTUN TUNFunc
+	probe  ProbeFunc
+	log    *slog.Logger
+
+	mu          sync.Mutex
+	cfg         *config.Config
+	down        *tunnel.Device
+	ups         []*Upstream
+	assignments map[netip.Addr]string      // peer address → upstream name
+	devicePeers map[awgconf.Key]netip.Addr // peers currently added to the downstream device
+	wake        chan struct{}              // nudges Run to reprobe and reconcile now
+}
+
+func New(d Deps) *Daemon {
 	return &Daemon{
-		cfg: cfg, id: id, store: st, dp: dp, down: down, ups: ups, probe: probe, log: log,
+		cfg: d.Config, id: d.Identity, store: d.Store, dp: d.Dataplane, newTUN: d.NewTUN, probe: d.Probe, log: d.Log,
 		assignments: map[netip.Addr]string{},
 		devicePeers: map[awgconf.Key]netip.Addr{},
+		wake:        make(chan struct{}, 1),
 	}
 }
 
 // ClientMTU is what every issued client config carries.
 func (d *Daemon) ClientMTU() int {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.clientMTU()
+}
+
+func (d *Daemon) clientMTU() int {
 	var ups []mtu.Upstream
 	for _, u := range d.ups {
 		ups = append(ups, mtu.Upstream{MTU: u.MTU, S4: u.Conf.Interface.S4})
@@ -61,56 +85,61 @@ func (d *Daemon) ClientMTU() int {
 }
 
 // Gateway is the downstream interface's own address.
-func (d *Daemon) Gateway() netip.Prefix {
-	return netip.PrefixFrom(d.cfg.Subnet.Addr().Next(), d.cfg.Subnet.Bits())
+func Gateway(cfg *config.Config) netip.Prefix {
+	return netip.PrefixFrom(cfg.Subnet.Addr().Next(), cfg.Subnet.Bits())
 }
 
 // Run brings everything up, then probes and reconciles until ctx is done.
 func (d *Daemon) Run(ctx context.Context) error {
-	if err := d.start(); err != nil {
+	if err := d.start(ctx); err != nil {
 		d.stop()
 		return err
 	}
 	defer d.stop()
 
-	d.probeAll(ctx)
-	if err := d.Reconcile(); err != nil {
-		return err
-	}
-	ticker := time.NewTicker(d.cfg.Health.Interval)
-	defer ticker.Stop()
 	for {
+		d.probeAll(ctx)
+		if err := d.Reconcile(); err != nil {
+			d.log.Error("reconcile failed", "err", err)
+		}
+		d.mu.Lock()
+		interval := d.cfg.Health.Interval
+		d.mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-ticker.C:
-			d.probeAll(ctx)
-			if err := d.Reconcile(); err != nil {
-				d.log.Error("reconcile failed", "err", err)
-			}
+		case <-time.After(interval):
+		case <-d.wake:
 		}
 	}
 }
 
-func (d *Daemon) start() error {
+func (d *Daemon) start(ctx context.Context) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	listen, err := netip.ParseAddrPort(d.cfg.Listen)
 	if err != nil {
 		return err
 	}
+	downTUN, err := d.newTUN(DownstreamInterface, mtu.DefaultWireGuard)
+	if err != nil {
+		return fmt.Errorf("create %s: %w", DownstreamInterface, err)
+	}
+	d.down = tunnel.New(DownstreamInterface, downTUN, d.log)
 	downCfg := awgconf.Config{Interface: awgconf.Interface{
 		PrivateKey: d.id.PrivateKey, ListenPort: listen.Port(), Params: d.id.Params,
 	}}
 	if err := d.down.Configure(downCfg.UAPI()); err != nil {
 		return err
 	}
-	var ifaces []dataplane.Interface
-	for _, u := range d.ups {
-		if err := u.Device.Configure(u.Conf.UAPI()); err != nil {
+	for _, u := range d.cfg.Upstreams {
+		up, err := d.openUpstream(ctx, u)
+		if err != nil {
 			return err
 		}
-		ifaces = append(ifaces, dataplane.Interface{Name: u.Device.Name(), Addr: u.Addr})
+		d.ups = append(d.ups, up)
 	}
-	if err := d.dp.Setup(dataplane.Interface{Name: d.down.Name(), Addr: d.Gateway()}, ifaces, d.ClientMTU()); err != nil {
+	if err := d.dp.Setup(dataplane.Interface{Name: d.down.Name(), Addr: Gateway(d.cfg)}, d.interfaces(), d.clientMTU()); err != nil {
 		return fmt.Errorf("dataplane setup: %w", err)
 	}
 	for _, u := range d.ups {
@@ -121,23 +150,161 @@ func (d *Daemon) start() error {
 	return d.down.Up()
 }
 
+// openUpstream loads the provider config and starts its device (still down).
+func (d *Daemon) openUpstream(ctx context.Context, u config.Upstream) (*Upstream, error) {
+	up, err := LoadUpstream(ctx, u, d.cfg.Health)
+	if err != nil {
+		return nil, err
+	}
+	t, err := d.newTUN(u.InterfaceName(), up.MTU)
+	if err != nil {
+		return nil, fmt.Errorf("create %s: %w", u.InterfaceName(), err)
+	}
+	up.Device = tunnel.New(u.InterfaceName(), t, d.log)
+	if err := up.Device.Configure(up.Conf.UAPI()); err != nil {
+		up.Device.Close()
+		return nil, err
+	}
+	return up, nil
+}
+
+func (d *Daemon) interfaces() []dataplane.Interface {
+	var out []dataplane.Interface
+	for _, u := range d.ups {
+		out = append(out, dataplane.Interface{Name: u.Device.Name(), Addr: u.Addr})
+	}
+	return out
+}
+
 func (d *Daemon) stop() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	if err := d.dp.Teardown(); err != nil {
 		d.log.Error("dataplane teardown", "err", err)
 	}
 	for _, u := range d.ups {
 		u.Device.Close()
 	}
-	d.down.Close()
+	if d.down != nil {
+		d.down.Close()
+	}
+}
+
+// Reload applies a new configuration without dropping anyone's tunnel.
+// Upstreams are matched by name; one whose provider config changed is
+// replaced. Profiles and health settings are swapped in and every peer is
+// re-evaluated. Settings that need a restart reject the whole reload.
+func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if err := restartRequired(d.cfg, cfg); err != nil {
+		return err
+	}
+	current := map[string]*Upstream{}
+	for _, u := range d.ups {
+		current[u.Name] = u
+	}
+	var next []*Upstream
+	var errs []error
+	for _, u := range cfg.Upstreams {
+		old, exists := current[u.Name]
+		delete(current, u.Name)
+		if exists && old.Conf.String() == renderedConf(u.Conf) {
+			old.Upstream = u
+			old.Tracker.SetThresholds(cfg.Health.DownAfter, cfg.Health.UpAfter)
+			next = append(next, old)
+			continue
+		}
+		if exists {
+			// The interface name is reused, so the old device must go first.
+			d.dropUpstream(old)
+			d.log.Info("upstream replaced", "upstream", u.Name)
+		}
+		up, err := d.openUpstream(ctx, u)
+		if err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		next = append(next, up)
+		if !exists {
+			d.log.Info("upstream added", "upstream", u.Name)
+		}
+	}
+	for name, old := range current {
+		d.dropUpstream(old)
+		d.log.Info("upstream removed", "upstream", name)
+	}
+	d.ups = next
+	d.cfg = cfg
+	if err := d.dp.SetUpstreams(d.interfaces(), d.clientMTU()); err != nil {
+		return fmt.Errorf("dataplane: %w", err)
+	}
+	for _, u := range d.ups {
+		if err := u.Device.Up(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	d.log.Info("configuration reloaded", "upstreams", len(d.ups), "profiles", len(cfg.Profiles), "client_mtu", d.clientMTU())
+	select {
+	case d.wake <- struct{}{}:
+	default:
+	}
+	return errors.Join(errs...)
+}
+
+// dropUpstream takes an upstream out of service. Its peers are unrouted so
+// the firewall blocks them until the next Reconcile finds them a new one.
+func (d *Daemon) dropUpstream(u *Upstream) {
+	for ip, name := range d.assignments {
+		if name == u.Name {
+			if err := d.dp.Unroute(ip); err != nil {
+				d.log.Error("unroute", "peer", ip, "err", err)
+			}
+			delete(d.assignments, ip)
+		}
+	}
+	u.Device.Close()
+}
+
+// renderedConf is the normalised content of a provider config file, or ""
+// if it cannot be read; used to tell whether an upstream's config changed.
+func renderedConf(path string) string {
+	cfg, err := readConf(path)
+	if err != nil {
+		return ""
+	}
+	return cfg.String()
+}
+
+func restartRequired(old, cfg *config.Config) error {
+	var changed []string
+	if old.Listen != cfg.Listen {
+		changed = append(changed, "listen")
+	}
+	if old.Subnet != cfg.Subnet {
+		changed = append(changed, "subnet")
+	}
+	if old.StateDir != cfg.StateDir {
+		changed = append(changed, "state_dir")
+	}
+	if len(changed) > 0 {
+		return fmt.Errorf("reload rejected: %v changed, which needs a restart", changed)
+	}
+	return nil
 }
 
 func (d *Daemon) probeAll(ctx context.Context) {
+	d.mu.Lock()
 	target, _ := netip.ParseAddrPort(d.cfg.Health.Probe)
 	timeout := max(d.cfg.Health.Interval/2, time.Second)
+	ups := d.ups
+	d.mu.Unlock()
 	var wg sync.WaitGroup
-	for _, u := range d.ups {
+	for _, u := range ups {
 		wg.Go(func() {
 			latency, err := d.probe(ctx, u.Addr.Addr(), target, timeout)
+			d.mu.Lock()
+			defer d.mu.Unlock()
 			before := u.Tracker.State()
 			if u.Tracker.Observe(err == nil, latency) {
 				d.log.Info("upstream health changed", "upstream", u.Name, "from", before, "to", u.Tracker.State(), "err", err)

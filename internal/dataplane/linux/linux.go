@@ -35,11 +35,13 @@ const (
 	probeRulePriority = 4000 // "from <upstream addr> lookup <table>", for health probes
 	peerRulePriority  = 5000 // "from <peer>/32 lookup <table>"
 	nftTable          = "lotsman"
+	upstreamSetName   = "upstreams"
 	upstreamPrefix    = "lm-up-" // every upstream interface starts with this
 )
 
 type Dataplane struct {
-	tables map[string]int // upstream name → routing table
+	down   string
+	tables map[string]int // upstream interface → routing table
 }
 
 func New() *Dataplane {
@@ -53,34 +55,112 @@ func (d *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, m
 	if err := configureLink(down, mtu); err != nil {
 		return err
 	}
+	d.down = down.Name
 	if err := deleteRules(probeRulePriority, peerRulePriority); err != nil {
 		return err
 	}
 	d.tables = map[string]int{}
-	for i, up := range ups {
-		if err := configureLink(up, 0); err != nil {
-			return err
-		}
-		table := tableBase + i
-		d.tables[up.Name] = table
-		link, err := netlink.LinkByName(up.Name)
-		if err != nil {
-			return err
-		}
-		err = netlink.RouteReplace(&netlink.Route{
-			LinkIndex: link.Attrs().Index,
-			Table:     table,
-			Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
-			Scope:     netlink.SCOPE_LINK,
-		})
-		if err != nil {
-			return fmt.Errorf("default route for %s in table %d: %w", up.Name, table, err)
-		}
-		if err := addRule(up.Addr.Addr(), table, probeRulePriority); err != nil {
+	for _, up := range ups {
+		if err := d.addUpstream(up); err != nil {
 			return err
 		}
 	}
 	return d.installFirewall(down.Name, ups)
+}
+
+func (d *Dataplane) SetUpstreams(ups []dataplane.Interface, mtu int) error {
+	link, err := netlink.LinkByName(d.down)
+	if err != nil {
+		return err
+	}
+	if err := netlink.LinkSetMTU(link, mtu); err != nil {
+		return fmt.Errorf("mtu on %s: %w", d.down, err)
+	}
+	keep := map[string]bool{}
+	for _, up := range ups {
+		keep[up.Name] = true
+		if _, exists := d.tables[up.Name]; !exists {
+			if err := d.addUpstream(up); err != nil {
+				return err
+			}
+		}
+	}
+	for name := range d.tables {
+		if !keep[name] {
+			if err := d.removeUpstream(name); err != nil {
+				return err
+			}
+		}
+	}
+	return d.setUpstreamSet(ups)
+}
+
+// addUpstream gives the interface an address, a routing table with a default
+// route over it, and the rule that sends probes from its address into that table.
+func (d *Dataplane) addUpstream(up dataplane.Interface) error {
+	if err := configureLink(up, 0); err != nil {
+		return err
+	}
+	table := d.allocateTable()
+	d.tables[up.Name] = table
+	link, err := netlink.LinkByName(up.Name)
+	if err != nil {
+		return err
+	}
+	err = netlink.RouteReplace(&netlink.Route{
+		LinkIndex: link.Attrs().Index,
+		Table:     table,
+		Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
+		Scope:     netlink.SCOPE_LINK,
+	})
+	if err != nil {
+		return fmt.Errorf("default route for %s in table %d: %w", up.Name, table, err)
+	}
+	return addRule(up.Addr.Addr(), table, probeRulePriority)
+}
+
+func (d *Dataplane) removeUpstream(name string) error {
+	table := d.tables[name]
+	delete(d.tables, name)
+	all, err := netlink.RuleList(netlink.FAMILY_V4)
+	if err != nil {
+		return err
+	}
+	for _, r := range all {
+		if r.Table == table && (r.Priority == probeRulePriority || r.Priority == peerRulePriority) {
+			if err := netlink.RuleDel(&r); err != nil {
+				return fmt.Errorf("delete rule for %s: %w", name, err)
+			}
+		}
+	}
+	return flushTable(table)
+}
+
+// allocateTable returns the lowest table id not in use, so ids are stable
+// for upstreams that stay across a reload.
+func (d *Dataplane) allocateTable() int {
+	used := map[int]bool{}
+	for _, t := range d.tables {
+		used[t] = true
+	}
+	for t := tableBase; ; t++ {
+		if !used[t] {
+			return t
+		}
+	}
+}
+
+func flushTable(table int) error {
+	routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Table: table}, netlink.RT_FILTER_TABLE)
+	if err != nil {
+		return err
+	}
+	for _, r := range routes {
+		if err := netlink.RouteDel(&r); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (d *Dataplane) Route(peer netip.Addr, upstream string) error {
@@ -124,14 +204,7 @@ func (d *Dataplane) Unroute(peer netip.Addr) error {
 func (d *Dataplane) Teardown() error {
 	err := deleteRules(probeRulePriority, peerRulePriority)
 	for _, table := range d.tables {
-		routes, listErr := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Table: table}, netlink.RT_FILTER_TABLE)
-		if listErr != nil {
-			err = errors.Join(err, listErr)
-			continue
-		}
-		for _, r := range routes {
-			err = errors.Join(err, netlink.RouteDel(&r))
-		}
+		err = errors.Join(err, flushTable(table))
 	}
 	c := &nftables.Conn{}
 	err = errors.Join(err, closeForeignForwardChains(c))
@@ -239,7 +312,7 @@ func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) erro
 	}
 
 	table := c.AddTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable})
-	upSet := &nftables.Set{Table: table, Name: "upstreams", KeyType: nftables.TypeIFName, KeyByteOrder: binaryutil.NativeEndian}
+	upSet := &nftables.Set{Table: table, Name: upstreamSetName, KeyType: nftables.TypeIFName, KeyByteOrder: binaryutil.NativeEndian}
 	var elems []nftables.SetElement
 	for _, up := range ups {
 		elems = append(elems, nftables.SetElement{Key: ifname(up.Name)})
@@ -297,6 +370,31 @@ func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) erro
 		return fmt.Errorf("install nftables rules: %w", err)
 	}
 	return openForeignForwardChains(c, down)
+}
+
+// setUpstreamSet replaces the members of the "upstreams" set in one
+// transaction; the rules referencing the set are untouched.
+func (d *Dataplane) setUpstreamSet(ups []dataplane.Interface) error {
+	c := &nftables.Conn{}
+	table := &nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable}
+	set, err := c.GetSetByName(table, upstreamSetName)
+	if err != nil {
+		return fmt.Errorf("upstreams set: %w", err)
+	}
+	c.FlushSet(set)
+	var elems []nftables.SetElement
+	for _, up := range ups {
+		elems = append(elems, nftables.SetElement{Key: ifname(up.Name)})
+	}
+	if len(elems) > 0 {
+		if err := c.SetAddElements(set, elems); err != nil {
+			return err
+		}
+	}
+	if err := c.Flush(); err != nil {
+		return fmt.Errorf("update upstreams set: %w", err)
+	}
+	return nil
 }
 
 // foreignRuleComment marks the rules Lotsman inserts into chains it does not own.

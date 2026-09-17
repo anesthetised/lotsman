@@ -72,8 +72,12 @@ only verify them, not set them.
 | `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider}` matchers; empty = any upstream. |
 | `health` | `interval`, `probe` (`ip:port` reachable through every upstream), `down_after`, `up_after`. |
 
-Configuration changes need a restart. `SIGHUP` (`systemctl reload lotsman`) only re-reads the
-user database.
+`systemctl reload lotsman` (SIGHUP) applies the file live, without dropping tunnels: upstreams are
+added, removed or replaced (a changed provider config counts as a replacement), profiles and
+`health` are swapped in, and every client is re-evaluated. Clients whose upstream was removed are
+blocked for a moment and rerouted on the same pass. `listen`, `subnet` and `state_dir` cannot change
+live; a reload that touches them is rejected as a whole and logged. A config that fails validation is
+logged and ignored. A changed client MTU only reaches clients that re-import their config.
 
 ## Users
 

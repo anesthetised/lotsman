@@ -32,8 +32,16 @@ func TestFake(t *testing.T) {
 	if _, ok := f.RouteOf(peer); ok {
 		t.Error("route survived Unroute")
 	}
+	dp.SetUpstreams([]dataplane.Interface{{Name: "c"}}, 1300)
+	if err := dp.Route(peer, "a"); err == nil {
+		t.Error("removed upstream still routable")
+	}
+	if err := dp.Route(peer, "c"); err != nil {
+		t.Error(err)
+	}
+	dp.Unroute(peer)
 	dp.Teardown()
-	if !f.TornDown || len(f.Log) != 5 {
+	if !f.TornDown || f.MTU != 1300 || len(f.Log) != 8 {
 		t.Errorf("log = %v", f.Log)
 	}
 }
