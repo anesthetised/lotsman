@@ -230,6 +230,26 @@ func newHarness(t *testing.T) *harness {
 	return h
 }
 
+// run starts the daemon and makes the test wait for it to stop, so the
+// listen port is free again before the next test starts its own daemon.
+func (h *harness) run(t *testing.T) (stop func()) {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- h.d.Run(ctx) }()
+	var once sync.Once
+	stop = func() {
+		once.Do(func() {
+			cancel()
+			if err := <-done; err != nil {
+				t.Errorf("Run: %v", err)
+			}
+		})
+	}
+	t.Cleanup(stop)
+	return stop
+}
+
 func (h *harness) setHealthy(addr string, ok bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -254,9 +274,7 @@ func TestDaemon(t *testing.T) {
 	nlPeer, _ := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
 	euPeer, _ := h.st.AddPeer("alice", store.DefaultDevice, "eu", h.cfg.Subnet)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	done := make(chan error, 1)
-	go func() { done <- h.d.Run(ctx) }()
+	stop := h.run(t)
 
 	routedVia := func(peer netip.Addr, want string) func() bool {
 		return func() bool { got, _ := h.dp.RouteOf(peer); return got == want }
@@ -297,10 +315,7 @@ func TestDaemon(t *testing.T) {
 		return len(peers) == 1 && !routed
 	})
 
-	cancel()
-	if err := <-done; err != nil {
-		t.Fatal(err)
-	}
+	stop()
 	if !h.dp.TornDown {
 		t.Error("dataplane not torn down")
 	}
@@ -310,10 +325,8 @@ func TestReconcileUnknownProfile(t *testing.T) {
 	h := newHarness(t)
 	h.st.CreateUser("bob")
 	h.st.AddPeer("bob", store.DefaultDevice, "gone", h.cfg.Subnet)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go h.d.Run(ctx)
-	eventually(t, "start", func() bool { return h.dp.SetupDone })
+	h.run(t)
+	eventually(t, "start", h.dp.Ready)
 	if err := h.d.Reconcile(); err == nil || !strings.Contains(err.Error(), `profile "gone"`) {
 		t.Errorf("expected profile error, got %v", err)
 	}
@@ -323,9 +336,8 @@ func TestReload(t *testing.T) {
 	h := newHarness(t)
 	h.st.CreateUser("alice")
 	euPeer, _ := h.st.AddPeer("alice", store.DefaultDevice, "eu", h.cfg.Subnet)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go h.d.Run(ctx)
+	h.run(t)
+	ctx := context.Background()
 	routedVia := func(want string) func() bool {
 		return func() bool { got, _ := h.dp.RouteOf(euPeer.IP); return got == want }
 	}

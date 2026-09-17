@@ -70,6 +70,13 @@ func (f *Dataplane) Teardown() error {
 	return nil
 }
 
+// Ready reports whether Setup has run.
+func (f *Dataplane) Ready() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.SetupDone
+}
+
 // RouteOf returns the upstream a peer is currently routed through.
 func (f *Dataplane) RouteOf(peer netip.Addr) (string, bool) {
 	f.mu.Lock()
