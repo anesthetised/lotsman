@@ -1,0 +1,4 @@
+/lotsman
+/dist/
+*.db
+*.db-*
