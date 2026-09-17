@@ -46,6 +46,11 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 - `tun/netstack` (gVisor) is available and needs no privileges — the `tunnel` package can be tested on
   macOS without root. Only `dataplane/linux` needs Linux and `NET_ADMIN`.
 - `S4` pads every transport message; it reduces effective MTU on both hops.
+- **Plain WireGuard stays supported.** With no obfuscation parameters amneziawg-go defaults to the
+  stock message types 1–4, zero padding and no junk, i.e. it is WireGuard on the wire. A provider
+  that hands out a plain WireGuard config works as an upstream unchanged; `TestPlainWireGuardInterop`
+  proves it against an untouched `wireguard-go`. The downstream side is AmneziaWG 2.0 only, because
+  obfuscation parameters are per device, not per peer.
 
 ## MTU
 

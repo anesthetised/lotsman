@@ -23,6 +23,7 @@ Amnezia app ──AWG2──▶ Lotsman ──AWG2──▶ provider NL ──�
 - Fail-closed: if no upstream is healthy for a user, their traffic is dropped, never leaked through
   the server's own IP.
 - MTU and TCP MSS handled for the double encapsulation; DNS follows the chosen upstream.
+- Upstreams may be plain WireGuard or AmneziaWG; clients use the Amnezia app.
 - A single static binary, a YAML file, and SQLite.
 
 ## What you do not get (yet)
