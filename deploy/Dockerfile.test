@@ -1,0 +1,10 @@
+# Runs the Linux integration tests. Needs NET_ADMIN and /dev/net/tun:
+#   docker build -f deploy/Dockerfile.test -t lotsman-test .
+#   docker run --rm --privileged lotsman-test
+FROM golang:1.27-bookworm
+RUN apt-get update && apt-get install -y --no-install-recommends nftables iproute2 iputils-ping && rm -rf /var/lib/apt/lists/*
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+CMD ["go", "test", "-tags", "integration", "-count=1", "-v", "./..."]
