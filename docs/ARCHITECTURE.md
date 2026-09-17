@@ -60,5 +60,6 @@ flows on the old upstream while it is still alive) is a v2 item.
 
 ## Open items
 
-- [ ] Confirm the official Amnezia client connects to a Lotsman downstream device on a real host.
+- [ ] Confirm the official Amnezia client connects to a Lotsman downstream device on a real host
+      (the end-to-end test uses amneziawg-go on both sides).
 - [ ] Throughput numbers through the full chain (`iperf3`).

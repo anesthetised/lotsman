@@ -1,0 +1,41 @@
+# Lotsman configuration. Copy to /etc/lotsman/lotsman.yaml.
+
+# Where the AmneziaWG 2.0 listener binds and what clients connect to.
+listen: 0.0.0.0:51820
+endpoint: vpn.example.org:51820
+
+# Addresses handed to clients; .1 is the gateway.
+subnet: 10.77.0.0/16
+# Resolvers written into client configs. Queries travel through the client's upstream.
+dns: [1.1.1.1, 1.0.0.1]
+
+state_dir: /var/lib/lotsman
+
+# Your own provider subscriptions. `conf` is the AmneziaWG config the provider
+# generated for you; it must route 0.0.0.0/0. The name becomes the interface
+# lm-up-<name>, so keep it to 9 characters.
+upstreams:
+  - name: rs-nl
+    conf: /etc/lotsman/upstreams/rs-nl.conf
+    geo: NL
+    provider: redshield
+  - name: rs-de
+    conf: /etc/lotsman/upstreams/rs-de.conf
+    geo: DE
+    provider: redshield
+
+# A user gets one client config per profile. `prefer` is an ordered list of
+# tiers; the first tier with a healthy upstream wins. Empty means any upstream.
+profiles:
+  - name: nl
+    prefer: [{geo: NL}]
+  - name: eu
+    prefer: [{geo: NL}, {geo: DE}]
+  - name: auto
+    prefer: []
+
+health:
+  interval: 15s
+  probe: 1.1.1.1:443   # a TCP port reachable through every upstream
+  down_after: 3
+  up_after: 2

@@ -18,6 +18,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
@@ -211,8 +212,13 @@ func hostNet(a netip.Addr) *net.IPNet {
 	return &net.IPNet{IP: a.AsSlice(), Mask: net.CIDRMask(a.BitLen(), a.BitLen())}
 }
 
+// sysctl sets a kernel parameter unless it already has that value, so a
+// container with a read-only /proc/sys still works when the operator presets it.
 func sysctl(key, value string) error {
 	path := filepath.Join("/proc/sys", key)
+	if current, err := os.ReadFile(path); err == nil && strings.TrimSpace(string(current)) == value {
+		return nil
+	}
 	if err := os.WriteFile(path, []byte(value), 0); err != nil {
 		return fmt.Errorf("sysctl %s=%s: %w", key, value, err)
 	}
