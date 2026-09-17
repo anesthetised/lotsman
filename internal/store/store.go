@@ -100,6 +100,16 @@ func migrate(db *sql.DB) error {
 	if err := db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		return err
 	}
+	// The first release created the schema without recording a version.
+	if version == 0 {
+		var tables int
+		if err := db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE type = 'table' AND name = 'users'`).Scan(&tables); err != nil {
+			return err
+		}
+		if tables == 1 {
+			version = 1
+		}
+	}
 	for i := version; i < len(migrations); i++ {
 		tx, err := db.Begin()
 		if err != nil {

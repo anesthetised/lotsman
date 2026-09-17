@@ -132,7 +132,8 @@ func TestDevices(t *testing.T) {
 	}
 }
 
-// The first release had no device column; its databases must migrate in place.
+// The first release had no device column and never set user_version; its
+// databases must migrate in place.
 func TestMigrateFromVersion1(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
 	db, err := sql.Open("sqlite", path)
@@ -145,7 +146,7 @@ func TestMigrateFromVersion1(t *testing.T) {
 	key, _ := awgconf.GeneratePrivateKey()
 	if _, err := db.Exec(`INSERT INTO users (id, name, created_at) VALUES (1, 'alice', '2026-09-17T00:00:00Z');
 		INSERT INTO peers (user_id, profile, private_key, public_key, ip, created_at)
-		VALUES (1, 'nl', ?, ?, '10.77.0.2', '2026-09-17T00:00:00Z'); PRAGMA user_version = 1;`,
+		VALUES (1, 'nl', ?, ?, '10.77.0.2', '2026-09-17T00:00:00Z');`,
 		key.String(), key.Public().String()); err != nil {
 		t.Fatal(err)
 	}
