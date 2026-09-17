@@ -23,6 +23,7 @@ import (
 	"github.com/google/nftables"
 	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/expr"
+	"github.com/google/nftables/userdata"
 	"github.com/vishvananda/netlink"
 	"golang.org/x/sys/unix"
 
@@ -34,6 +35,7 @@ const (
 	probeRulePriority = 4000 // "from <upstream addr> lookup <table>", for health probes
 	peerRulePriority  = 5000 // "from <peer>/32 lookup <table>"
 	nftTable          = "lotsman"
+	upstreamPrefix    = "lm-up-" // every upstream interface starts with this
 )
 
 type Dataplane struct {
@@ -132,6 +134,7 @@ func (d *Dataplane) Teardown() error {
 		}
 	}
 	c := &nftables.Conn{}
+	err = errors.Join(err, closeForeignForwardChains(c))
 	c.DelTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable})
 	if flushErr := c.Flush(); flushErr != nil && !errors.Is(flushErr, unix.ENOENT) {
 		err = errors.Join(err, flushErr)
@@ -227,6 +230,9 @@ func sysctl(key, value string) error {
 
 func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) error {
 	c := &nftables.Conn{}
+	if err := closeForeignForwardChains(c); err != nil {
+		return err
+	}
 	c.DelTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable})
 	if err := c.Flush(); err != nil && !errors.Is(err, unix.ENOENT) {
 		return fmt.Errorf("remove old nftables table: %w", err)
@@ -290,7 +296,97 @@ func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) erro
 	if err := c.Flush(); err != nil {
 		return fmt.Errorf("install nftables rules: %w", err)
 	}
+	return openForeignForwardChains(c, down)
+}
+
+// foreignRuleComment marks the rules Lotsman inserts into chains it does not own.
+const foreignRuleComment = "lotsman"
+
+// openForeignForwardChains inserts accept rules at the top of every other
+// forward base chain. Docker sets "iptables -P FORWARD DROP" and ufw adds
+// its own drops; a drop in any chain on the hook wins over our accept, so the
+// forwarded traffic must be accepted there too. Interface names are matched
+// by prefix because sets cannot be shared across tables.
+func openForeignForwardChains(c *nftables.Conn, down string) error {
+	chains, err := foreignForwardChains(c)
+	if err != nil {
+		return err
+	}
+	comment := userdata.AppendString(nil, userdata.TypeComment, foreignRuleComment)
+	for _, ch := range chains {
+		oifUp := []expr.Any{
+			&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte(upstreamPrefix)},
+		}
+		iifUp := []expr.Any{
+			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte(upstreamPrefix)},
+		}
+		iifDown := []expr.Any{
+			&expr.Meta{Key: expr.MetaKeyIIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: ifname(down)},
+		}
+		oifDown := []expr.Any{
+			&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: ifname(down)},
+		}
+		// Insert in reverse so the final order is: downstream→upstream, then replies.
+		c.InsertRule(&nftables.Rule{Table: ch.Table, Chain: ch, UserData: comment,
+			Exprs: concat(iifUp, oifDown, ctEstablished, accepting)})
+		c.InsertRule(&nftables.Rule{Table: ch.Table, Chain: ch, UserData: comment,
+			Exprs: concat(iifDown, oifUp, accepting)})
+	}
+	if err := c.Flush(); err != nil {
+		return fmt.Errorf("open foreign forward chains: %w", err)
+	}
 	return nil
+}
+
+func closeForeignForwardChains(c *nftables.Conn) error {
+	chains, err := foreignForwardChains(c)
+	if err != nil {
+		return err
+	}
+	for _, ch := range chains {
+		rules, err := c.GetRules(ch.Table, ch)
+		if err != nil {
+			return err
+		}
+		for _, r := range rules {
+			if comment, ok := userdata.GetString(r.UserData, userdata.TypeComment); ok && comment == foreignRuleComment {
+				if err := c.DelRule(r); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return c.Flush()
+}
+
+// foreignForwardChains lists IPv4-capable base chains on the forward hook that Lotsman does not own.
+func foreignForwardChains(c *nftables.Conn) ([]*nftables.Chain, error) {
+	all, err := c.ListChains()
+	if err != nil {
+		return nil, fmt.Errorf("list nftables chains: %w", err)
+	}
+	var out []*nftables.Chain
+	for _, ch := range all {
+		if ch.Table.Name == nftTable || ch.Hooknum == nil || *ch.Hooknum != *nftables.ChainHookForward {
+			continue
+		}
+		if ch.Table.Family == nftables.TableFamilyIPv4 || ch.Table.Family == nftables.TableFamilyINet {
+			out = append(out, ch)
+		}
+	}
+	return out, nil
+}
+
+func concat(parts ...[]expr.Any) []expr.Any {
+	var out []expr.Any
+	for _, p := range parts {
+		out = append(out, p...)
+	}
+	return out
 }
 
 var (

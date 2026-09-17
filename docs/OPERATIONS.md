@@ -119,8 +119,11 @@ config's `MTU` if the provider's path is narrower than it claims.
 be `2` (loose). Lotsman sets it, but a hardening tool may reset it; in Docker set
 `net.ipv4.conf.default.rp_filter=2` at start.
 
-**Another firewall on the host.** Lotsman owns only `table inet lotsman`. A host firewall with a
-default-drop forward policy must still allow `lm0 → lm-up-*` and the replies; the UDP listen port
+**Another firewall on the host.** Lotsman owns `table inet lotsman`. Docker (`iptables -P FORWARD
+DROP`) and ufw add their own forward chains whose drop would win over Lotsman's accept, so on start
+Lotsman also inserts two `accept` rules tagged `comment "lotsman"` at the top of every other
+forward chain and removes them on shutdown. Only nftables-backed chains are handled; on a host
+still using `iptables-legacy` allow `lm0 → lm-up-*` and the replies by hand. The UDP listen port
 must be open for input.
 
 **Restart left rules behind.** Lotsman removes its rules, routes and nftables table on shutdown and

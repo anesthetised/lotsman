@@ -22,6 +22,7 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 | Preference | One peer per (user, profile) | The preference is encoded in which key the user connects with; no side channel needed. |
 | State | YAML for upstreams/profiles, SQLite for users/peers | Operators edit and version the YAML; users are created at runtime. |
 | Fail-closed | Mandatory | User traffic must never leave via the host's own IP. nftables drops anything from `lm0` not routed into an `lm-up-*`. |
+| Host firewalls | Accept rules inserted into foreign forward chains | Docker's `FORWARD DROP` and ufw would otherwise silently drop forwarded traffic; same approach as Tailscale. |
 
 ## AmneziaWG implementation notes (verified 2026-09-17)
 

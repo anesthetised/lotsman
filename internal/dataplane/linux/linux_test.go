@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/google/nftables"
+	"github.com/google/nftables/userdata"
 	"github.com/vishvananda/netlink"
 
 	"github.com/anesthetised/lotsman/internal/dataplane"
@@ -51,9 +52,38 @@ func rulesAt(t *testing.T, priority int) []netlink.Rule {
 	return out
 }
 
+// foreignRules counts the rules Lotsman inserted into chains it does not own.
+func foreignRules(t *testing.T) int {
+	t.Helper()
+	c := &nftables.Conn{}
+	chains, err := foreignForwardChains(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	for _, ch := range chains {
+		rules, err := c.GetRules(ch.Table, ch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, r := range rules {
+			if comment, ok := userdata.GetString(r.UserData, userdata.TypeComment); ok && comment == foreignRuleComment {
+				n++
+			}
+		}
+	}
+	return n
+}
+
 func TestDataplane(t *testing.T) {
 	for _, n := range []string{"lm0", "lm-up-a", "lm-up-b"} {
 		dummy(t, n)
+	}
+	// A Docker-style host firewall: iptables-nft FORWARD chain with policy drop.
+	if err := exec.Command("iptables", "-P", "FORWARD", "DROP").Run(); err != nil {
+		t.Logf("iptables not usable, skipping foreign chain checks: %v", err)
+	} else {
+		t.Cleanup(func() { exec.Command("iptables", "-P", "FORWARD", "ACCEPT").Run() })
 	}
 	down := dataplane.Interface{Name: "lm0", Addr: netip.MustParsePrefix("10.77.0.1/16")}
 	ups := []dataplane.Interface{
@@ -83,6 +113,11 @@ func TestDataplane(t *testing.T) {
 		}
 		if got := rulesAt(t, probeRulePriority); len(got) != 2 {
 			t.Errorf("round %d: probe rules = %v", round, got)
+		}
+		if chains, _ := foreignForwardChains(&nftables.Conn{}); len(chains) > 0 {
+			if got := foreignRules(t); got != 2*len(chains) {
+				t.Errorf("round %d: %d foreign accept rules for %d chains", round, got, len(chains))
+			}
 		}
 	}
 
@@ -159,6 +194,9 @@ func TestDataplane(t *testing.T) {
 
 	if err := d.Teardown(); err != nil {
 		t.Fatal(err)
+	}
+	if got := foreignRules(t); got != 0 {
+		t.Errorf("%d foreign rules survived teardown", got)
 	}
 	if got := rulesAt(t, probeRulePriority); len(got) != 0 {
 		t.Errorf("probe rules survived teardown: %v", got)
