@@ -27,6 +27,20 @@ sudo systemctl enable --now lotsman
 
 `config check` parses everything, resolves endpoints and prints the interface each upstream gets.
 
+### Removing it
+
+`deploy/uninstall.sh` stops the service, removes the binary, unit, config and state directory,
+cleans up any leftover interfaces or rules, and restores `net.ipv4.ip_forward` to the value it had
+before the install. It reads `/etc/lotsman/INSTALLED`, a manifest you write at install time:
+
+```
+ip_forward_before=0
+path=/usr/local/bin/lotsman
+path=/etc/systemd/system/lotsman.service
+path=/etc/lotsman
+path=/var/lib/lotsman
+```
+
 ### Docker
 
 ```bash
