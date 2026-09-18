@@ -244,6 +244,10 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 		if err := u.Device.Up(); err != nil {
 			errs = append(errs, err)
 		}
+		// A replaced upstream starts unknown again; nothing may stay pinned to it.
+		if err := d.dp.SetAlive(u.Device.Name(), u.Tracker.State() == health.Up); err != nil {
+			errs = append(errs, err)
+		}
 	}
 	d.log.Info("configuration reloaded", "upstreams", len(d.ups), "profiles", len(cfg.Profiles), "client_mtu", d.clientMTU())
 	select {
@@ -309,6 +313,9 @@ func (d *Daemon) probeAll(ctx context.Context) {
 			before := u.Tracker.State()
 			if u.Tracker.Observe(err == nil, latency) {
 				d.log.Info("upstream health changed", "upstream", u.Name, "from", before, "to", u.Tracker.State(), "err", err)
+				if aerr := d.dp.SetAlive(u.Device.Name(), u.Tracker.State() == health.Up); aerr != nil {
+					d.log.Error("set alive", "upstream", u.Name, "err", aerr)
+				}
 			}
 			if err == nil {
 				return

@@ -31,21 +31,24 @@ import (
 )
 
 const (
-	tableBase         = 1000 // routing table of upstream i is tableBase+i
+	tableBase         = 1000 // routing tables of upstreams start here; a table id doubles as the flow mark
+	pinRulePriority   = 3000 // "from <peer>/32 fwmark <table> lookup <table>", flows opened before a move
 	probeRulePriority = 4000 // "from <upstream addr> lookup <table>", for health probes
 	peerRulePriority  = 5000 // "from <peer>/32 lookup <table>"
 	nftTable          = "lotsman"
 	upstreamSetName   = "upstreams"
-	upstreamPrefix    = "lm-up-" // every upstream interface starts with this
+	pinMapName        = "pinmark" // upstream interface → mark stamped on new flows leaving through it
+	upstreamPrefix    = "lm-up-"  // every upstream interface starts with this
 )
 
 type Dataplane struct {
 	down   string
-	tables map[string]int // upstream interface → routing table
+	tables map[string]int  // upstream interface → routing table
+	alive  map[string]bool // upstream interface → flows may stay pinned to it
 }
 
 func New() *Dataplane {
-	return &Dataplane{tables: map[string]int{}}
+	return &Dataplane{tables: map[string]int{}, alive: map[string]bool{}}
 }
 
 func (d *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, mtu int) error {
@@ -56,10 +59,11 @@ func (d *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, m
 		return err
 	}
 	d.down = down.Name
-	if err := deleteRules(probeRulePriority, peerRulePriority); err != nil {
+	if err := deleteRules(pinRulePriority, probeRulePriority, peerRulePriority); err != nil {
 		return err
 	}
 	d.tables = map[string]int{}
+	d.alive = map[string]bool{}
 	for _, up := range ups {
 		if err := d.addUpstream(up); err != nil {
 			return err
@@ -92,7 +96,7 @@ func (d *Dataplane) SetUpstreams(ups []dataplane.Interface, mtu int) error {
 			}
 		}
 	}
-	return d.setUpstreamSet(ups)
+	return d.setUpstreamSets(ups)
 }
 
 // addUpstream gives the interface an address, a routing table with a default
@@ -126,12 +130,13 @@ func (d *Dataplane) addUpstream(up dataplane.Interface) error {
 func (d *Dataplane) removeUpstream(name string) error {
 	table := d.tables[name]
 	delete(d.tables, name)
+	delete(d.alive, name)
 	all, err := netlink.RuleList(netlink.FAMILY_V4)
 	if err != nil {
 		return err
 	}
 	for _, r := range all {
-		if r.Table == table && (r.Priority == probeRulePriority || r.Priority == peerRulePriority) {
+		if r.Table == table && (r.Priority == pinRulePriority || r.Priority == probeRulePriority || r.Priority == peerRulePriority) {
 			if err := netlink.RuleDel(&r); err != nil {
 				return fmt.Errorf("delete rule for %s: %w", name, err)
 			}
@@ -172,13 +177,29 @@ func (d *Dataplane) Route(peer netip.Addr, upstream string) error {
 	if !ok {
 		return fmt.Errorf("unknown upstream %q", upstream)
 	}
-	old, err := rulesFor(peer)
+	rules, err := rulesFor(peer)
 	if err != nil {
 		return err
 	}
-	for _, r := range old {
-		if r.Table == table {
+	var old []netlink.Rule
+	for _, r := range rules {
+		switch {
+		case r.Priority == peerRulePriority && r.Table == table:
 			return nil
+		case r.Priority == peerRulePriority:
+			old = append(old, r)
+		case r.Priority == pinRulePriority && r.Table == table:
+			// Flows pinned to the upstream we are moving back to no longer need a pin.
+			if err := netlink.RuleDel(&r); err != nil {
+				return fmt.Errorf("remove pin for %s: %w", peer, err)
+			}
+		}
+	}
+	for _, r := range old {
+		if d.alive[interfaceOfTable(d.tables, r.Table)] {
+			if err := addPinRule(peer, r.Table); err != nil {
+				return err
+			}
 		}
 	}
 	if err := addRule(peer, table, peerRulePriority); err != nil {
@@ -205,8 +226,40 @@ func (d *Dataplane) Unroute(peer netip.Addr) error {
 	return nil
 }
 
+func (d *Dataplane) SetAlive(upstream string, alive bool) error {
+	table, ok := d.tables[upstream]
+	if !ok {
+		return fmt.Errorf("unknown upstream %q", upstream)
+	}
+	d.alive[upstream] = alive
+	if alive {
+		return nil
+	}
+	all, err := netlink.RuleList(netlink.FAMILY_V4)
+	if err != nil {
+		return err
+	}
+	for _, r := range all {
+		if r.Priority == pinRulePriority && r.Table == table {
+			if err := netlink.RuleDel(&r); err != nil {
+				return fmt.Errorf("remove pin to %s: %w", upstream, err)
+			}
+		}
+	}
+	return nil
+}
+
+func interfaceOfTable(tables map[string]int, table int) string {
+	for name, t := range tables {
+		if t == table {
+			return name
+		}
+	}
+	return ""
+}
+
 func (d *Dataplane) Teardown() error {
-	err := deleteRules(probeRulePriority, peerRulePriority)
+	err := deleteRules(pinRulePriority, probeRulePriority, peerRulePriority)
 	for _, table := range d.tables {
 		err = errors.Join(err, flushTable(table))
 	}
@@ -257,6 +310,24 @@ func addRule(src netip.Addr, table, priority int) error {
 	return nil
 }
 
+// addPinRule keeps flows the peer opened through table's upstream on it:
+// "from <peer> fwmark <table> lookup <table>", ahead of the peer's plain rule.
+func addPinRule(peer netip.Addr, table int) error {
+	r := netlink.NewRule()
+	r.Family = netlink.FAMILY_V4
+	r.Src = hostNet(peer)
+	r.Mark = uint32(table)
+	mask := uint32(0xffffffff)
+	r.Mask = &mask
+	r.Table = table
+	r.Priority = pinRulePriority
+	if err := netlink.RuleAdd(r); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("pin rule from %s fwmark %d: %w", peer, table, err)
+	}
+	return nil
+}
+
+// rulesFor lists the peer's plain and pin rules.
 func rulesFor(peer netip.Addr) ([]netlink.Rule, error) {
 	all, err := netlink.RuleList(netlink.FAMILY_V4)
 	if err != nil {
@@ -264,7 +335,7 @@ func rulesFor(peer netip.Addr) ([]netlink.Rule, error) {
 	}
 	var out []netlink.Rule
 	for _, r := range all {
-		if r.Priority == peerRulePriority && r.Src != nil && r.Src.IP.Equal(peer.AsSlice()) {
+		if (r.Priority == peerRulePriority || r.Priority == pinRulePriority) && r.Src != nil && r.Src.IP.Equal(peer.AsSlice()) {
 			out = append(out, r)
 		}
 	}
@@ -317,11 +388,12 @@ func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) erro
 
 	table := c.AddTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable})
 	upSet := &nftables.Set{Table: table, Name: upstreamSetName, KeyType: nftables.TypeIFName, KeyByteOrder: binaryutil.NativeEndian}
-	var elems []nftables.SetElement
-	for _, up := range ups {
-		elems = append(elems, nftables.SetElement{Key: ifname(up.Name)})
+	if err := c.AddSet(upSet, d.upstreamElements(ups)); err != nil {
+		return err
 	}
-	if err := c.AddSet(upSet, elems); err != nil {
+	pinMap := &nftables.Set{Table: table, Name: pinMapName, IsMap: true,
+		KeyType: nftables.TypeIFName, KeyByteOrder: binaryutil.NativeEndian, DataType: nftables.TypeMark}
+	if err := c.AddSet(pinMap, d.pinElements(ups)); err != nil {
 		return err
 	}
 
@@ -333,6 +405,17 @@ func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) erro
 	postrouting := c.AddChain(&nftables.Chain{
 		Name: "postrouting", Table: table, Type: nftables.ChainTypeNAT,
 		Hooknum: nftables.ChainHookPostrouting, Priority: nftables.ChainPriorityNATSource, Policy: &accept,
+	})
+	// Flow pinning: a new flow is stamped with the table it first left
+	// through; later packets carry that mark into routing, where a pin rule
+	// may send them back to the same upstream after the peer has moved.
+	restore := c.AddChain(&nftables.Chain{
+		Name: "restore_mark", Table: table, Type: nftables.ChainTypeFilter,
+		Hooknum: nftables.ChainHookPrerouting, Priority: nftables.ChainPriorityMangle, Policy: &accept,
+	})
+	stamp := c.AddChain(&nftables.Chain{
+		Name: "stamp_mark", Table: table, Type: nftables.ChainTypeFilter,
+		Hooknum: nftables.ChainHookPostrouting, Priority: nftables.ChainPriorityMangle, Policy: &accept,
 	})
 
 	iifIs := func(name string) []expr.Any {
@@ -369,6 +452,20 @@ func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) erro
 	rule(forward, iifIs(down), dropping)
 	rule(forward, iifInUps, dropping)
 	rule(postrouting, oifInUps, []expr.Any{&expr.Masq{}})
+	// iifname lm0 ct mark != 0 meta mark set ct mark
+	rule(restore, iifIs(down), []expr.Any{
+		&expr.Ct{Key: expr.CtKeyMARK, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: []byte{0, 0, 0, 0}},
+		&expr.Meta{Key: expr.MetaKeyMARK, Register: 1, SourceRegister: true},
+	})
+	// iifname lm0 ct mark 0 ct mark set oifname map @pinmark
+	rule(stamp, iifIs(down), []expr.Any{
+		&expr.Ct{Key: expr.CtKeyMARK, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{0, 0, 0, 0}},
+		&expr.Meta{Key: expr.MetaKeyOIFNAME, Register: 1},
+		&expr.Lookup{SourceRegister: 1, DestRegister: 1, IsDestRegSet: true, SetName: pinMap.Name, SetID: pinMap.ID},
+		&expr.Ct{Key: expr.CtKeyMARK, Register: 1, SourceRegister: true},
+	})
 
 	if err := c.Flush(); err != nil {
 		return fmt.Errorf("install nftables rules: %w", err)
@@ -376,29 +473,49 @@ func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) erro
 	return openForeignForwardChains(c, down)
 }
 
-// setUpstreamSet replaces the members of the "upstreams" set in one
-// transaction; the rules referencing the set are untouched.
-func (d *Dataplane) setUpstreamSet(ups []dataplane.Interface) error {
+// setUpstreamSets replaces the members of the "upstreams" set and the
+// "pinmark" map in one transaction; the rules referencing them are untouched.
+func (d *Dataplane) setUpstreamSets(ups []dataplane.Interface) error {
 	c := &nftables.Conn{}
 	table := &nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable}
 	set, err := c.GetSetByName(table, upstreamSetName)
 	if err != nil {
 		return fmt.Errorf("upstreams set: %w", err)
 	}
-	c.FlushSet(set)
-	var elems []nftables.SetElement
-	for _, up := range ups {
-		elems = append(elems, nftables.SetElement{Key: ifname(up.Name)})
+	pins, err := c.GetSetByName(table, pinMapName)
+	if err != nil {
+		return fmt.Errorf("pinmark map: %w", err)
 	}
-	if len(elems) > 0 {
-		if err := c.SetAddElements(set, elems); err != nil {
+	c.FlushSet(set)
+	c.FlushSet(pins)
+	if len(ups) > 0 {
+		if err := c.SetAddElements(set, d.upstreamElements(ups)); err != nil {
+			return err
+		}
+		if err := c.SetAddElements(pins, d.pinElements(ups)); err != nil {
 			return err
 		}
 	}
 	if err := c.Flush(); err != nil {
-		return fmt.Errorf("update upstreams set: %w", err)
+		return fmt.Errorf("update upstream sets: %w", err)
 	}
 	return nil
+}
+
+func (d *Dataplane) upstreamElements(ups []dataplane.Interface) []nftables.SetElement {
+	var elems []nftables.SetElement
+	for _, up := range ups {
+		elems = append(elems, nftables.SetElement{Key: ifname(up.Name)})
+	}
+	return elems
+}
+
+func (d *Dataplane) pinElements(ups []dataplane.Interface) []nftables.SetElement {
+	var elems []nftables.SetElement
+	for _, up := range ups {
+		elems = append(elems, nftables.SetElement{Key: ifname(up.Name), Val: binaryutil.NativeEndian.PutUint32(uint32(d.tables[up.Name]))})
+	}
+	return elems
 }
 
 // foreignRuleComment marks the rules Lotsman inserts into chains it does not own.

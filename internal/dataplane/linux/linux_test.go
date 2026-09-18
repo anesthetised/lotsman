@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/google/nftables"
+	"github.com/google/nftables/binaryutil"
 	"github.com/google/nftables/userdata"
 	"github.com/vishvananda/netlink"
 
@@ -126,7 +127,7 @@ func TestDataplane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int{"forward": 5, "postrouting": 1}
+	want := map[string]int{"forward": 5, "postrouting": 1, "restore_mark": 1, "stamp_mark": 1}
 	for _, ch := range chains {
 		if ch.Table.Name != nftTable {
 			continue
@@ -163,6 +164,19 @@ func TestDataplane(t *testing.T) {
 		t.Logf("nft:\n%s", out)
 	}
 
+	pinMap, err := c.GetSetByName(&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable}, pinMapName)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pins, _ := c.GetSetElements(pinMap)
+	marks := map[string]uint32{}
+	for _, e := range pins {
+		marks[string(bytes.TrimRight(e.Key, "\x00"))] = binaryutil.NativeEndian.Uint32(e.Val)
+	}
+	if marks["lm-up-a"] != uint32(d.tables["lm-up-a"]) || marks["lm-up-b"] != uint32(d.tables["lm-up-b"]) {
+		t.Errorf("pinmark map = %v, tables = %v", marks, d.tables)
+	}
+
 	peer := netip.MustParseAddr("10.77.0.5")
 	if err := d.Route(peer, "nope"); err == nil {
 		t.Error("unknown upstream accepted")
@@ -192,10 +206,54 @@ func TestDataplane(t *testing.T) {
 		t.Fatalf("after Unroute: %v", got)
 	}
 
+	// Flow pinning: moving off an alive upstream leaves a fwmark rule for the old flows.
+	pinsTo := func(table int) []netlink.Rule {
+		var out []netlink.Rule
+		for _, r := range peerRules(t, peer) {
+			if r.Priority == pinRulePriority && r.Table == table {
+				out = append(out, r)
+			}
+		}
+		return out
+	}
+	tableA, tableB := d.tables["lm-up-a"], d.tables["lm-up-b"]
+	d.Route(peer, "lm-up-b")
+	d.Route(peer, "lm-up-a") // b was never marked alive: no pin
+	if got := pinsTo(tableB); len(got) != 0 {
+		t.Errorf("pinned to an upstream never marked alive: %v", got)
+	}
+	d.SetAlive("lm-up-a", true)
+	d.Route(peer, "lm-up-b")
+	got := pinsTo(tableA)
+	if len(got) != 1 || got[0].Mark != uint32(tableA) || got[0].Mask == nil || *got[0].Mask != 0xffffffff {
+		t.Fatalf("pin rule after moving off a: %+v", got)
+	}
+	if plain := peerRules(t, peer); len(plain) != 2 {
+		t.Errorf("expected plain rule + pin rule, got %v", plain)
+	}
+	d.Route(peer, "lm-up-a") // moving back drops the now-redundant pin to a
+	if got := pinsTo(tableA); len(got) != 0 {
+		t.Errorf("pin to the current upstream survived: %v", got)
+	}
+	d.SetAlive("lm-up-b", true)
+	d.Route(peer, "lm-up-b")
+	d.SetAlive("lm-up-a", false)
+	if got := pinsTo(tableA); len(got) != 0 {
+		t.Errorf("pins to a dead upstream survived: %v", got)
+	}
+	d.Route(peer, "lm-up-a")
+	if got := pinsTo(tableB); len(got) != 1 {
+		t.Errorf("expected a pin to b: %v", got)
+	}
+	d.Unroute(peer)
+	if got := peerRules(t, peer); len(got) != 0 {
+		t.Fatalf("pins survived Unroute: %v", got)
+	}
+
 	// Reload: a leaves, c arrives, b keeps its table; a peer on a is unrouted first.
 	d.Route(peer, "lm-up-a")
 	d.Unroute(peer)
-	tableB := d.tables["lm-up-b"]
+	tableB = d.tables["lm-up-b"]
 	newUps := []dataplane.Interface{ups[1], {Name: "lm-up-c", Addr: netip.MustParsePrefix("10.10.0.2/32")}}
 	if err := d.SetUpstreams(newUps, 1300); err != nil {
 		t.Fatal(err)

@@ -133,8 +133,10 @@ what `upstream status` prints, refreshed every health interval.
   successes. Defaults: 45 s to declare dead, 30 s to trust it again.
 - A client stays on its upstream while it is healthy, even if a sibling in the same tier becomes
   faster. It moves when its upstream goes down, or when an upstream in a *better* tier recovers.
-- Moving changes the client's exit IP: open TCP connections reset, new ones work at once. The
-  tunnel to Lotsman itself never drops.
+- Moving changes the exit IP for *new* connections only. Connections a client already has open
+  through an upstream that is still alive stay pinned to it (conntrack marks plus a per-client
+  `fwmark` rule) until they close; only when the old upstream is dead do they fail. The tunnel to
+  Lotsman itself never drops.
 - No healthy upstream for a profile: the client's rule is removed and nftables drops its packets.
   Nothing leaves through the server's own address.
 

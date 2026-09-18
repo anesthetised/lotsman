@@ -379,11 +379,19 @@ func TestDaemon(t *testing.T) {
 		t.Errorf("status = %+v", st)
 	}
 
-	// NL recovers: the preferred tier wins again.
+	if h.dp.PinnedTo(euPeer.IP, "lm-up-nl") {
+		t.Error("flows pinned to the dead upstream")
+	}
+
+	// NL recovers: the preferred tier wins again, and the flows the eu peer
+	// opened through DE stay there because DE is still alive.
 	h.setHealthy("10.8.0.2", true)
 	eventually(t, "return to nl", func() bool {
 		return routedVia(euPeer.IP, "lm-up-nl")() && routedVia(nlPeer.IP, "lm-up-nl")()
 	})
+	if !h.dp.PinnedTo(euPeer.IP, "lm-up-de") {
+		t.Error("flows not pinned to the alive previous upstream")
+	}
 
 	// Removing a peer from the store removes it from the device and the kernel.
 	h.st.DeletePeer("alice", store.DefaultDevice, "nl")

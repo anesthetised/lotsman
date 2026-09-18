@@ -19,7 +19,8 @@ Amnezia app ──AWG2──▶ Lotsman ──AWG2──▶ provider NL ──�
 ## What you get
 
 - One server, one config per device per profile, zero custom client software.
-- Automatic failover between upstreams with sticky selection (no flapping).
+- Automatic failover between upstreams with sticky selection (no flapping); connections already
+  open through a live upstream stay on it while new ones move.
 - Fail-closed: if no upstream is healthy for a user, their traffic is dropped, never leaked through
   the server's own IP.
 - MTU and TCP MSS handled for the double encapsulation; DNS follows the chosen upstream.
@@ -28,8 +29,6 @@ Amnezia app ──AWG2──▶ Lotsman ──AWG2──▶ provider NL ──�
 
 ## What you do not get (yet)
 
-- Established TCP connections survive an upstream switch only from the tunnel's point of view; the
-  exit IP changes, so they are reset. New connections work immediately.
 - All users behind one upstream share its exit IP and its reputation.
 - IPv6 inside the tunnel, a web UI, more than one node.
 - Throughput of a kernel WireGuard: crypto runs in userspace twice per packet.

@@ -6,6 +6,7 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -79,6 +80,31 @@ func newProvider(t *testing.T, name string, tunnelNet netip.Prefix, port uint16)
 			c.Close()
 		}
 	}()
+	// A long-lived echo on :445 for flow-pinning checks; replies are prefixed with the provider name.
+	echo, err := tnet.ListenTCPAddrPort(netip.AddrPortFrom(internet, 445))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { echo.Close() })
+	go func() {
+		for {
+			c, err := echo.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				buf := make([]byte, 64)
+				for {
+					n, err := c.Read(buf)
+					if err != nil {
+						return
+					}
+					c.Write([]byte(name + ":" + string(buf[:n])))
+				}
+			}()
+		}
+	}()
 
 	customer := awgconf.Config{
 		Interface: awgconf.Interface{PrivateKey: clientKey, Addresses: []netip.Prefix{netip.PrefixFrom(clientAddr, 32)}, MTU: 1400, Params: params},
@@ -114,6 +140,34 @@ func newClient(t *testing.T, conf string) *client {
 	}
 	t.Cleanup(dev.Close)
 	return &client{dev: dev, tnet: tnet}
+}
+
+// stream is an open connection through the tunnel; ping returns which provider echoed.
+type stream struct{ conn net.Conn }
+
+func (c *client) openStream(t *testing.T) *stream {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, err := c.tnet.DialContextTCPAddrPort(ctx, netip.AddrPortFrom(internet, 445))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { conn.Close() })
+	return &stream{conn: conn}
+}
+
+func (s *stream) ping(msg string) (string, error) {
+	s.conn.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := s.conn.Write([]byte(msg)); err != nil {
+		return "", err
+	}
+	buf := make([]byte, 64)
+	n, err := s.conn.Read(buf)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSuffix(string(buf[:n]), ":"+msg), nil
 }
 
 // exitVia dials the fake internet through the tunnel and returns which provider answered.
@@ -172,17 +226,18 @@ func TestEndToEnd(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "de.conf"), []byte(de.conf), 0o600)
 
 	cfgPath := filepath.Join(dir, "lotsman.yaml")
-	os.WriteFile(cfgPath, []byte(`
+	baseConfig := `
 listen: 127.0.0.1:51820
 endpoint: 127.0.0.1:51820
-state_dir: `+filepath.Join(dir, "state")+`
+state_dir: ` + filepath.Join(dir, "state") + `
 upstreams:
-  - {name: nl, conf: `+filepath.Join(dir, "nl.conf")+`, geo: NL}
-  - {name: de, conf: `+filepath.Join(dir, "de.conf")+`, geo: DE}
+  - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, geo: NL}
+  - {name: de, conf: ` + filepath.Join(dir, "de.conf") + `, geo: DE}
 profiles:
   - {name: eu, prefer: [{geo: NL}, {geo: DE}]}
 health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
-`), 0o600)
+`
+	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
@@ -246,6 +301,28 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 			t.Errorf("recreated lm-up-nl has addresses %v", addrs)
 		}
 	}
+
+	// Flow pinning: a connection opened through NL survives the profile
+	// being repointed at DE while NL is still alive; new connections use DE.
+	long := c.openStream(t)
+	if via, err := long.ping("a"); err != nil || via != "nl" {
+		t.Fatalf("stream before move: %q, %v", via, err)
+	}
+	os.WriteFile(cfgPath, []byte(strings.Replace(baseConfig, "prefer: [{geo: NL}, {geo: DE}]", "prefer: [{geo: DE}, {geo: NL}]", 1)), 0o600)
+	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	eventually(t, "new connections via de", 15*time.Second, func() bool {
+		got, err := c.exitVia(2 * time.Second)
+		return err == nil && got == "de"
+	})
+	if via, err := long.ping("b"); err != nil || via != "nl" {
+		t.Errorf("pinned stream after move: %q, %v (want nl)", via, err)
+	}
+	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
+	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	eventually(t, "back via nl", 15*time.Second, func() bool {
+		got, err := c.exitVia(2 * time.Second)
+		return err == nil && got == "nl"
+	})
 
 	// NL is removed from the config and the daemon reloaded on SIGHUP:
 	// traffic moves to DE without the client reconnecting, and the NL TUN is gone.

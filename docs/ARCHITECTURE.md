@@ -60,9 +60,15 @@ set on `lm0` and written into client configs; nftables additionally clamps TCP M
 
 ## Failover semantics
 
-Switching a peer to another upstream changes its exit IP: established TCP flows break; the user's
-tunnel to Lotsman stays up and new flows work immediately. Conntrack-based flow pinning (drain old
-flows on the old upstream while it is still alive) is a v2 item.
+Switching a peer to another upstream changes the exit IP of *new* flows only. Existing flows are
+pinned: every new flow leaving through an upstream gets a conntrack mark equal to that upstream's
+routing table (`stamp_mark` chain, `ct mark set oifname map @pinmark`); later packets carry the mark
+into routing (`restore_mark` chain, `meta mark set ct mark`); and when a peer moves off an upstream
+that is still alive, a per-peer rule `from <peer> fwmark <table> lookup <table>` (priority 3000,
+ahead of the plain `from <peer>` rule) keeps those flows on it. The pin rules are per peer, so
+`Unroute` removes them with everything else and a removed peer cannot leak; when an upstream goes
+down its pins are deleted and the flows follow the peer's current route. Only flows through a dead
+upstream are lost, and those were dead anyway.
 
 ## Open items
 
