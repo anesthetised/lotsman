@@ -5,6 +5,11 @@ All notable changes to Lotsman are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Prometheus metrics endpoint, enabled with `metrics.listen` (#3): upstream health, probe
+  latency and counts, handshake times, byte counters per upstream and per client, current
+  upstream per client, reroute and reload counters.
+
 ## [0.1.2] - 2026-09-18
 
 ### Added

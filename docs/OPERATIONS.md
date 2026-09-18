@@ -127,6 +127,43 @@ nft list table inet lotsman
 Health transitions and every routing decision are logged. `status.json` in the state directory is
 what `upstream status` prints, refreshed every health interval.
 
+## Monitoring
+
+```yaml
+metrics:
+  listen: 10.77.0.1:9100     # or 127.0.0.1:9100 for a scraper on the host
+```
+
+`GET /metrics` serves the Prometheus text format. The endpoint is off unless `metrics.listen` is
+set, and an unspecified address (`0.0.0.0`, `::`) is refused: the per-client series carry user,
+device and profile names. On the gateway address every connected client can read it; on loopback
+only a scraper on the host can. Changing `metrics.listen` needs a restart.
+
+| Metric | Labels | Meaning |
+|---|---|---|
+| `lotsman_upstream_up` | `upstream` | 1 while probes pass |
+| `lotsman_upstream_probe_latency_seconds` | `upstream` | last successful probe |
+| `lotsman_upstream_probes_total` | `upstream`, `result` | `ok` / `fail` |
+| `lotsman_upstream_last_handshake_timestamp_seconds` | `upstream` | 0 if never |
+| `lotsman_upstream_clients` | `upstream` | clients routed through it |
+| `lotsman_upstream_receive_bytes_total`, `…_transmit_bytes_total` | `upstream` | provider tunnel counters |
+| `lotsman_peer_receive_bytes_total`, `…_transmit_bytes_total` | `user`, `device`, `profile` | client tunnel counters |
+| `lotsman_peer_last_handshake_timestamp_seconds` | `user`, `device`, `profile` | 0 if never |
+| `lotsman_peer_upstream` | `user`, `device`, `profile`, `upstream` | 1 for the current upstream |
+| `lotsman_reroutes_total` | `upstream` | routes to it, first assignment included |
+| `lotsman_reloads_total` | `result` | `ok` / `error` |
+| `lotsman_client_mtu`, `lotsman_build_info{version}` | | |
+
+Byte counters come from the WireGuard devices and reset when a peer is re-added; use `rate()`.
+A Prometheus job:
+
+```yaml
+scrape_configs:
+  - job_name: lotsman
+    static_configs:
+      - targets: ["10.77.0.1:9100"]
+```
+
 ## How failover behaves
 
 - An upstream is *down* after `down_after` consecutive failed probes and *up* again after `up_after`

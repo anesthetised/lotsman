@@ -22,6 +22,13 @@ type Config struct {
 	Upstreams []Upstream   `yaml:"upstreams"`
 	Profiles  []Profile    `yaml:"profiles"`
 	Health    Health       `yaml:"health"`
+	Metrics   Metrics      `yaml:"metrics"`
+}
+
+// Metrics enables the Prometheus endpoint when Listen is set. The endpoint
+// names users, so it must not be bound to an unspecified address.
+type Metrics struct {
+	Listen string `yaml:"listen"`
 }
 
 type Upstream struct {
@@ -152,6 +159,15 @@ func (c *Config) Validate() error {
 	}
 	if h.DownAfter < 1 || h.UpAfter < 1 {
 		return fmt.Errorf("health.down_after and health.up_after must be at least 1")
+	}
+	if c.Metrics.Listen != "" {
+		ap, err := netip.ParseAddrPort(c.Metrics.Listen)
+		if err != nil {
+			return fmt.Errorf("metrics.listen: %w", err)
+		}
+		if ap.Addr().IsUnspecified() {
+			return fmt.Errorf("metrics.listen: %s would expose user names to everyone; bind the tunnel or loopback address", ap.Addr())
+		}
 	}
 	return nil
 }

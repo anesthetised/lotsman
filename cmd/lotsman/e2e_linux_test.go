@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -184,6 +185,17 @@ func (c *client) exitVia(timeout time.Duration) (string, error) {
 	return string(b), err
 }
 
+// scrape fetches the metrics endpoint the test config enables.
+func scrape() (body, contentType string, err error) {
+	resp, err := http.Get("http://127.0.0.1:19100/metrics")
+	if err != nil {
+		return "", "", err
+	}
+	defer resp.Body.Close()
+	b, err := io.ReadAll(resp.Body)
+	return string(b), resp.Header.Get("Content-Type"), err
+}
+
 func linkIndex(t *testing.T, name string) int {
 	t.Helper()
 	l, err := netlink.LinkByName(name)
@@ -236,6 +248,7 @@ upstreams:
 profiles:
   - {name: eu, prefer: [{geo: NL}, {geo: DE}]}
 health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
+metrics: {listen: 127.0.0.1:19100}
 `
 	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
 
@@ -264,6 +277,15 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 		got, err := c.exitVia(2 * time.Second)
 		return err == nil && got == "nl"
 	})
+
+	// The metrics endpoint reflects the routing above.
+	eventually(t, "metrics endpoint", 10*time.Second, func() bool {
+		body, ct, err := scrape()
+		return err == nil && strings.HasPrefix(ct, "text/plain; version=0.0.4") && strings.Contains(body, `lotsman_upstream_up{upstream="nl"} 1`)
+	})
+	if body, _, _ := scrape(); !strings.Contains(body, `lotsman_peer_upstream{user="alice",device="default",profile="eu",upstream="nl"} 1`) {
+		t.Errorf("peer metric missing:\n%s", body)
+	}
 
 	// Reload without changes: nothing may be touched. The interface keeps its
 	// index and the provider sees no new handshake.
@@ -324,18 +346,18 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 		return err == nil && got == "nl"
 	})
 
+	if body, _, _ := scrape(); !strings.Contains(body, `lotsman_reloads_total{result="ok"} `) || strings.Contains(body, `lotsman_reloads_total{result="ok"} 0`) {
+		t.Errorf("reloads not counted:\n%s", body)
+	}
+
 	// NL is removed from the config and the daemon reloaded on SIGHUP:
 	// traffic moves to DE without the client reconnecting, and the NL TUN is gone.
-	os.WriteFile(cfgPath, []byte(`
-listen: 127.0.0.1:51820
-endpoint: 127.0.0.1:51820
-state_dir: `+filepath.Join(dir, "state")+`
-upstreams:
-  - {name: de, conf: `+filepath.Join(dir, "de.conf")+`, geo: DE}
-profiles:
-  - {name: eu, prefer: [{geo: DE}]}
-health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
-`), 0o600)
+	withoutNL := strings.Replace(baseConfig, "  - {name: nl, conf: "+filepath.Join(dir, "nl.conf")+", geo: NL}\n", "", 1)
+	withoutNL = strings.Replace(withoutNL, "prefer: [{geo: NL}, {geo: DE}]", "prefer: [{geo: DE}]", 1)
+	if withoutNL == baseConfig {
+		t.Fatal("test setup: could not derive the config without nl")
+	}
+	os.WriteFile(cfgPath, []byte(withoutNL), 0o600)
 	syscall.Kill(os.Getpid(), syscall.SIGHUP)
 	eventually(t, "reroute to de after reload", 15*time.Second, func() bool {
 		got, err := c.exitVia(2 * time.Second)

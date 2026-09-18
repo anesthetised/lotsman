@@ -39,3 +39,8 @@ health:
   probe: 1.1.1.1:443   # a TCP port reachable through every upstream
   down_after: 3
   up_after: 2
+
+# Prometheus endpoint, off unless set. It names users, so keep it on the tunnel
+# gateway (reachable by clients only) or on loopback; 0.0.0.0 is refused.
+# metrics:
+#   listen: 10.77.0.1:9100

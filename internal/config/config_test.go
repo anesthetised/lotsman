@@ -85,6 +85,9 @@ func TestValidationErrors(t *testing.T) {
 		"zero health interval":   "health: {interval: 0s}\n",
 		"probe without port":     "health: {probe: 1.1.1.1}\n",
 		"down_after zero":        "health: {down_after: 0}\n",
+		"metrics without port":   "metrics: {listen: 10.77.0.1}\n",
+		"metrics on any address": "metrics: {listen: 0.0.0.0:9100}\n",
+		"metrics on any v6":      "metrics: {listen: '[::]:9100'}\n",
 	}
 	for name, override := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -92,6 +95,17 @@ func TestValidationErrors(t *testing.T) {
 				t.Fatal("expected error")
 			}
 		})
+	}
+}
+
+func TestMetricsListen(t *testing.T) {
+	cfg, err := Parse([]byte(minimal))
+	if err != nil || cfg.Metrics.Listen != "" {
+		t.Fatalf("metrics should be off by default: %+v, %v", cfg.Metrics, err)
+	}
+	cfg, err = Parse([]byte(minimal + "metrics: {listen: 10.77.0.1:9100}\n"))
+	if err != nil || cfg.Metrics.Listen != "10.77.0.1:9100" {
+		t.Errorf("metrics.listen = %q, %v", cfg.Metrics.Listen, err)
 	}
 }
 

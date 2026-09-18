@@ -21,6 +21,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/dataplane/fake"
 	"github.com/anesthetised/lotsman/internal/health"
+	"github.com/anesthetised/lotsman/internal/metrics"
 	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/tunnel"
 )
@@ -304,7 +305,7 @@ func newHarness(t *testing.T) *harness {
 		tn, _, err := netstack.CreateNetTUN([]netip.Addr{addr}, nil, mtu)
 		return tn, err
 	}
-	h.d = New(Deps{Config: cfg, Identity: id, Store: st, Dataplane: h.dp, NewTUN: newTUN, Probe: probe, Log: quiet})
+	h.d = New(Deps{Version: "test", Config: cfg, Identity: id, Store: st, Dataplane: h.dp, NewTUN: newTUN, Probe: probe, Log: quiet})
 	return h
 }
 
@@ -332,6 +333,29 @@ func (h *harness) setHealthy(addr string, ok bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.healthy[netip.MustParseAddr(addr)] = ok
+}
+
+// metric finds one sample by name and a subset of labels; ok is false if absent.
+func metric(samples []metrics.Sample, name string, want ...metrics.Label) (float64, bool) {
+	for _, s := range samples {
+		if s.Name != name {
+			continue
+		}
+		has := map[metrics.Label]bool{}
+		for _, l := range s.Labels {
+			has[l] = true
+		}
+		match := true
+		for _, l := range want {
+			if !has[l] {
+				match = false
+			}
+		}
+		if match {
+			return s.Value, true
+		}
+	}
+	return 0, false
 }
 
 func eventually(t *testing.T, what string, cond func() bool) {
@@ -369,6 +393,29 @@ func TestDaemon(t *testing.T) {
 	if peers, _ := h.d.down.Peers(); len(peers) != 2 {
 		t.Errorf("downstream device has %d peers", len(peers))
 	}
+	m := h.d.Metrics()
+	up := metrics.Label{Name: "upstream", Value: "nl"}
+	if v, ok := metric(m, "lotsman_upstream_up", up); !ok || v != 1 {
+		t.Errorf("upstream_up{nl} = %v, %v", v, ok)
+	}
+	if v, ok := metric(m, "lotsman_upstream_probes_total", up, metrics.Label{Name: "result", Value: "ok"}); !ok || v < 1 {
+		t.Errorf("probes_total{nl,ok} = %v, %v", v, ok)
+	}
+	if v, ok := metric(m, "lotsman_upstream_clients", up); !ok || v != 2 {
+		t.Errorf("upstream_clients{nl} = %v, %v", v, ok)
+	}
+	if v, ok := metric(m, "lotsman_peer_upstream", metrics.Label{Name: "user", Value: "alice"}, metrics.Label{Name: "profile", Value: "eu"}, up); !ok || v != 1 {
+		t.Errorf("peer_upstream{alice,eu,nl} = %v, %v", v, ok)
+	}
+	if _, ok := metric(m, "lotsman_peer_last_handshake_timestamp_seconds", metrics.Label{Name: "device", Value: store.DefaultDevice}); !ok {
+		t.Error("per-peer handshake metric missing")
+	}
+	if v, ok := metric(m, "lotsman_client_mtu"); !ok || v != 1392 {
+		t.Errorf("client_mtu = %v, %v", v, ok)
+	}
+	if v, _ := metric(m, "lotsman_build_info", metrics.Label{Name: "version", Value: "test"}); v != 1 {
+		t.Error("build_info missing or wrong version")
+	}
 
 	// NL dies: the eu profile falls back to DE, the nl-only profile is blocked.
 	h.setHealthy("10.8.0.2", false)
@@ -377,6 +424,16 @@ func TestDaemon(t *testing.T) {
 	st := h.d.Status()
 	if st[0].State != health.Down || st[1].State != health.Up || st[1].Clients != 1 {
 		t.Errorf("status = %+v", st)
+	}
+	m = h.d.Metrics()
+	if v, _ := metric(m, "lotsman_upstream_up", up); v != 0 {
+		t.Error("upstream_up{nl} still 1 after it died")
+	}
+	if v, ok := metric(m, "lotsman_reroutes_total", metrics.Label{Name: "upstream", Value: "de"}); !ok || v != 1 {
+		t.Errorf("reroutes_total{de} = %v, %v", v, ok)
+	}
+	if v, ok := metric(m, "lotsman_upstream_probes_total", up, metrics.Label{Name: "result", Value: "fail"}); !ok || v < 2 {
+		t.Errorf("probes_total{nl,fail} = %v, %v", v, ok)
 	}
 
 	if h.dp.PinnedTo(euPeer.IP, "lm-up-nl") {

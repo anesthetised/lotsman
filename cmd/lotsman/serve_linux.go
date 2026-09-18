@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -14,6 +16,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/dataplane/linux"
 	"github.com/anesthetised/lotsman/internal/health"
+	"github.com/anesthetised/lotsman/internal/metrics"
 	"github.com/anesthetised/lotsman/internal/tunnel"
 )
 
@@ -26,7 +29,7 @@ func serve(ctx context.Context, configPath string) error {
 	defer e.store.Close()
 
 	d := daemon.New(daemon.Deps{
-		Config: e.cfg, Identity: e.id, Store: e.store,
+		Version: version, Config: e.cfg, Identity: e.id, Store: e.store,
 		Dataplane: linux.New(), NewTUN: tunnel.CreateTUN, Probe: health.Probe, Log: log,
 	})
 	if err := writePID(e.cfg.StateDir); err != nil {
@@ -38,6 +41,9 @@ func serve(ctx context.Context, configPath string) error {
 	defer stop()
 	go handleHUP(ctx, d, configPath, log)
 	go publishStatus(ctx, d, e.cfg.StateDir, e.cfg.Health.Interval, log)
+	if e.cfg.Metrics.Listen != "" {
+		go serveMetrics(ctx, e.cfg.Metrics.Listen, metrics.Handler(daemon.Families, d.Metrics), log)
+	}
 
 	log.Info("lotsman starting", "listen", e.cfg.Listen, "upstreams", len(e.cfg.Upstreams))
 	err = d.Run(ctx)
@@ -86,6 +92,42 @@ func publishStatus(ctx context.Context, d *daemon.Daemon, stateDir string, inter
 				log.Error("write status", "err", err)
 			}
 		}
+	}
+}
+
+// serveMetrics answers /metrics on addr. The address is usually the tunnel
+// gateway, which exists only once the daemon has brought lm0 up, so binding
+// is retried for a while.
+func serveMetrics(ctx context.Context, addr string, h http.Handler, log *slog.Logger) {
+	var ln net.Listener
+	deadline := time.Now().Add(30 * time.Second)
+	for {
+		var err error
+		if ln, err = net.Listen("tcp", addr); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			log.Error("metrics: cannot listen", "addr", addr, "err", err)
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", h)
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		<-ctx.Done()
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		srv.Shutdown(shutdownCtx)
+	}()
+	log.Info("metrics listening", "addr", ln.Addr())
+	if err := srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Error("metrics server", "err", err)
 	}
 }
 

@@ -35,6 +35,7 @@ type ProbeFunc func(ctx context.Context, source netip.Addr, target netip.AddrPor
 type TUNFunc func(name string, mtu int) (tun.Device, error)
 
 type Deps struct {
+	Version   string
 	Config    *config.Config
 	Identity  Identity
 	Store     *store.Store
@@ -45,28 +46,36 @@ type Deps struct {
 }
 
 type Daemon struct {
-	id     Identity
-	store  *store.Store
-	dp     dataplane.Dataplane
-	newTUN TUNFunc
-	probe  ProbeFunc
-	log    *slog.Logger
+	version string
+	id      Identity
+	store   *store.Store
+	dp      dataplane.Dataplane
+	newTUN  TUNFunc
+	probe   ProbeFunc
+	log     *slog.Logger
 
 	mu          sync.Mutex
 	cfg         *config.Config
 	down        *tunnel.Device
 	ups         []*Upstream
 	assignments map[netip.Addr]string      // peer address → upstream name
-	devicePeers map[awgconf.Key]netip.Addr // peers currently added to the downstream device
+	devicePeers map[awgconf.Key]store.Peer // peers currently added to the downstream device
 	wake        chan struct{}              // nudges Run to reprobe and reconcile now
+
+	// Monotonic counters for metrics.
+	probes   map[string]*[2]uint64 // upstream → {ok, fail}
+	reroutes map[string]uint64     // destination upstream → moves
+	reloads  [2]uint64             // {ok, error}
 }
 
 func New(d Deps) *Daemon {
 	return &Daemon{
-		cfg: d.Config, id: d.Identity, store: d.Store, dp: d.Dataplane, newTUN: d.NewTUN, probe: d.Probe, log: d.Log,
+		version: d.Version, cfg: d.Config, id: d.Identity, store: d.Store, dp: d.Dataplane, newTUN: d.NewTUN, probe: d.Probe, log: d.Log,
 		assignments: map[netip.Addr]string{},
-		devicePeers: map[awgconf.Key]netip.Addr{},
+		devicePeers: map[awgconf.Key]store.Peer{},
 		wake:        make(chan struct{}, 1),
+		probes:      map[string]*[2]uint64{},
+		reroutes:    map[string]uint64{},
 	}
 }
 
@@ -199,6 +208,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if err := restartRequired(d.cfg, cfg); err != nil {
+		d.reloads[1]++
 		return err
 	}
 	current := map[string]*Upstream{}
@@ -254,6 +264,11 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	case d.wake <- struct{}{}:
 	default:
 	}
+	if len(errs) == 0 {
+		d.reloads[0]++
+	} else {
+		d.reloads[1]++
+	}
 	return errors.Join(errs...)
 }
 
@@ -292,6 +307,9 @@ func restartRequired(old, cfg *config.Config) error {
 	if old.StateDir != cfg.StateDir {
 		changed = append(changed, "state_dir")
 	}
+	if old.Metrics.Listen != cfg.Metrics.Listen {
+		changed = append(changed, "metrics.listen")
+	}
 	if len(changed) > 0 {
 		return fmt.Errorf("reload rejected: %v changed, which needs a restart", changed)
 	}
@@ -310,6 +328,7 @@ func (d *Daemon) probeAll(ctx context.Context) {
 			latency, err := d.probe(ctx, u.Addr.Addr(), target, timeout)
 			d.mu.Lock()
 			defer d.mu.Unlock()
+			d.countProbe(u.Name, err == nil)
 			before := u.Tracker.State()
 			if u.Tracker.Observe(err == nil, latency) {
 				d.log.Info("upstream health changed", "upstream", u.Name, "from", before, "to", u.Tracker.State(), "err", err)
@@ -351,18 +370,18 @@ func (d *Daemon) Reconcile() error {
 				errs = append(errs, err)
 				continue
 			}
-			d.devicePeers[p.PublicKey] = p.IP
+			d.devicePeers[p.PublicKey] = p
 		}
 		errs = append(errs, d.route(p))
 	}
-	for key, ip := range d.devicePeers {
+	for key, p := range d.devicePeers {
 		if wanted[key] {
 			continue
 		}
-		errs = append(errs, d.down.RemovePeer(key), d.dp.Unroute(ip))
+		errs = append(errs, d.down.RemovePeer(key), d.dp.Unroute(p.IP))
 		delete(d.devicePeers, key)
-		delete(d.assignments, ip)
-		d.log.Info("peer removed", "peer", ip)
+		delete(d.assignments, p.IP)
+		d.log.Info("peer removed", "peer", p.IP)
 	}
 	return errors.Join(errs...)
 }
@@ -388,8 +407,22 @@ func (d *Daemon) route(p store.Peer) error {
 		return err
 	}
 	d.assignments[p.IP] = want
+	d.reroutes[want]++
 	d.log.Info("peer routed", "peer", p.IP, "user", p.User, "device", p.Device, "profile", p.Profile, "from", current, "to", want)
 	return nil
+}
+
+func (d *Daemon) countProbe(upstream string, ok bool) {
+	c := d.probes[upstream]
+	if c == nil {
+		c = new([2]uint64)
+		d.probes[upstream] = c
+	}
+	if ok {
+		c[0]++
+	} else {
+		c[1]++
+	}
 }
 
 func (d *Daemon) interfaceOf(upstream string) string {
