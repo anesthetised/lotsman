@@ -5,6 +5,9 @@ All notable changes to Lotsman are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `tags` on upstreams and `tag` in profile tiers, so several countries can form one tier picked by latency.
+
 ### Fixed
 - Block clients whose profile is removed on reload, clearing their routes, flow pins, and
   reported assignment even when their upstream remains configured (#6).

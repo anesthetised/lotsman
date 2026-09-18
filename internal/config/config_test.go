@@ -82,6 +82,8 @@ func TestValidationErrors(t *testing.T) {
 		"no profiles":            "profiles: []\n",
 		"duplicate profile":      "profiles: [{name: p}, {name: p}]\n",
 		"prefer matches nothing": "profiles: [{name: p, prefer: [{geo: XX}]}]\n",
+		"prefer tag nobody has":  "profiles: [{name: p, prefer: [{tag: asia}]}]\n",
+		"bad tag":                "upstreams: [{name: a, conf: /x, tags: ['Bad Tag']}]\nprofiles: [{name: p}]\n",
 		"zero health interval":   "health: {interval: 0s}\n",
 		"probe without port":     "health: {probe: 1.1.1.1}\n",
 		"down_after zero":        "health: {down_after: 0}\n",
@@ -95,6 +97,25 @@ func TestValidationErrors(t *testing.T) {
 				t.Fatal("expected error")
 			}
 		})
+	}
+}
+
+func TestTags(t *testing.T) {
+	cfg, err := Parse([]byte(`
+endpoint: vpn.example.org:51820
+upstreams:
+  - {name: a, conf: /a, geo: LT, tags: [near, eu]}
+  - {name: b, conf: /b, geo: NL, tags: [eu]}
+profiles:
+  - {name: near, prefer: [{tag: near}]}
+  - {name: eu, prefer: [{tag: near}, {tag: eu}]}
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	near, _ := cfg.Profile("near")
+	if !near.Prefer[0].Matches(cfg.Upstreams[0]) || near.Prefer[0].Matches(cfg.Upstreams[1]) {
+		t.Error("tag tier matches the wrong upstreams")
 	}
 }
 
@@ -116,12 +137,16 @@ func TestInterfaceName(t *testing.T) {
 }
 
 func TestMatch(t *testing.T) {
-	u := Upstream{Name: "x", Geo: "NL", Provider: "rs"}
+	u := Upstream{Name: "x", Geo: "NL", Provider: "rs", Tags: []string{"near", "eu"}}
 	for m, want := range map[Match]bool{
 		{}:                             true,
 		{Geo: "NL"}:                    true,
 		{Provider: "rs"}:               true,
 		{Geo: "NL", Provider: "rs"}:    true,
+		{Tag: "eu"}:                    true,
+		{Tag: "near", Geo: "NL"}:       true,
+		{Tag: "asia"}:                  false,
+		{Tag: "eu", Geo: "DE"}:         false,
 		{Geo: "DE"}:                    false,
 		{Geo: "NL", Provider: "other"}: false,
 	} {

@@ -13,26 +13,38 @@ state_dir: /var/lib/lotsman
 
 # Your own provider subscriptions. `conf` is the AmneziaWG config the provider
 # generated for you; it must route 0.0.0.0/0. The name becomes the interface
-# lm-up-<name>, so keep it to 9 characters.
+# lm-up-<name>, so keep it to 9 characters. `geo`, `provider` and `tags` are
+# free-form labels that profiles match on.
 upstreams:
+  - name: rs-lt
+    conf: /etc/lotsman/upstreams/rs-lt.conf
+    geo: LT
+    provider: redshield
+    tags: [near, eu]
   - name: rs-nl
     conf: /etc/lotsman/upstreams/rs-nl.conf
     geo: NL
     provider: redshield
-  - name: rs-de
-    conf: /etc/lotsman/upstreams/rs-de.conf
-    geo: DE
+    tags: [eu]
+  - name: rs-us
+    conf: /etc/lotsman/upstreams/rs-us.conf
+    geo: US
     provider: redshield
 
 # A user gets one client config per profile. `prefer` is an ordered list of
-# tiers; the first tier with a healthy upstream wins. Empty means any upstream.
+# tiers; the first tier with a healthy upstream wins, lowest latency within a
+# tier. A tier is one match on geo, provider and/or tag. Empty means any upstream.
 profiles:
-  - name: nl
-    prefer: [{geo: NL}]
-  - name: eu
-    prefer: [{geo: NL}, {geo: DE}]
   - name: auto
     prefer: []
+  - name: near
+    prefer: [{tag: near}]
+  - name: eu
+    prefer: [{tag: near}, {tag: eu}]
+  - name: nl
+    prefer: [{geo: NL}, {tag: eu}]
+  - name: us
+    prefer: [{geo: US}]
 
 health:
   interval: 15s

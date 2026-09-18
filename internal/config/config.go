@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"regexp"
+	"slices"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -32,10 +33,15 @@ type Metrics struct {
 }
 
 type Upstream struct {
-	Name     string `yaml:"name"`
-	Conf     string `yaml:"conf"`
-	Geo      string `yaml:"geo"`
-	Provider string `yaml:"provider"`
+	Name     string   `yaml:"name"`
+	Conf     string   `yaml:"conf"`
+	Geo      string   `yaml:"geo"`
+	Provider string   `yaml:"provider"`
+	Tags     []string `yaml:"tags"` // free-form groups a profile can prefer as one tier
+}
+
+func (u Upstream) HasTag(tag string) bool {
+	return slices.Contains(u.Tags, tag)
 }
 
 type Profile struct {
@@ -47,10 +53,11 @@ type Profile struct {
 type Match struct {
 	Geo      string `yaml:"geo"`
 	Provider string `yaml:"provider"`
+	Tag      string `yaml:"tag"`
 }
 
 func (m Match) Matches(u Upstream) bool {
-	return (m.Geo == "" || m.Geo == u.Geo) && (m.Provider == "" || m.Provider == u.Provider)
+	return (m.Geo == "" || m.Geo == u.Geo) && (m.Provider == "" || m.Provider == u.Provider) && (m.Tag == "" || u.HasTag(m.Tag))
 }
 
 type Health struct {
@@ -130,6 +137,11 @@ func (c *Config) Validate() error {
 		seen[u.Name] = true
 		if u.Conf == "" {
 			return fmt.Errorf("upstream %q: conf path is required", u.Name)
+		}
+		for _, tag := range u.Tags {
+			if !profileNameRe.MatchString(tag) {
+				return fmt.Errorf("upstream %q: tag %q must match %s", u.Name, tag, profileNameRe)
+			}
 		}
 	}
 	if len(c.Profiles) == 0 {
