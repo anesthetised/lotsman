@@ -22,6 +22,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/dataplane/fake"
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/store"
+	"github.com/anesthetised/lotsman/internal/tunnel"
 )
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -89,6 +90,79 @@ func TestLoadUpstream(t *testing.T) {
 			t.Errorf("endpoint = %q", u.Conf.Peers[0].Endpoint)
 		}
 	})
+}
+
+// fakeResolver answers hostname lookups from a map the test controls.
+type fakeResolver struct {
+	mu    sync.Mutex
+	hosts map[string]string
+}
+
+func (r *fakeResolver) set(host, ip string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.hosts[host] = ip
+}
+
+func (r *fakeResolver) lookup(_ context.Context, _ string, host string) ([]netip.Addr, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ip, ok := r.hosts[host]; ok {
+		return []netip.Addr{netip.MustParseAddr(ip)}, nil
+	}
+	return nil, errors.New("no such host")
+}
+
+func useResolver(t *testing.T, r *fakeResolver) {
+	t.Helper()
+	old := lookupNetIP
+	lookupNetIP = r.lookup
+	t.Cleanup(func() { lookupNetIP = old })
+}
+
+func TestRefreshEndpoint(t *testing.T) {
+	dns := &fakeResolver{hosts: map[string]string{"vpn.provider.test": "192.0.2.1"}}
+	useResolver(t, dns)
+	dir := t.TempDir()
+	path := providerConf(t, dir, "p", "10.8.0.2/32", 0)
+	content := strings.Replace(mustRead(t, path), "localhost:51820", "vpn.provider.test:51820", 1)
+	os.WriteFile(path, []byte(content), 0o600)
+	h := config.Health{DownAfter: 2, UpAfter: 1}
+	u, err := LoadUpstream(context.Background(), config.Upstream{Name: "p", Conf: path}, h)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Endpoint != "vpn.provider.test:51820" || u.Conf.Peers[0].Endpoint != "192.0.2.1:51820" {
+		t.Fatalf("loaded endpoint = %q resolved %q", u.Endpoint, u.Conf.Peers[0].Endpoint)
+	}
+	tn, _, _ := netstack.CreateNetTUN([]netip.Addr{u.Addr.Addr()}, nil, 1400)
+	u.Device = tunnel.New("p", tn, quiet)
+	t.Cleanup(u.Device.Close)
+	if err := u.Device.Configure(u.Conf.UAPI()); err != nil {
+		t.Fatal(err)
+	}
+
+	if changed, err := u.RefreshEndpoint(context.Background()); err != nil || changed {
+		t.Errorf("unchanged DNS: changed=%v err=%v", changed, err)
+	}
+	dns.set("vpn.provider.test", "192.0.2.2")
+	if changed, err := u.RefreshEndpoint(context.Background()); err != nil || !changed {
+		t.Fatalf("changed DNS: changed=%v err=%v", changed, err)
+	}
+	peers, _ := u.Device.Peers()
+	if len(peers) != 1 || peers[0].Endpoint != "192.0.2.2:51820" {
+		t.Errorf("device endpoint not updated: %+v", peers)
+	}
+	if u.Conf.Peers[0].Endpoint != "192.0.2.2:51820" {
+		t.Errorf("Conf endpoint not updated: %q", u.Conf.Peers[0].Endpoint)
+	}
+
+	// A literal IP endpoint is never re-resolved.
+	dns.set("vpn.provider.test", "192.0.2.3")
+	u.Endpoint = "192.0.2.2:51820"
+	if changed, err := u.RefreshEndpoint(context.Background()); err != nil || changed {
+		t.Errorf("literal endpoint: changed=%v err=%v", changed, err)
+	}
 }
 
 func mustRead(t *testing.T, path string) string {
@@ -322,6 +396,28 @@ func TestDaemon(t *testing.T) {
 	stop()
 	if !h.dp.TornDown {
 		t.Error("dataplane not torn down")
+	}
+}
+
+func TestProbeFailureReresolvesEndpoint(t *testing.T) {
+	dns := &fakeResolver{hosts: map[string]string{"localhost": "127.0.0.1"}}
+	useResolver(t, dns)
+	h := newHarness(t)
+	h.run(t)
+	eventually(t, "start", h.dp.Ready)
+
+	dns.set("localhost", "127.0.0.2")
+	h.setHealthy("10.8.0.2", false) // nl starts failing its probes
+	eventually(t, "nl endpoint re-resolved", func() bool {
+		h.d.mu.Lock()
+		defer h.d.mu.Unlock()
+		return h.d.ups[0].Conf.Peers[0].Endpoint == "127.0.0.2:51820"
+	})
+	h.d.mu.Lock()
+	de := h.d.ups[1].Conf.Peers[0].Endpoint
+	h.d.mu.Unlock()
+	if de != "127.0.0.1:51820" {
+		t.Errorf("healthy upstream was re-resolved: %q", de)
 	}
 }
 

@@ -19,12 +19,13 @@ import (
 // Upstream is one provider tunnel: its config, its device and its health.
 type Upstream struct {
 	config.Upstream
-	Conf    *awgconf.Config
-	Source  string       // the provider file as loaded, to detect edits on reload
-	Addr    netip.Prefix // the tunnel's IPv4 address, also the probe source
-	MTU     int
-	Device  *tunnel.Device
-	Tracker *health.Tracker
+	Conf     *awgconf.Config
+	Source   string       // the provider file as loaded, to detect edits on reload
+	Endpoint string       // the peer endpoint as written, possibly a hostname
+	Addr     netip.Prefix // the tunnel's IPv4 address, also the probe source
+	MTU      int
+	Device   *tunnel.Device
+	Tracker  *health.Tracker
 }
 
 // LoadUpstream reads a provider config and resolves its endpoint. The device
@@ -45,7 +46,8 @@ func LoadUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Ups
 	if !routesEverything(peer.AllowedIPs) {
 		return nil, fmt.Errorf("upstream %s: [Peer] AllowedIPs must include 0.0.0.0/0", u.Name)
 	}
-	if peer.Endpoint, err = resolveEndpoint(ctx, peer.Endpoint); err != nil {
+	endpoint := peer.Endpoint
+	if peer.Endpoint, err = resolveEndpoint(ctx, endpoint); err != nil {
 		return nil, fmt.Errorf("upstream %s: %w", u.Name, err)
 	}
 	addr, ok := firstIPv4(conf.Interface.Addresses)
@@ -60,6 +62,7 @@ func LoadUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Ups
 		Upstream: u,
 		Conf:     conf,
 		Source:   string(source),
+		Endpoint: endpoint,
 		Addr:     addr,
 		MTU:      m,
 		Tracker:  health.NewTracker(h.DownAfter, h.UpAfter),
@@ -84,6 +87,28 @@ func firstIPv4(prefixes []netip.Prefix) (netip.Prefix, bool) {
 	return netip.Prefix{}, false
 }
 
+// RefreshEndpoint re-resolves a hostname endpoint and, if the provider moved
+// to another address, points the running device at it. Returns whether the
+// endpoint changed. Literal IP endpoints never change.
+func (u *Upstream) RefreshEndpoint(ctx context.Context) (bool, error) {
+	if _, err := netip.ParseAddrPort(u.Endpoint); err == nil {
+		return false, nil
+	}
+	resolved, err := resolveEndpoint(ctx, u.Endpoint)
+	if err != nil || resolved == u.Conf.Peers[0].Endpoint {
+		return false, err
+	}
+	peer := u.Conf.Peers[0]
+	if err := u.Device.Configure("public_key=" + peer.PublicKey.Hex() + "\nupdate_only=true\nendpoint=" + resolved + "\n"); err != nil {
+		return false, err
+	}
+	u.Conf.Peers[0].Endpoint = resolved
+	return true, nil
+}
+
+// lookupNetIP is swapped in tests.
+var lookupNetIP = net.DefaultResolver.LookupNetIP
+
 // resolveEndpoint turns host:port into ip:port; amneziawg-go's UAPI takes
 // addresses only. Providers usually hand out IPs, so this is mostly a no-op.
 func resolveEndpoint(ctx context.Context, endpoint string) (string, error) {
@@ -101,7 +126,7 @@ func resolveEndpoint(ctx context.Context, endpoint string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("endpoint %q: bad port", endpoint)
 	}
-	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip4", host)
+	addrs, err := lookupNetIP(ctx, "ip4", host)
 	if err != nil {
 		return "", fmt.Errorf("resolve endpoint %q: %w", endpoint, err)
 	}

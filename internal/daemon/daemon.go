@@ -310,6 +310,15 @@ func (d *Daemon) probeAll(ctx context.Context) {
 			if u.Tracker.Observe(err == nil, latency) {
 				d.log.Info("upstream health changed", "upstream", u.Name, "from", before, "to", u.Tracker.State(), "err", err)
 			}
+			if err == nil {
+				return
+			}
+			// A failing upstream may simply have moved; providers change IPs.
+			if changed, rerr := u.RefreshEndpoint(ctx); rerr != nil {
+				d.log.Warn("re-resolve endpoint", "upstream", u.Name, "err", rerr)
+			} else if changed {
+				d.log.Info("upstream endpoint changed", "upstream", u.Name, "endpoint", u.Conf.Peers[0].Endpoint)
+			}
 		})
 	}
 	wg.Wait()

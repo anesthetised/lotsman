@@ -146,6 +146,11 @@ keys so configs can be re-shown; treat both files like the server key (mode 0600
 
 ## Troubleshooting
 
+**The provider changed its server IP.** Nothing to do if the provider config names a hostname:
+when an upstream's probes fail, Lotsman re-resolves the name and, if the address changed, points
+the running tunnel at it (`upstream endpoint changed` in the log). A config with a literal IP needs
+editing and `systemctl reload lotsman`.
+
 **Clients connect but nothing loads.** Check `upstream status`; if everything is `down`, the
 probes cannot get out. Test an upstream config by hand with `awg-quick`, and confirm the probe
 target is reachable through it.
