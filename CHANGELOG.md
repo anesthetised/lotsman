@@ -5,6 +5,8 @@ All notable changes to Lotsman are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-18
+
 ### Added
 - `upstream status` shows `ROUTED` and `ACTIVE` clients (handshake within 3 minutes) instead of
   the ambiguous `CLIENTS`; `user list` shows each client's upstream and last handshake;
@@ -36,7 +38,8 @@ First release: AmneziaWG 2.0 gateway with profile-based upstream selection, heal
 hysteresis, fail-closed forwarding, per-device client configs with QR output, live configuration
 reload, database backups before migrations, systemd unit and Docker image.
 
-[Unreleased]: https://github.com/anesthetised/lotsman/compare/v0.1.2...HEAD
+[Unreleased]: https://github.com/anesthetised/lotsman/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/anesthetised/lotsman/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/anesthetised/lotsman/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/anesthetised/lotsman/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/anesthetised/lotsman/releases/tag/v0.1.0
