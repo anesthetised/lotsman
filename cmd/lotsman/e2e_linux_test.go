@@ -82,7 +82,7 @@ func newProvider(t *testing.T, name string, tunnelNet netip.Prefix, port uint16)
 
 	customer := awgconf.Config{
 		Interface: awgconf.Interface{PrivateKey: clientKey, Addresses: []netip.Prefix{netip.PrefixFrom(clientAddr, 32)}, MTU: 1400, Params: params},
-		Peers: []awgconf.Peer{{PublicKey: serverKey.Public(), Endpoint: "127.0.0.1:" + strconv.Itoa(int(port)),
+		Peers: []awgconf.Peer{{PublicKey: serverKey.Public(), Endpoint: "localhost:" + strconv.Itoa(int(port)),
 			AllowedIPs: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}, PersistentKeepalive: 5}},
 	}
 	return &provider{name: name, dev: dev, conf: customer.String(), params: params}
@@ -128,6 +128,25 @@ func (c *client) exitVia(timeout time.Duration) (string, error) {
 	conn.SetReadDeadline(time.Now().Add(timeout))
 	b, err := io.ReadAll(conn)
 	return string(b), err
+}
+
+func linkIndex(t *testing.T, name string) int {
+	t.Helper()
+	l, err := netlink.LinkByName(name)
+	if err != nil {
+		t.Fatalf("%s: %v", name, err)
+	}
+	return l.Attrs().Index
+}
+
+// providerHandshake is when the provider last completed a handshake with Lotsman.
+func providerHandshake(t *testing.T, p *provider) time.Time {
+	t.Helper()
+	peers, err := p.dev.Peers()
+	if err != nil || len(peers) != 1 {
+		t.Fatalf("provider %s peers: %v, %v", p.name, peers, err)
+	}
+	return peers[0].LastHandshake
 }
 
 func eventually(t *testing.T, what string, timeout time.Duration, cond func() bool) {
@@ -190,6 +209,43 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 		got, err := c.exitVia(2 * time.Second)
 		return err == nil && got == "nl"
 	})
+
+	// Reload without changes: nothing may be touched. The interface keeps its
+	// index and the provider sees no new handshake.
+	nlIndex := linkIndex(t, "lm-up-nl")
+	handshakeBefore := providerHandshake(t, nl)
+	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	time.Sleep(2 * time.Second)
+	if got, err := c.exitVia(2 * time.Second); err != nil || got != "nl" {
+		t.Fatalf("after no-op reload: %q, %v", got, err)
+	}
+	if linkIndex(t, "lm-up-nl") != nlIndex {
+		t.Error("no-op reload recreated lm-up-nl")
+	}
+	if !providerHandshake(t, nl).Equal(handshakeBefore) {
+		t.Error("no-op reload caused a new handshake with the provider")
+	}
+
+	// The provider file changes: the upstream is replaced with a fresh
+	// interface that must be fully configured, and traffic keeps flowing.
+	edited := strings.Replace(nl.conf, "PersistentKeepalive = 5", "PersistentKeepalive = 7", 1)
+	if edited == nl.conf {
+		t.Fatal("test setup: expected PersistentKeepalive = 5 in the provider config")
+	}
+	os.WriteFile(filepath.Join(dir, "nl.conf"), []byte(edited), 0o600)
+	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	eventually(t, "exit via nl after replacing its config", 15*time.Second, func() bool {
+		got, err := c.exitVia(2 * time.Second)
+		return err == nil && got == "nl"
+	})
+	if linkIndex(t, "lm-up-nl") == nlIndex {
+		t.Error("changed provider config did not recreate lm-up-nl")
+	}
+	if l, err := netlink.LinkByName("lm-up-nl"); err == nil {
+		if addrs, _ := netlink.AddrList(l, netlink.FAMILY_V4); len(addrs) != 1 {
+			t.Errorf("recreated lm-up-nl has addresses %v", addrs)
+		}
+	}
 
 	// NL is removed from the config and the daemon reloaded on SIGHUP:
 	// traffic moves to DE without the client reconnecting, and the NL TUN is gone.
