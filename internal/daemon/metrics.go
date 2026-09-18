@@ -3,6 +3,8 @@ package daemon
 import (
 	"time"
 
+	"github.com/anesthetised/lotsman/internal/awgconf"
+
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/metrics"
 	"github.com/anesthetised/lotsman/internal/tunnel"
@@ -16,7 +18,8 @@ var Families = []metrics.Family{
 	{Name: "lotsman_upstream_probe_latency_seconds", Type: "gauge", Help: "Latency of the last successful probe."},
 	{Name: "lotsman_upstream_probes_total", Type: "counter", Help: "Probes by result."},
 	{Name: "lotsman_upstream_last_handshake_timestamp_seconds", Type: "gauge", Help: "Unix time of the last handshake with the provider; 0 if none yet."},
-	{Name: "lotsman_upstream_clients", Type: "gauge", Help: "Clients currently routed through the upstream."},
+	{Name: "lotsman_upstream_clients", Type: "gauge", Help: "Clients whose traffic is routed through the upstream, connected or not."},
+	{Name: "lotsman_upstream_active_clients", Type: "gauge", Help: "Routed clients with a handshake in the last 3 minutes."},
 	{Name: "lotsman_upstream_receive_bytes_total", Type: "counter", Help: "Bytes received from the provider."},
 	{Name: "lotsman_upstream_transmit_bytes_total", Type: "counter", Help: "Bytes sent to the provider."},
 	{Name: "lotsman_peer_receive_bytes_total", Type: "counter", Help: "Bytes received from the client."},
@@ -42,9 +45,18 @@ func (d *Daemon) Metrics() []metrics.Sample {
 		sample("lotsman_reloads_total", float64(d.reloads[1]), metrics.Label{Name: "result", Value: "error"}),
 	}
 
-	clients := map[string]int{}
-	for _, name := range d.assignments {
+	now := time.Now()
+	handshakes := d.downstreamHandshakes()
+	clients, active := map[string]int{}, map[string]int{}
+	for key, p := range d.devicePeers {
+		name, ok := d.assignments[p.IP]
+		if !ok {
+			continue
+		}
 		clients[name]++
+		if now.Sub(handshakes[key]) < ActiveWindow {
+			active[name]++
+		}
 	}
 	for _, u := range d.ups {
 		up := metrics.Label{Name: "upstream", Value: u.Name}
@@ -52,6 +64,7 @@ func (d *Daemon) Metrics() []metrics.Sample {
 			sample("lotsman_upstream_up", boolean(u.Tracker.State() == health.Up), up),
 			sample("lotsman_upstream_probe_latency_seconds", u.Tracker.Latency().Seconds(), up),
 			sample("lotsman_upstream_clients", float64(clients[u.Name]), up),
+			sample("lotsman_upstream_active_clients", float64(active[u.Name]), up),
 			sample("lotsman_reroutes_total", float64(d.reroutes[u.Name]), up),
 		)
 		if c := d.probes[u.Name]; c != nil {
@@ -72,15 +85,15 @@ func (d *Daemon) Metrics() []metrics.Sample {
 	if d.down == nil {
 		return out
 	}
-	status := map[string]tunnel.PeerStatus{}
+	status := map[awgconf.Key]tunnel.PeerStatus{}
 	if peers, err := d.down.Peers(); err == nil {
 		for _, p := range peers {
-			status[p.PublicKey.Hex()] = p
+			status[p.PublicKey] = p
 		}
 	}
 	for key, p := range d.devicePeers {
 		labels := []metrics.Label{{Name: "user", Value: p.User}, {Name: "device", Value: p.Device}, {Name: "profile", Value: p.Profile}}
-		if st, ok := status[key.Hex()]; ok {
+		if st, ok := status[key]; ok {
 			out = append(out,
 				sample("lotsman_peer_receive_bytes_total", float64(st.RxBytes), labels...),
 				sample("lotsman_peer_transmit_bytes_total", float64(st.TxBytes), labels...),

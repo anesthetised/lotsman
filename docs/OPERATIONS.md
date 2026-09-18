@@ -125,7 +125,14 @@ nft list table inet lotsman
 ```
 
 Health transitions and every routing decision are logged. `status.json` in the state directory is
-what `upstream status` prints, refreshed every health interval.
+what `upstream status` and the live columns of `user list` read; the daemon writes it right after
+its first reconcile and then every health interval.
+
+`ROUTED` counts clients whose traffic is directed through the upstream — every client in the
+database is routed somewhere whether or not it is connected. `ACTIVE` counts those with a
+WireGuard handshake in the last three minutes, which is what "connected" means for WireGuard;
+`user list` shows each client's last handshake and current upstream (`blocked` when no healthy
+upstream matches its profile, `-` when the daemon is not running).
 
 ## Monitoring
 
@@ -145,7 +152,8 @@ only a scraper on the host can. Changing `metrics.listen` needs a restart.
 | `lotsman_upstream_probe_latency_seconds` | `upstream` | last successful probe |
 | `lotsman_upstream_probes_total` | `upstream`, `result` | `ok` / `fail` |
 | `lotsman_upstream_last_handshake_timestamp_seconds` | `upstream` | 0 if never |
-| `lotsman_upstream_clients` | `upstream` | clients routed through it |
+| `lotsman_upstream_clients` | `upstream` | clients routed through it, connected or not |
+| `lotsman_upstream_active_clients` | `upstream` | of those, with a handshake in the last 3 minutes |
 | `lotsman_upstream_receive_bytes_total`, `…_transmit_bytes_total` | `upstream` | provider tunnel counters |
 | `lotsman_peer_receive_bytes_total`, `…_transmit_bytes_total` | `user`, `device`, `profile` | client tunnel counters |
 | `lotsman_peer_last_handshake_timestamp_seconds` | `user`, `device`, `profile` | 0 if never |

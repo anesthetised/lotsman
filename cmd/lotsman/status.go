@@ -21,6 +21,25 @@ type statusFile struct {
 	UpdatedAt time.Time               `json:"updated_at"`
 	ClientMTU int                     `json:"client_mtu"`
 	Upstreams []daemon.UpstreamStatus `json:"upstreams"`
+	Peers     []daemon.PeerStatus     `json:"peers"`
+}
+
+// readStatus returns the last status the daemon wrote, or an error when
+// there is none (daemon not running or not ready yet).
+func readStatus(stateDir string) (statusFile, error) {
+	var s statusFile
+	data, err := os.ReadFile(statusPath(stateDir))
+	if err != nil {
+		return s, fmt.Errorf("no status yet (is the daemon running?): %w", err)
+	}
+	return s, json.Unmarshal(data, &s)
+}
+
+func ago(t time.Time) string {
+	if t.IsZero() {
+		return "never"
+	}
+	return time.Since(t).Round(time.Second).String() + " ago"
 }
 
 func writeStatus(stateDir string, s statusFile) error {
@@ -40,23 +59,15 @@ func upstreamStatus(configPath string) error {
 	if err != nil {
 		return err
 	}
-	data, err := os.ReadFile(statusPath(cfg.StateDir))
+	s, err := readStatus(cfg.StateDir)
 	if err != nil {
-		return fmt.Errorf("no status yet (is the daemon running?): %w", err)
-	}
-	var s statusFile
-	if err := json.Unmarshal(data, &s); err != nil {
 		return err
 	}
 	fmt.Printf("updated %s ago, client MTU %d\n", time.Since(s.UpdatedAt).Round(time.Second), s.ClientMTU)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "UPSTREAM\tINTERFACE\tSTATE\tLATENCY\tLAST HANDSHAKE\tCLIENTS")
+	fmt.Fprintln(w, "UPSTREAM\tINTERFACE\tSTATE\tLATENCY\tLAST HANDSHAKE\tROUTED\tACTIVE")
 	for _, u := range s.Upstreams {
-		hs := "never"
-		if !u.LastHandshake.IsZero() {
-			hs = time.Since(u.LastHandshake).Round(time.Second).String() + " ago"
-		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\n", u.Name, u.Interface, u.State, u.Latency.Round(time.Millisecond), hs, u.Clients)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%d\t%d\n", u.Name, u.Interface, u.State, u.Latency.Round(time.Millisecond), ago(u.LastHandshake), u.Routed, u.Active)
 	}
 	return w.Flush()
 }

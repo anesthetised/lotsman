@@ -78,19 +78,27 @@ func handleHUP(ctx context.Context, d *daemon.Daemon, configPath string, log *sl
 	}
 }
 
+// publishStatus writes the status file as soon as the daemon is ready and
+// then after every health round.
 func publishStatus(ctx context.Context, d *daemon.Daemon, stateDir string, interval time.Duration, log *slog.Logger) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-d.Ready():
+	}
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
+		st := d.Status()
+		s := statusFile{UpdatedAt: time.Now(), ClientMTU: d.ClientMTU(), Upstreams: st.Upstreams, Peers: st.Peers}
+		if err := writeStatus(stateDir, s); err != nil {
+			log.Error("write status", "err", err)
+		}
 		select {
 		case <-ctx.Done():
 			os.Remove(statusPath(stateDir))
 			return
 		case <-ticker.C:
-			s := statusFile{UpdatedAt: time.Now(), ClientMTU: d.ClientMTU(), Upstreams: d.Status()}
-			if err := writeStatus(stateDir, s); err != nil {
-				log.Error("write status", "err", err)
-			}
 		}
 	}
 }

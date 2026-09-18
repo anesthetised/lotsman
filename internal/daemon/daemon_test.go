@@ -422,8 +422,14 @@ func TestDaemon(t *testing.T) {
 	eventually(t, "failover to de", routedVia(euPeer.IP, "lm-up-de"))
 	eventually(t, "nl-only peer blocked", func() bool { _, ok := h.dp.RouteOf(nlPeer.IP); return !ok })
 	st := h.d.Status()
-	if st[0].State != health.Down || st[1].State != health.Up || st[1].Clients != 1 {
-		t.Errorf("status = %+v", st)
+	if st.Upstreams[0].State != health.Down || st.Upstreams[1].State != health.Up || st.Upstreams[1].Routed != 1 || st.Upstreams[1].Active != 0 {
+		t.Errorf("status = %+v", st.Upstreams)
+	}
+	if len(st.Peers) != 2 || st.Peers[0].Profile != "eu" || st.Peers[0].Upstream != "de" || st.Peers[1].Profile != "nl" || st.Peers[1].Upstream != "" {
+		t.Errorf("peers = %+v", st.Peers)
+	}
+	if v, ok := metric(h.d.Metrics(), "lotsman_upstream_active_clients", metrics.Label{Name: "upstream", Value: "de"}); !ok || v != 0 {
+		t.Errorf("active_clients{de} = %v, %v (no handshake in tests)", v, ok)
 	}
 	m = h.d.Metrics()
 	if v, _ := metric(m, "lotsman_upstream_up", up); v != 0 {
@@ -515,7 +521,7 @@ func TestReload(t *testing.T) {
 		t.Fatal(err)
 	}
 	same, _ := config.Parse([]byte(fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir)))
-	before := h.d.Status()
+	before := h.d.Status().Upstreams
 	h.d.mu.Lock()
 	nlDevice := h.d.ups[0].Device
 	h.d.mu.Unlock()
@@ -531,7 +537,7 @@ func TestReload(t *testing.T) {
 	if got, _ := h.dp.RouteOf(euPeer.IP); got != "lm-up-nl" {
 		t.Errorf("peer moved on a no-op reload: %q", got)
 	}
-	if after := h.d.Status(); after[0].State != before[0].State {
+	if after := h.d.Status().Upstreams; after[0].State != before[0].State {
 		t.Errorf("health state lost on no-op reload: %v -> %v", before[0].State, after[0].State)
 	}
 
@@ -569,8 +575,8 @@ health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 1, up_after: 1}
 		t.Errorf("dataplane upstreams after reload = %v", names)
 	}
 	st := h.d.Status()
-	if len(st) != 2 || st[0].Name != "de" || st[1].Name != "fi" || st[1].Clients != 1 {
-		t.Errorf("status after reload = %+v", st)
+	if len(st.Upstreams) != 2 || st.Upstreams[0].Name != "de" || st.Upstreams[1].Name != "fi" || st.Upstreams[1].Routed != 1 {
+		t.Errorf("status after reload = %+v", st.Upstreams)
 	}
 	if h.dp.MTU != 1412 { // de: 1420-8; fi: 1420-8; downstream 1500-60-S4 is larger
 		t.Errorf("mtu after reload = %d", h.dp.MTU)

@@ -74,10 +74,24 @@ func userList(configPath string) error {
 	if err != nil {
 		return err
 	}
+	// Live data comes from the daemon's status file; without a daemon the columns stay "-".
+	live := map[[3]string]daemon.PeerStatus{}
+	if st, err := readStatus(e.cfg.StateDir); err == nil {
+		for _, ps := range st.Peers {
+			live[[3]string{ps.User, ps.Device, ps.Profile}] = ps
+		}
+	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "USER\tDEVICE\tPROFILE\tADDRESS\tPUBLIC KEY\tCREATED")
+	fmt.Fprintln(w, "USER\tDEVICE\tPROFILE\tADDRESS\tUPSTREAM\tLAST HANDSHAKE\tCREATED")
 	for _, p := range peers {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", p.User, p.Device, p.Profile, p.IP, p.PublicKey, p.CreatedAt.Format("2006-01-02"))
+		upstream, handshake := "-", "-"
+		if ps, ok := live[[3]string{p.User, p.Device, p.Profile}]; ok {
+			upstream, handshake = ps.Upstream, ago(ps.LastHandshake)
+			if upstream == "" {
+				upstream = "blocked"
+			}
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.User, p.Device, p.Profile, p.IP, upstream, handshake, p.CreatedAt.Format("2006-01-02"))
 	}
 	return w.Flush()
 }

@@ -4,12 +4,15 @@
 package daemon
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/netip"
 	"os"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -61,6 +64,7 @@ type Daemon struct {
 	assignments map[netip.Addr]string      // peer address → upstream name
 	devicePeers map[awgconf.Key]store.Peer // peers currently added to the downstream device
 	wake        chan struct{}              // nudges Run to reprobe and reconcile now
+	ready       chan struct{}              // closed after the first reconcile
 
 	// Monotonic counters for metrics.
 	probes   map[string]*[2]uint64 // upstream → {ok, fail}
@@ -74,6 +78,7 @@ func New(d Deps) *Daemon {
 		assignments: map[netip.Addr]string{},
 		devicePeers: map[awgconf.Key]store.Peer{},
 		wake:        make(chan struct{}, 1),
+		ready:       make(chan struct{}),
 		probes:      map[string]*[2]uint64{},
 		reroutes:    map[string]uint64{},
 	}
@@ -99,6 +104,9 @@ func Gateway(cfg *config.Config) netip.Prefix {
 	return netip.PrefixFrom(cfg.Subnet.Addr().Next(), cfg.Subnet.Bits())
 }
 
+// Ready is closed once the daemon has probed and reconciled for the first time.
+func (d *Daemon) Ready() <-chan struct{} { return d.ready }
+
 // Run brings everything up, then probes and reconciles until ctx is done.
 func (d *Daemon) Run(ctx context.Context) error {
 	if err := d.start(ctx); err != nil {
@@ -107,10 +115,15 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 	defer d.stop()
 
+	first := true
 	for {
 		d.probeAll(ctx)
 		if err := d.Reconcile(); err != nil {
 			d.log.Error("reconcile failed", "err", err)
+		}
+		if first {
+			close(d.ready)
+			first = false
 		}
 		d.mu.Lock()
 		interval := d.cfg.Health.Interval
@@ -446,30 +459,73 @@ func (d *Daemon) candidates() []policy.Upstream {
 	return out
 }
 
+// ActiveWindow is how recent a handshake must be for a client to count as
+// connected: WireGuard rekeys at least every 3 minutes while traffic flows.
+const ActiveWindow = 3 * time.Minute
+
 type UpstreamStatus struct {
 	Name          string
 	Interface     string
 	State         health.State
 	Latency       time.Duration
 	LastHandshake time.Time
-	Clients       int // Lotsman peers currently routed through this upstream
+	Routed        int // clients whose traffic is directed through this upstream
+	Active        int // of those, clients with a handshake inside ActiveWindow
 }
 
-func (d *Daemon) Status() []UpstreamStatus {
+type PeerStatus struct {
+	User, Device, Profile string
+	Upstream              string // "" when blocked
+	LastHandshake         time.Time
+}
+
+type Status struct {
+	Upstreams []UpstreamStatus
+	Peers     []PeerStatus
+}
+
+func (d *Daemon) Status() Status {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	var out []UpstreamStatus
+	now := time.Now()
+	var st Status
+	handshakes := d.downstreamHandshakes()
+	routed, active := map[string]int{}, map[string]int{}
+	for key, p := range d.devicePeers {
+		ps := PeerStatus{User: p.User, Device: p.Device, Profile: p.Profile, Upstream: d.assignments[p.IP], LastHandshake: handshakes[key]}
+		st.Peers = append(st.Peers, ps)
+		if ps.Upstream == "" {
+			continue
+		}
+		routed[ps.Upstream]++
+		if now.Sub(ps.LastHandshake) < ActiveWindow {
+			active[ps.Upstream]++
+		}
+	}
+	slices.SortFunc(st.Peers, func(a, b PeerStatus) int {
+		return cmp.Or(strings.Compare(a.User, b.User), strings.Compare(a.Device, b.Device), strings.Compare(a.Profile, b.Profile))
+	})
 	for _, u := range d.ups {
-		s := UpstreamStatus{Name: u.Name, Interface: u.Device.Name(), State: u.Tracker.State(), Latency: u.Tracker.Latency()}
+		s := UpstreamStatus{Name: u.Name, Interface: u.Device.Name(), State: u.Tracker.State(), Latency: u.Tracker.Latency(),
+			Routed: routed[u.Name], Active: active[u.Name]}
 		if peers, err := u.Device.Peers(); err == nil && len(peers) == 1 {
 			s.LastHandshake = peers[0].LastHandshake
 		}
-		for _, name := range d.assignments {
-			if name == u.Name {
-				s.Clients++
-			}
+		st.Upstreams = append(st.Upstreams, s)
+	}
+	return st
+}
+
+// downstreamHandshakes maps each client key to its last handshake; callers hold d.mu.
+func (d *Daemon) downstreamHandshakes() map[awgconf.Key]time.Time {
+	out := map[awgconf.Key]time.Time{}
+	if d.down == nil {
+		return out
+	}
+	if peers, err := d.down.Peers(); err == nil {
+		for _, p := range peers {
+			out[p.PublicKey] = p.LastHandshake
 		}
-		out = append(out, s)
 	}
 	return out
 }

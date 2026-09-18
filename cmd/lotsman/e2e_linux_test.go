@@ -262,7 +262,8 @@ metrics: {listen: 127.0.0.1:19100}
 		}
 	})
 
-	eventually(t, "daemon status", 10*time.Second, func() bool {
+	// The status file must appear right after the first reconcile, not a health interval later.
+	eventually(t, "daemon status", 3*time.Second, func() bool {
 		_, err := os.Stat(filepath.Join(dir, "state", "status.json"))
 		return err == nil
 	})
@@ -277,6 +278,15 @@ metrics: {listen: 127.0.0.1:19100}
 		got, err := c.exitVia(2 * time.Second)
 		return err == nil && got == "nl"
 	})
+
+	// With the client connected, status shows it as active and user list shows its handshake.
+	eventually(t, "active client in status", 10*time.Second, func() bool {
+		status, _ := capture(t, "-config", cfgPath, "upstream", "status")
+		return strings.Contains(status, "ROUTED  ACTIVE") && strings.Contains(status, "  1       1")
+	})
+	if list, _ := capture(t, "-config", cfgPath, "user", "list"); !strings.Contains(list, "s ago") || !strings.Contains(list, "  nl  ") {
+		t.Errorf("user list lacks live upstream/handshake:\n%s", list)
+	}
 
 	// The metrics endpoint reflects the routing above.
 	eventually(t, "metrics endpoint", 10*time.Second, func() bool {

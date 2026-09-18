@@ -6,6 +6,10 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `upstream status` shows `ROUTED` and `ACTIVE` clients (handshake within 3 minutes) instead of
+  the ambiguous `CLIENTS`; `user list` shows each client's upstream and last handshake;
+  `lotsman_upstream_active_clients` metric.
+- The status file is written right after the first reconcile instead of one health interval later.
 - Prometheus metrics endpoint, enabled with `metrics.listen` (#3): upstream health, probe
   latency and counts, handshake times, byte counters per upstream and per client, current
   upstream per client, reroute and reload counters.
