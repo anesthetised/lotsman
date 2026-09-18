@@ -67,7 +67,9 @@ just test-integration  # Linux kernel tests in a privileged Docker container
 just lint
 ```
 
-Code, comments and commits are in English; commits follow Conventional Commits.
+Code, comments and commits are in English; commits follow Conventional Commits. Releases are
+cut from tags; their notes come from [CHANGELOG.md](CHANGELOG.md), so add an entry under
+`Unreleased` with your change.
 
 ## License
 
