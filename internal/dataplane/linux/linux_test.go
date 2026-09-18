@@ -236,6 +236,30 @@ func TestDataplane(t *testing.T) {
 	}
 	d.Unroute(peer)
 
+	// An upstream whose interface was recreated (daemon replaced its device)
+	// gets its address, route and rule back, and keeps its table.
+	tableC := d.tables["lm-up-c"]
+	cLink := &netlink.Dummy{LinkAttrs: netlink.LinkAttrs{Name: "lm-up-c"}}
+	netlink.LinkDel(cLink)
+	if err := netlink.LinkAdd(cLink); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.SetUpstreams(newUps, 1300); err != nil {
+		t.Fatal(err)
+	}
+	if d.tables["lm-up-c"] != tableC {
+		t.Errorf("table changed after recreation: %d -> %d", tableC, d.tables["lm-up-c"])
+	}
+	cl, _ := netlink.LinkByName("lm-up-c")
+	addrs, _ := netlink.AddrList(cl, netlink.FAMILY_V4)
+	cRoutes, _ := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Table: tableC}, netlink.RT_FILTER_TABLE)
+	if len(addrs) != 1 || cl.Attrs().Flags&net.FlagUp == 0 || len(cRoutes) != 1 || cRoutes[0].LinkIndex != cl.Attrs().Index {
+		t.Errorf("recreated upstream not restored: addrs=%v up=%v routes=%v", addrs, cl.Attrs().Flags&net.FlagUp != 0, cRoutes)
+	}
+	if got := rulesAt(t, probeRulePriority); len(got) != 2 {
+		t.Errorf("probe rules after recreation = %v", got)
+	}
+
 	if err := d.Teardown(); err != nil {
 		t.Fatal(err)
 	}

@@ -31,12 +31,13 @@ func providerConf(t *testing.T, dir, name, addr string, mtu int) string {
 	t.Helper()
 	key, _ := awgconf.GeneratePrivateKey()
 	peer, _ := awgconf.GeneratePrivateKey()
+	// A hostname endpoint, as providers often hand out; LoadUpstream resolves it.
 	conf := &awgconf.Config{
 		Interface: awgconf.Interface{
 			PrivateKey: key, Addresses: []netip.Prefix{netip.MustParsePrefix(addr)}, MTU: mtu,
 			Params: awgconf.Params{S1: 5, S2: 6, S3: 7, S4: 8, H1: awgconf.Range{Lo: 10, Hi: 10}, H2: awgconf.Range{Lo: 20, Hi: 20}, H3: awgconf.Range{Lo: 30, Hi: 30}, H4: awgconf.Range{Lo: 40, Hi: 40}},
 		},
-		Peers: []awgconf.Peer{{PublicKey: peer.Public(), Endpoint: "192.0.2.1:51820", AllowedIPs: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}}},
+		Peers: []awgconf.Peer{{PublicKey: peer.Public(), Endpoint: "localhost:51820", AllowedIPs: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}}},
 	}
 	path := filepath.Join(dir, name+".conf")
 	if err := os.WriteFile(path, []byte(conf.String()), 0o600); err != nil {
@@ -53,15 +54,18 @@ func TestLoadUpstream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.Addr.String() != "10.8.0.2/32" || u.MTU != 1420 || u.Conf.Peers[0].Endpoint != "192.0.2.1:51820" {
+	if u.Addr.String() != "10.8.0.2/32" || u.MTU != 1420 || u.Conf.Peers[0].Endpoint != "127.0.0.1:51820" {
 		t.Errorf("upstream = %+v", u)
+	}
+	if !strings.Contains(u.Source, "localhost:51820") {
+		t.Errorf("Source should be the file as written, got %q", u.Source)
 	}
 
 	bad := map[string]string{
 		"split tunnel": strings.Replace(mustRead(t, good), "0.0.0.0/0", "10.0.0.0/8", 1),
 		"no peer":      strings.Split(mustRead(t, good), "\n[Peer]")[0],
 		"no ipv4":      strings.Replace(mustRead(t, good), "10.8.0.2/32", "fd00::2/128", 1),
-		"no endpoint":  strings.Replace(mustRead(t, good), "Endpoint = 192.0.2.1:51820\n", "", 1),
+		"no endpoint":  strings.Replace(mustRead(t, good), "Endpoint = localhost:51820\n", "", 1),
 	}
 	for name, content := range bad {
 		t.Run(name, func(t *testing.T) {
@@ -73,15 +77,15 @@ func TestLoadUpstream(t *testing.T) {
 		})
 	}
 
-	t.Run("hostname endpoint is resolved", func(t *testing.T) {
-		content := strings.Replace(mustRead(t, good), "192.0.2.1:51820", "localhost:51820", 1)
-		path := filepath.Join(dir, "host.conf")
+	t.Run("ip endpoint is kept", func(t *testing.T) {
+		content := strings.Replace(mustRead(t, good), "localhost:51820", "192.0.2.1:51820", 1)
+		path := filepath.Join(dir, "ip.conf")
 		os.WriteFile(path, []byte(content), 0o600)
-		u, err := LoadUpstream(context.Background(), config.Upstream{Name: "host", Conf: path}, h)
+		u, err := LoadUpstream(context.Background(), config.Upstream{Name: "ip", Conf: path}, h)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if u.Conf.Peers[0].Endpoint != "127.0.0.1:51820" {
+		if u.Conf.Peers[0].Endpoint != "192.0.2.1:51820" {
 			t.Errorf("endpoint = %q", u.Conf.Peers[0].Endpoint)
 		}
 	})
@@ -342,6 +346,33 @@ func TestReload(t *testing.T) {
 		return func() bool { got, _ := h.dp.RouteOf(euPeer.IP); return got == want }
 	}
 	eventually(t, "initial routing", routedVia("lm-up-nl"))
+
+	// Reloading an unchanged config must not replace anything, even when the
+	// provider file uses a hostname that LoadUpstream resolves to an IP.
+	h.st.CreateUser("carol")
+	if _, err := os.Stat(filepath.Join(h.dir, "nl.conf")); err != nil {
+		t.Fatal(err)
+	}
+	same, _ := config.Parse([]byte(fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir)))
+	before := h.d.Status()
+	h.d.mu.Lock()
+	nlDevice := h.d.ups[0].Device
+	h.d.mu.Unlock()
+	if err := h.d.Reload(ctx, same); err != nil {
+		t.Fatal(err)
+	}
+	h.d.mu.Lock()
+	sameDevice := h.d.ups[0].Device == nlDevice
+	h.d.mu.Unlock()
+	if !sameDevice {
+		t.Error("unchanged upstream was replaced on reload")
+	}
+	if got, _ := h.dp.RouteOf(euPeer.IP); got != "lm-up-nl" {
+		t.Errorf("peer moved on a no-op reload: %q", got)
+	}
+	if after := h.d.Status(); after[0].State != before[0].State {
+		t.Errorf("health state lost on no-op reload: %v -> %v", before[0].State, after[0].State)
+	}
 
 	// Settings that need a restart reject the reload as a whole.
 	bad, _ := config.Parse([]byte(strings.Replace(fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir), "endpoint:", "listen: 0.0.0.0:1\nendpoint:", 1)))

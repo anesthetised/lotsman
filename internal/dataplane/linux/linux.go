@@ -79,10 +79,10 @@ func (d *Dataplane) SetUpstreams(ups []dataplane.Interface, mtu int) error {
 	keep := map[string]bool{}
 	for _, up := range ups {
 		keep[up.Name] = true
-		if _, exists := d.tables[up.Name]; !exists {
-			if err := d.addUpstream(up); err != nil {
-				return err
-			}
+		// Re-applied even for known names: the interface may have been
+		// recreated, which loses its address and the route that pointed at it.
+		if err := d.addUpstream(up); err != nil {
+			return err
 		}
 	}
 	for name := range d.tables {
@@ -96,13 +96,17 @@ func (d *Dataplane) SetUpstreams(ups []dataplane.Interface, mtu int) error {
 }
 
 // addUpstream gives the interface an address, a routing table with a default
-// route over it, and the rule that sends probes from its address into that table.
+// route over it, and the rule that sends probes from its address into that
+// table. It is idempotent and keeps the table of an interface it already knows.
 func (d *Dataplane) addUpstream(up dataplane.Interface) error {
 	if err := configureLink(up, 0); err != nil {
 		return err
 	}
-	table := d.allocateTable()
-	d.tables[up.Name] = table
+	table, known := d.tables[up.Name]
+	if !known {
+		table = d.allocateTable()
+		d.tables[up.Name] = table
+	}
 	link, err := netlink.LinkByName(up.Name)
 	if err != nil {
 		return err

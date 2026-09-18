@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -19,6 +20,7 @@ import (
 type Upstream struct {
 	config.Upstream
 	Conf    *awgconf.Config
+	Source  string       // the provider file as loaded, to detect edits on reload
 	Addr    netip.Prefix // the tunnel's IPv4 address, also the probe source
 	MTU     int
 	Device  *tunnel.Device
@@ -28,7 +30,11 @@ type Upstream struct {
 // LoadUpstream reads a provider config and resolves its endpoint. The device
 // is attached later by whoever creates the TUN.
 func LoadUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Upstream, error) {
-	conf, err := readConf(u.Conf)
+	source, err := os.ReadFile(u.Conf)
+	if err != nil {
+		return nil, err
+	}
+	conf, err := awgconf.Parse(bytes.NewReader(source))
 	if err != nil {
 		return nil, fmt.Errorf("upstream %s: %w", u.Name, err)
 	}
@@ -53,19 +59,11 @@ func LoadUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Ups
 	return &Upstream{
 		Upstream: u,
 		Conf:     conf,
+		Source:   string(source),
 		Addr:     addr,
 		MTU:      m,
 		Tracker:  health.NewTracker(h.DownAfter, h.UpAfter),
 	}, nil
-}
-
-func readConf(path string) (*awgconf.Config, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return awgconf.Parse(f)
 }
 
 func routesEverything(prefixes []netip.Prefix) bool {

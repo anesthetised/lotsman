@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
+	"os"
 	"sync"
 	"time"
 
@@ -209,7 +210,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	for _, u := range cfg.Upstreams {
 		old, exists := current[u.Name]
 		delete(current, u.Name)
-		if exists && old.Conf.String() == renderedConf(u.Conf) {
+		if exists && old.Source == fileContent(u.Conf) {
 			old.Upstream = u
 			old.Tracker.SetThresholds(cfg.Health.DownAfter, cfg.Health.UpAfter)
 			next = append(next, old)
@@ -266,14 +267,14 @@ func (d *Daemon) dropUpstream(u *Upstream) {
 	u.Device.Close()
 }
 
-// renderedConf is the normalised content of a provider config file, or ""
-// if it cannot be read; used to tell whether an upstream's config changed.
-func renderedConf(path string) string {
-	cfg, err := readConf(path)
+// fileContent is the provider file as it is now, or "" if unreadable; an
+// unreadable file counts as changed so the reload reports the error.
+func fileContent(path string) string {
+	b, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
-	return cfg.String()
+	return string(b)
 }
 
 func restartRequired(old, cfg *config.Config) error {
