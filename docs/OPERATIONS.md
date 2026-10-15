@@ -85,8 +85,8 @@ broken upgrade shows up in `systemctl status lotsman` instead of crash-looping.
 | `subnet` | IPv4 range for clients; `.1` is the gateway. |
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
 | `state_dir` | Server identity, SQLite database, pid and status files. |
-| `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `conf` path, free-form `geo` and `provider` labels. |
-| `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider}` matchers; empty = any upstream. |
+| `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `conf` path, free-form `geo`, `provider` and `tags` labels. |
+| `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider, tag}` matchers (all given fields must match); empty = any upstream. Within a tier the lowest latency wins, so a tag such as `near` groups several countries into one tier. |
 | `health` | `interval`, `probe` (`ip:port` reachable through every upstream), `down_after`, `up_after`. |
 
 `systemctl reload lotsman` (SIGHUP) applies the file live, without dropping tunnels: upstreams are
