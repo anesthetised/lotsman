@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -87,7 +88,13 @@ func runUninstall(t *testing.T, stubs map[string]string) ([]byte, error) {
 			t.Fatal(err)
 		}
 	}
-	script, err := os.ReadFile("../../../deploy/uninstall.sh")
+	// CI runs the compiled test binary from the repository root, while go test
+	// starts in this package. Resolve the fixture from its source in both cases.
+	_, source, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("locate uninstall test source")
+	}
+	script, err := os.ReadFile(filepath.Join(filepath.Dir(source), "../../../deploy/uninstall.sh"))
 	if err != nil {
 		t.Fatal(err)
 	}

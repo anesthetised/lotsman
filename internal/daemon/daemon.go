@@ -344,15 +344,14 @@ func restartRequired(old, cfg *config.Config) error {
 }
 
 func (d *Daemon) probeAll(ctx context.Context) {
+	var wg sync.WaitGroup
 	d.mu.Lock()
 	target, _ := netip.ParseAddrPort(d.cfg.Health.Probe)
 	timeout := max(d.cfg.Health.Interval/2, time.Second)
-	ups := d.ups
-	d.mu.Unlock()
-	var wg sync.WaitGroup
-	for _, u := range ups {
+	for _, u := range d.ups {
+		iface, source := u.InterfaceName(), u.Addr.Addr()
 		wg.Go(func() {
-			latency, err := d.probe(ctx, u.InterfaceName(), u.Addr.Addr(), target, timeout)
+			latency, err := d.probe(ctx, iface, source, target, timeout)
 			d.mu.Lock()
 			defer d.mu.Unlock()
 			d.countProbe(u.Name, err == nil)
@@ -375,6 +374,7 @@ func (d *Daemon) probeAll(ctx context.Context) {
 			}
 		})
 	}
+	d.mu.Unlock()
 	wg.Wait()
 }
 
