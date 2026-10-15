@@ -321,13 +321,16 @@ metrics: {listen: 127.0.0.1:19100}
 	}
 	os.WriteFile(filepath.Join(dir, "nl.conf"), []byte(edited), 0o600)
 	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	// The old interface keeps carrying traffic until the reload swaps it, so
+	// wait for the new interface first.
+	eventually(t, "lm-up-nl recreated", 15*time.Second, func() bool {
+		l, err := netlink.LinkByName("lm-up-nl")
+		return err == nil && l.Attrs().Index != nlIndex
+	})
 	eventually(t, "exit via nl after replacing its config", 15*time.Second, func() bool {
 		got, err := c.exitVia(2 * time.Second)
 		return err == nil && got == "nl"
 	})
-	if linkIndex(t, "lm-up-nl") == nlIndex {
-		t.Error("changed provider config did not recreate lm-up-nl")
-	}
 	if l, err := netlink.LinkByName("lm-up-nl"); err == nil {
 		if addrs, _ := netlink.AddrList(l, netlink.FAMILY_V4); len(addrs) != 1 {
 			t.Errorf("recreated lm-up-nl has addresses %v", addrs)
