@@ -10,6 +10,12 @@ All notable changes to Lotsman are documented here. The format follows
   reported assignment even when their upstream remains configured (#6).
 - Retry failed route and flow-pin cleanup after upstream failure, peer removal, and upstream
   removal or replacement on reload, instead of forgetting stale forwarding state (#7).
+- The database, its WAL/SHM files and migration backups are created with mode 0600, and existing
+  ones are tightened on start. Other local users and tools can no longer read them (#11).
+- Retry a failed health update so flow pins to a dead upstream are eventually removed (#12).
+- The Linux dataplane and `uninstall.sh` delete and overwrite only IP rules and routes of
+  Lotsman's exact shape in routing tables 1000-1099 that hold nothing else. Occupied tables are
+  skipped, and startup fails if none is free (#9).
 
 ## [0.2.0] - 2026-09-18
 
