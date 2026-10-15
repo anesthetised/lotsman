@@ -234,6 +234,28 @@ func TestSubnetFull(t *testing.T) {
 	}
 }
 
+func TestCanonicalSubnetAllocationBoundaries(t *testing.T) {
+	for _, prefix := range []string{"10.77.42.0/24", "255.255.255.0/24"} {
+		t.Run(prefix, func(t *testing.T) {
+			network := netip.MustParsePrefix(prefix)
+			used := map[netip.Addr]bool{}
+			want := network.Addr().Next().Next()
+			for i := 0; i < 253; i++ {
+				got, ok := firstFree(network, used)
+				if !ok || got != want || !network.Contains(got) {
+					t.Fatalf("allocation %d = %s, %v; want %s inside %s", i, got, ok, want, network)
+				}
+				used[got] = true
+				want = want.Next()
+			}
+			// Only the network, gateway and broadcast remain unused.
+			if got, ok := firstFree(network, used); ok {
+				t.Fatalf("exhausted network allocated reserved address %s", got)
+			}
+		})
+	}
+}
+
 func TestReopenKeepsData(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "lotsman.db")
 	s, err := Open(path)
@@ -250,7 +272,7 @@ func TestReopenKeepsData(t *testing.T) {
 	}
 	defer s.Close()
 	got, err := s.Peer("alice", DefaultDevice, "nl")
-	if err != nil || got.PrivateKey != p.PrivateKey {
+	if err != nil || got.PrivateKey != p.PrivateKey || got.PublicKey != p.PublicKey || got.IP != p.IP {
 		t.Errorf("after reopen: %+v, %v", got, err)
 	}
 }
