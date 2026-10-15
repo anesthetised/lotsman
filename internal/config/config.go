@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"os"
 	"regexp"
+	"strconv"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -104,8 +105,15 @@ func (c *Config) Validate() error {
 	if _, err := netip.ParseAddrPort(c.Listen); err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	if _, _, err := net.SplitHostPort(c.Endpoint); err != nil {
+	host, port, err := net.SplitHostPort(c.Endpoint)
+	if err != nil {
 		return fmt.Errorf("endpoint: %w", err)
+	}
+	if host == "" {
+		return fmt.Errorf("endpoint: host is required")
+	}
+	if n, err := strconv.ParseUint(port, 10, 16); err != nil || n == 0 {
+		return fmt.Errorf("endpoint: port must be a number from 1 to 65535")
 	}
 	if !c.Subnet.Addr().Is4() || c.Subnet.Bits() > 24 {
 		return fmt.Errorf("subnet: must be an IPv4 prefix of /24 or larger, got %s", c.Subnet)

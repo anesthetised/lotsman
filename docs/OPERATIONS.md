@@ -85,7 +85,7 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | Key | Meaning |
 |---|---|
 | `listen` | UDP address the downstream device binds to. |
-| `endpoint` | `host:port` written into client configs. |
+| `endpoint` | Nonempty host and numeric UDP port (1–65535) written into client configs; hostname, IPv4, and bracketed IPv6 forms are supported. |
 | `subnet` | Canonical IPv4 network prefix, /24 or larger; the first host address is the gateway. |
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
 | `state_dir` | Server identity, SQLite database, pid and status files. |

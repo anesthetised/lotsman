@@ -6,6 +6,8 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Validate advertised endpoints before creating users or rendering client configs:
+  require a nonempty host and a numeric UDP port from 1 to 65535 (#21).
 - Reject client subnet prefixes with host bits set before creating users or peers;
   report the canonical network prefix instead of failing later during IP allocation (#20).
 - Disable downstream ingress before removing routing and firewall protection on shutdown,

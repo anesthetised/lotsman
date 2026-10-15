@@ -76,6 +76,13 @@ func TestValidationErrors(t *testing.T) {
 		"unknown field":          {"bogus", "bogus: 1\n", "field bogus not found"},
 		"missing endpoint":       {"endpoint", "endpoint: ''\n", "endpoint:"},
 		"endpoint without port":  {"endpoint", "endpoint: vpn.example.org\n", "endpoint:"},
+		"endpoint empty host":    {"endpoint", "endpoint: ':51820'\n", "endpoint: host is required"},
+		"endpoint service port":  {"endpoint", "endpoint: vpn.example.org:banana\n", "endpoint: port must be a number from 1 to 65535"},
+		"endpoint empty port":    {"endpoint", "endpoint: 'vpn.example.org:'\n", "endpoint: port must be a number from 1 to 65535"},
+		"endpoint zero port":     {"endpoint", "endpoint: vpn.example.org:0\n", "endpoint: port must be a number from 1 to 65535"},
+		"endpoint port overflow": {"endpoint", "endpoint: vpn.example.org:65536\n", "endpoint: port must be a number from 1 to 65535"},
+		"endpoint negative port": {"endpoint", "endpoint: vpn.example.org:-1\n", "endpoint: port must be a number from 1 to 65535"},
+		"endpoint signed port":   {"endpoint", "endpoint: vpn.example.org:+1\n", "endpoint: port must be a number from 1 to 65535"},
 		"ipv6 subnet":            {"subnet", "subnet: fd00::/64\n", "subnet:"},
 		"subnet too small":       {"subnet", "subnet: 10.0.0.0/30\n", "subnet:"},
 		"empty dns":              {"dns", "dns: []\n", "dns:"},
@@ -99,6 +106,21 @@ func TestValidationErrors(t *testing.T) {
 			input := replaceTopLevelField(minimal, tc.field, tc.value)
 			if _, err := Parse([]byte(input)); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Fatalf("Parse error = %v, want error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestEndpointValidForms(t *testing.T) {
+	for _, endpoint := range []string{"vpn.example.org:1", "vpn.example.org:65535", "192.0.2.1:51820", "[2001:db8::1]:51820"} {
+		t.Run(endpoint, func(t *testing.T) {
+			input := replaceTopLevelField(minimal, "endpoint", "endpoint: '"+endpoint+"'\n")
+			cfg, err := Parse([]byte(input))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Endpoint != endpoint {
+				t.Errorf("endpoint changed to %q, want %q", cfg.Endpoint, endpoint)
 			}
 		})
 	}

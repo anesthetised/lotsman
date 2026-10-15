@@ -277,3 +277,51 @@ func TestCanonicalSubnetGateway(t *testing.T) {
 		})
 	}
 }
+
+func TestCLIRejectsInvalidEndpoint(t *testing.T) {
+	path := testConfig(t)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := capture(t, "-config", path, "user", "add", "alice", "-profile", "nl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := openEnv(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.store.Close()
+	peers, err := e.store.ListPeers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, endpoint := range []string{":51820", "vpn.example.org:banana", "vpn.example.org:0", "vpn.example.org:65536"} {
+		t.Run(endpoint, func(t *testing.T) {
+			invalid := strings.Replace(string(original), "endpoint: vpn.example.org:51820", "endpoint: '"+endpoint+"'", 1)
+			if err := os.WriteFile(path, []byte(invalid), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			for _, args := range [][]string{{"config", "check"}, {"user", "add", "bob", "-profile", "nl"}, {"user", "show", "alice", "-profile", "nl"}} {
+				out, err := capture(t, append([]string{"-config", path}, args...)...)
+				if err == nil || !strings.HasPrefix(err.Error(), "endpoint:") || out != "" {
+					t.Errorf("%v: printed output = %v, error = %v; want endpoint error without output", args, out != "", err)
+				}
+			}
+			if after, err := e.store.ListPeers(); err != nil || !reflect.DeepEqual(after, peers) {
+				t.Errorf("invalid endpoint changed stored peers: %v", err)
+			}
+			if users, err := e.store.ListUsers(); err != nil || len(users) != 1 || users[0].Name != "alice" {
+				t.Errorf("invalid endpoint created a user: %v", err)
+			}
+		})
+	}
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	after, err := capture(t, "-config", path, "user", "show", "alice", "-profile", "nl")
+	if err != nil || after != before {
+		t.Errorf("valid endpoint no longer reproduces stored peer: %v", err)
+	}
+}
