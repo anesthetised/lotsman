@@ -6,6 +6,8 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Deny peers without an upstream assignment in nftables, including upstream connected subnets;
+  revoke forwarding before route cleanup so stale rules cannot keep a peer connected (#14).
 - `user add`, `user show` and `user rm` reject unexpected arguments instead of ignoring them;
   `user rm alice phone -profile nl` used to delete the whole user (#15).
 - Create the initial server identity atomically, so concurrent first starts share one complete

@@ -21,7 +21,7 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 | Forwarding | Kernel: real TUNs, policy routing (`ip rule`/tables), nftables | NAT, conntrack and MSS clamping come from the kernel; the Go code stays small. Linux only. |
 | Preference | One peer per (user, profile) | The preference is encoded in which key the user connects with; no side channel needed. |
 | State | YAML for upstreams/profiles, SQLite for users/peers | Operators edit and version the YAML; users are created at runtime. |
-| Fail-closed | Mandatory | User traffic must never leave via the host's own IP. nftables drops anything from `lm0` not routed into an `lm-up-*`. |
+| Fail-closed | Mandatory | User traffic must never leave via the host's own IP. nftables admits only authorized peers from `lm0` into an `lm-up-*`; all other forwarding from `lm0` is dropped. |
 | Host firewalls | Accept rules inserted into foreign forward chains | Docker's `FORWARD DROP` and ufw would otherwise silently drop forwarded traffic; same approach as Tailscale. |
 
 ## AmneziaWG implementation notes (verified 2026-09-17)
@@ -66,7 +66,8 @@ routing table (`stamp_mark` chain, `ct mark set oifname map @pinmark`); later pa
 into routing (`restore_mark` chain, `meta mark set ct mark`); and when a peer moves off an upstream
 that is still alive, a per-peer rule `from <peer> fwmark <table> lookup <table>` (priority 3000,
 ahead of the plain `from <peer>` rule) keeps those flows on it. The pin rules are per peer, so
-`Unroute` removes them with everything else and a removed peer cannot leak; when an upstream goes
+`Unroute` revokes the peer in the nftables `authorized_peers` set before removing its rules,
+so even stale pins or main-table connected routes cannot authorize it; when an upstream goes
 down its pins are deleted and the flows follow the peer's current route. Only flows through a dead
 upstream are lost, and those were dead anyway.
 

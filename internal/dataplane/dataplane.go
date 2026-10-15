@@ -24,8 +24,9 @@ type Dataplane interface {
 	// through the peer's previous upstream stay pinned to it while that
 	// upstream is alive (see SetAlive), so a move does not reset them.
 	Route(peer netip.Addr, upstreamInterface string) error
-	// Unroute removes every rule of the peer, pins included; its traffic is
-	// then dropped, not leaked.
+	// Unroute revokes forwarding, then removes every rule of the peer, pins
+	// included. Once revocation succeeds, traffic stays blocked even if rule
+	// cleanup fails; callers must retry errors until cleanup completes.
 	Unroute(peer netip.Addr) error
 	// SetAlive marks whether flows may stay pinned to an upstream. Marking one
 	// dead drops every pin to it, so those flows follow their peer's current

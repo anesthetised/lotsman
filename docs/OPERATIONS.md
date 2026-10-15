@@ -108,7 +108,10 @@ are removed.
 If route cleanup fails, the daemon logs the error and retries on subsequent reconciliations.
 It retains the previous assignment in status until cleanup succeeds, and finishes removing old
 routes and flow pins before routing that peer again, including through a replacement upstream
-with the same name. Removing a peer revokes its downstream key even while route cleanup is pending.
+with the same name. The Linux dataplane revokes firewall authorization before deleting routes,
+so a successful revocation blocks traffic even while route cleanup is pending. An error revoking
+authorization is reported and retried, not treated as a successful block. Removing a peer also
+revokes its downstream key even while route cleanup is pending.
 
 ## Users
 
@@ -196,8 +199,9 @@ scrape_configs:
   through an upstream that is still alive stay pinned to it (conntrack marks plus a per-client
   `fwmark` rule) until they close; only when the old upstream is dead do they fail. The tunnel to
   Lotsman itself never drops.
-- No healthy upstream for a profile: the client's rule is removed and nftables drops its packets.
-  Nothing leaves through the server's own address.
+- No healthy upstream for a profile: nftables denies the client, then its routes and pins are
+  removed. A client without an assignment is denied from the start, including destinations in an
+  upstream's connected subnet. Nothing leaves through the server's own address.
 
 ## Identity and secrets
 
