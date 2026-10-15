@@ -403,14 +403,17 @@ func (d *Daemon) Reconcile() error {
 }
 
 func (d *Daemon) route(p store.Peer) error {
+	profile, ok := d.cfg.Profile(p.Profile)
+	if !ok {
+		return errors.Join(
+			fmt.Errorf("peer %s/%s/%s: profile %q is not in the config", p.User, p.Device, p.Profile, p.Profile),
+			d.unroute(p.IP),
+		)
+	}
 	if d.unroutePending[p.IP] {
 		if err := d.unroute(p.IP); err != nil {
 			return err
 		}
-	}
-	profile, ok := d.cfg.Profile(p.Profile)
-	if !ok {
-		return fmt.Errorf("peer %s/%s/%s: profile %q is not in the config", p.User, p.Device, p.Profile, p.Profile)
 	}
 	current := d.assignments[p.IP]
 	want, ok := policy.Select(profile, d.candidates(), current)

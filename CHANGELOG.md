@@ -6,6 +6,8 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Block clients whose profile is removed on reload, clearing their routes, flow pins, and
+  reported assignment even when their upstream remains configured (#6).
 - Retry failed route and flow-pin cleanup after upstream failure, peer removal, and upstream
   removal or replacement on reload, instead of forgetting stale forwarding state (#7).
 

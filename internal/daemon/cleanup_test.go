@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"strings"
 	"testing"
 
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/dataplane/fake"
+	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/store"
 )
 
@@ -28,8 +30,12 @@ func (f *failingUnroute) Unroute(ip netip.Addr) error {
 }
 
 func TestRouteCleanupRetry(t *testing.T) {
-	for _, reason := range []string{"no healthy upstream", "upstream recovers", "peer removed", "upstream removed", "upstream replaced"} {
-		for _, failures := range []int{1, 3} {
+	for _, reason := range []string{"no healthy upstream", "upstream recovers", "peer removed", "upstream removed", "upstream replaced", "profile removed"} {
+		failureCounts := []int{1, 3}
+		if reason == "profile removed" {
+			failureCounts = []int{0, 1, 3}
+		}
+		for _, failures := range failureCounts {
 			t.Run(fmt.Sprintf("%s/%d failures", reason, failures), func(t *testing.T) {
 				h := newHarness(t)
 				if _, err := h.st.CreateUser("alice"); err != nil {
@@ -68,13 +74,15 @@ func TestRouteCleanupRetry(t *testing.T) {
 					if err := h.st.DeletePeer("alice", store.DefaultDevice, "nl"); err != nil {
 						t.Fatal(err)
 					}
-				case "upstream removed", "upstream replaced":
+				case "upstream removed", "upstream replaced", "profile removed":
 					cfg, err := config.Parse([]byte(fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir)))
 					if err != nil {
 						t.Fatal(err)
 					}
 					if reason == "upstream removed" {
 						cfg.Upstreams = cfg.Upstreams[1:]
+					} else if reason == "profile removed" {
+						cfg.Profiles = cfg.Profiles[1:]
 					} else {
 						providerConf(t, h.dir, "nl", "10.8.0.2/32", 1300)
 					}
@@ -83,6 +91,12 @@ func TestRouteCleanupRetry(t *testing.T) {
 					}
 					// The replacement can recover before cleanup is retried.
 					h.d.probeAll(ctx)
+					if reason == "profile removed" {
+						st := h.d.Status()
+						if len(st.Upstreams) != 2 || st.Upstreams[0].State != health.Up || st.Upstreams[1].State != health.Up {
+							t.Fatalf("profile removal must retain both healthy upstreams: %+v", st.Upstreams)
+						}
+					}
 				}
 				// Reload already attempted the first cleanup in these two cases.
 				first := 0
@@ -117,7 +131,11 @@ func TestRouteCleanupRetry(t *testing.T) {
 						}
 					}
 				}
-				if err := h.d.Reconcile(); err != nil {
+				if err := h.d.Reconcile(); reason == "profile removed" {
+					if err == nil || !strings.Contains(err.Error(), `profile "nl" is not in the config`) || errors.Is(err, errUnroute) {
+						t.Fatalf("expected only a missing-profile error after cleanup, got %v", err)
+					}
+				} else if err != nil {
 					t.Fatal(err)
 				}
 				want := ""
