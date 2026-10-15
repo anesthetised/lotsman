@@ -6,6 +6,8 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Honor the downstream `listen` address and address family. The default
+  `0.0.0.0:51820` now opens only IPv4; `[::]:51820` opens only IPv6 (#13).
 - Bind health probes and their policy routes to the intended upstream interface,
   so providers with identical tunnel IPs retain independent health and failover (#10).
 - Reject missing upstream peer keys, unsafe active junk ranges/counts, and MTUs

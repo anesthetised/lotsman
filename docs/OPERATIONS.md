@@ -84,7 +84,7 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 
 | Key | Meaning |
 |---|---|
-| `listen` | UDP address the downstream device binds to. |
+| `listen` | Numeric UDP address and family the downstream device binds to; `0.0.0.0` is IPv4-only and `[::]` is IPv6-only. |
 | `endpoint` | Nonempty host and numeric UDP port (1–65535) written into client configs; hostname, IPv4, and bracketed IPv6 forms are supported. |
 | `subnet` | Canonical IPv4 network prefix, /24 or larger; the first host address is the gateway. |
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
@@ -92,6 +92,17 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `conf` path, free-form `geo` and `provider` labels. |
 | `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider}` matchers; empty = any upstream. |
 | `health` | `interval`, `probe` (`ip:port` reachable through every upstream), `down_after`, `up_after`. |
+
+`listen` binds exactly the configured numeric address; hostnames and an omitted
+host are unsupported. An occupied port, unavailable family, or unassigned address
+fails startup without falling back to wildcard. Native IPv6 zones are supported;
+IPv4-mapped IPv6 literals use their IPv4 address. The default `0.0.0.0:51820` no
+longer also exposes IPv6. A listen change requires a restart.
+
+Downstream uses a simple UDP socket without AWG's batching/GSO/GRO optimizations;
+upstream devices retain their existing bind. Throughput impact is unmeasured.
+Wildcard replies use host routing to choose their source; use a concrete listen
+address when replies must originate from one fixed local IP.
 
 Subnet prefixes with host bits set are rejected: use `10.77.0.0/24`, not
 `10.77.0.255/24`. The network address, gateway, and broadcast address are reserved
@@ -236,6 +247,9 @@ If disabling fails, those protections remain and the error is logged. The daemon
 closes downstream and retries cleanup once before closing upstreams. The same
 order applies after a failed start; repeated shutdown is safe. Cleanup errors
 that persist are logged, and owned leftovers are reconciled at the next start.
+Uninstall also disables surviving downstream ingress before removing protection,
+even if stopping the service fails. If interface inspection or disabling fails,
+it stops while preserving the firewall and routing state.
 
 ## Identity and secrets
 

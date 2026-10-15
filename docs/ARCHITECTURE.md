@@ -52,6 +52,18 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
   proves it against an untouched `wireguard-go`. The downstream side is AmneziaWG 2.0 only, because
   obfuscation parameters are per device, not per peer.
 
+## Downstream socket binding
+
+Downstream socket binding honors the configured numeric address and family via
+`tunnel.NewBound`; upstreams continue to use `tunnel.New` and the default AWG bind.
+The address bind keeps one UDP socket, captures it in each receiver across reopen,
+and sends every buffer supplied by AWG even though its receive batch size is one.
+Wildcards are family-specific, mapped IPv4 addresses are normalized, and native
+IPv6 zones are retained. Binding failures propagate instead of widening exposure.
+It omits default-bind batching, offloads and sticky-source caching; throughput
+equivalence has not been measured. A concrete listen address fixes reply source;
+wildcard replies follow host routing.
+
 ## MTU
 
 Client tunnel MTU = `min(1500 − 60 − S4_down, min over upstreams (upstream MTU − S4_up))`.
