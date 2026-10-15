@@ -73,7 +73,7 @@ func TestSetAliveRetry(t *testing.T) {
 		t.Run(fmt.Sprintf("%d failures", failures), func(t *testing.T) {
 			h, fp, logs, peer := aliveSetup(t, failures)
 			ctx := context.Background()
-			h.setHealthy("10.9.0.2", false)
+			h.setHealthy("lm-up-de", false)
 			h.d.probeAll(ctx)
 			h.d.probeAll(ctx) // down_after: 2, so this round marks de down and fails once
 			for i := 1; i < failures; i++ {
@@ -115,10 +115,10 @@ func TestSetAliveRetry(t *testing.T) {
 func TestSetAliveRetryAppliesCurrentHealth(t *testing.T) {
 	h, _, _, peer := aliveSetup(t, 1)
 	ctx := context.Background()
-	h.setHealthy("10.9.0.2", false)
+	h.setHealthy("lm-up-de", false)
 	h.d.probeAll(ctx)
 	h.d.probeAll(ctx) // marks down; SetAlive(false) fails
-	h.setHealthy("10.9.0.2", true)
+	h.setHealthy("lm-up-de", true)
 	h.d.probeAll(ctx) // up_after: 1, so de is up again
 	if !h.dp.Alive["lm-up-de"] {
 		t.Error("recovered upstream not marked alive")

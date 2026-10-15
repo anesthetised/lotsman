@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -227,13 +228,42 @@ func eventually(t *testing.T, what string, timeout time.Duration, cond func() bo
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// Block only this provider's outer UDP endpoint inside the disposable container.
+func blockProviderEndpoint(t *testing.T, port uint16) func() {
+	t.Helper()
+	rule := []string{"OUTPUT", "-d", "127.0.0.1", "-p", "udp", "--dport", strconv.Itoa(int(port)), "-j", "DROP"}
+	if out, err := exec.Command("iptables", append([]string{"-I"}, rule...)...).CombinedOutput(); err != nil {
+		t.Fatalf("block provider: %v: %s", err, out)
+	}
+	blocked := true
+	restore := func() {
+		if blocked {
+			if out, err := exec.Command("iptables", append([]string{"-D"}, rule...)...).CombinedOutput(); err != nil {
+				t.Errorf("restore provider: %v: %s", err, out)
+			}
+			blocked = false
+		}
+	}
+	t.Cleanup(restore)
+	return restore
+}
+
 func TestEndToEnd(t *testing.T) {
+	for _, tc := range []struct{ name, deSubnet string }{
+		{"distinct-provider-ips", "10.101.0.0/24"},
+		{"overlapping-provider-ips", "10.100.0.0/24"},
+	} {
+		t.Run(tc.name, func(t *testing.T) { testEndToEnd(t, tc.deSubnet) })
+	}
+}
+
+func testEndToEnd(t *testing.T, deSubnet string) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root: creates TUNs and programs the kernel")
 	}
 	dir := t.TempDir()
 	nl := newProvider(t, "nl", netip.MustParsePrefix("10.100.0.0/24"), 51001)
-	de := newProvider(t, "de", netip.MustParsePrefix("10.101.0.0/24"), 51002)
+	de := newProvider(t, "de", netip.MustParsePrefix(deSubnet), 51002)
 	os.WriteFile(filepath.Join(dir, "nl.conf"), []byte(nl.conf), 0o600)
 	os.WriteFile(filepath.Join(dir, "de.conf"), []byte(de.conf), 0o600)
 
@@ -291,11 +321,45 @@ metrics: {listen: 127.0.0.1:19100}
 	// The metrics endpoint reflects the routing above.
 	eventually(t, "metrics endpoint", 10*time.Second, func() bool {
 		body, ct, err := scrape()
-		return err == nil && strings.HasPrefix(ct, "text/plain; version=0.0.4") && strings.Contains(body, `lotsman_upstream_up{upstream="nl"} 1`)
+		return err == nil && strings.HasPrefix(ct, "text/plain; version=0.0.4") &&
+			strings.Contains(body, `lotsman_upstream_up{upstream="nl"} 1`) && strings.Contains(body, `lotsman_upstream_up{upstream="de"} 1`)
 	})
 	if body, _, _ := scrape(); !strings.Contains(body, `lotsman_peer_upstream{user="alice",device="default",profile="eu",upstream="nl"} 1`) {
 		t.Errorf("peer metric missing:\n%s", body)
 	}
+
+	// Block each provider's outer UDP endpoint in turn, preserving its keys
+	// for recovery. A healthy provider must never hide the other's outage, even when
+	// both customer tunnels have exactly the same source IP.
+	for _, outage := range []struct {
+		provider *provider
+		port     uint16
+		other    string
+	}{
+		{de, 51002, "nl"},
+		{nl, 51001, "de"},
+	} {
+		restore := blockProviderEndpoint(t, outage.port)
+		eventually(t, outage.provider.name+" down independently", 15*time.Second, func() bool {
+			body, _, err := scrape()
+			return err == nil && strings.Contains(body, `lotsman_upstream_up{upstream="`+outage.provider.name+`"} 0`) &&
+				strings.Contains(body, `lotsman_upstream_up{upstream="`+outage.other+`"} 1`)
+		})
+		eventually(t, "exit via "+outage.other+" during outage", 15*time.Second, func() bool {
+			got, err := c.exitVia(2 * time.Second)
+			return err == nil && got == outage.other
+		})
+		restore()
+		eventually(t, "both providers recovered", 15*time.Second, func() bool {
+			body, _, err := scrape()
+			return err == nil && strings.Contains(body, `lotsman_upstream_up{upstream="nl"} 1`) &&
+				strings.Contains(body, `lotsman_upstream_up{upstream="de"} 1`)
+		})
+	}
+	eventually(t, "preferred nl restored", 15*time.Second, func() bool {
+		got, err := c.exitVia(2 * time.Second)
+		return err == nil && got == "nl"
+	})
 
 	// Reload without changes: nothing may be touched. The interface keeps its
 	// index and the provider sees no new handshake.

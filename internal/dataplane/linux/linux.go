@@ -42,7 +42,7 @@ const (
 	tableBase         = 1000 // routing tables of upstreams start here; a table id doubles as the flow mark
 	tableLimit        = 1100 // upstream tables are picked from [tableBase, tableLimit)
 	pinRulePriority   = 3000 // "from <peer>/32 fwmark <table> lookup <table>", flows opened before a move
-	probeRulePriority = 4000 // "from <upstream addr> lookup <table>", for health probes
+	probeRulePriority = 4000 // "from <upstream addr> oif <upstream> lookup <table>", for health probes
 	peerRulePriority  = 5000 // "from <peer>/32 lookup <table>"
 	nftTable          = "lotsman"
 	upstreamSetName   = "upstreams"
@@ -111,8 +111,8 @@ func (d *Dataplane) SetUpstreams(ups []dataplane.Interface, mtu int) error {
 }
 
 // addUpstream gives the interface an address, a routing table with a default
-// route over it, and the rule that sends probes from its address into that
-// table. It is idempotent and keeps the table of an interface it already knows.
+// route over it, and a rule for probes bound to its address and interface. It
+// is idempotent and keeps the table of an interface it already knows.
 func (d *Dataplane) addUpstream(up dataplane.Interface) error {
 	if err := configureLink(up, 0); err != nil {
 		return err
@@ -132,7 +132,13 @@ func (d *Dataplane) addUpstream(up dataplane.Interface) error {
 	if err := addDefaultRoute(link.Attrs().Index, table); err != nil {
 		return fmt.Errorf("default route for %s in table %d: %w", up.Name, table, err)
 	}
-	return addRule(up.Addr.Addr(), table, probeRulePriority)
+	r := netlink.NewRule()
+	r.Family, r.Src = netlink.FAMILY_V4, hostNet(up.Addr.Addr())
+	r.Table, r.Priority, r.OifName = table, probeRulePriority, up.Name
+	if err := netlink.RuleAdd(r); err != nil && !errors.Is(err, os.ErrExist) {
+		return fmt.Errorf("probe rule for %s: %w", up.Name, err)
+	}
+	return nil
 }
 
 // addDefaultRoute adds the table's only route. It never replaces: an existing
@@ -272,7 +278,10 @@ func ownedTable(table int, routes []netlink.Route, names map[int]string) bool {
 // table of its range. Any extra selector (iif, dport, goto, ...) makes it foreign.
 //
 //	pin:   priority 3000, from <peer>/32 fwmark <table>/0xffffffff lookup <table>
-//	probe: priority 4000, from <upstream addr>/32 lookup <table>
+//	probe: priority 4000, from <upstream addr>/32 oif lm-up-<name> lookup <table>
+//
+// Legacy source-only probe rules are recognized for upgrade cleanup.
+//
 //	peer:  priority 5000, from <peer>/32 lookup <table>
 func ours(r netlink.Rule) bool {
 	if r.Table < tableBase || r.Table >= tableLimit || r.Src == nil {
@@ -287,7 +296,12 @@ func ours(r netlink.Rule) bool {
 	case pinRulePriority:
 		mask := uint32(0xffffffff)
 		want.Mark, want.Mask = uint32(r.Table), &mask
-	case probeRulePriority, peerRulePriority:
+	case probeRulePriority:
+		if r.OifName != "" && !strings.HasPrefix(r.OifName, upstreamPrefix) {
+			return false
+		}
+		want.OifName = r.OifName
+	case peerRulePriority:
 	default:
 		return false
 	}
@@ -302,11 +316,44 @@ func (d *Dataplane) ownRules() ([]netlink.Rule, error) {
 	}
 	var out []netlink.Rule
 	for _, r := range all {
-		if ours(r) && interfaceOfTable(d.tables, r.Table) != "" {
+		upstream := interfaceOfTable(d.tables, r.Table)
+		if ours(r) && upstream != "" && (r.OifName == "" || r.OifName == upstream) {
+			if probeDeletionAmbiguous(r, all) {
+				return nil, fmt.Errorf("ambiguous probe rule in table %d: manual cleanup required", r.Table)
+			}
 			out = append(out, r)
 		}
 	}
 	return out, nil
+}
+
+// Rule deletion treats omitted selectors as wildcards. Refuse to delete a
+// probe rule if that could select another rule with additional selectors.
+func probeDeletionAmbiguous(r netlink.Rule, all []netlink.Rule) bool {
+	if r.Priority != probeRulePriority {
+		return false
+	}
+	for _, other := range all {
+		if other.Priority == r.Priority && other.Table == r.Table && other.Family == r.Family &&
+			reflect.DeepEqual(other.Src, r.Src) && (r.OifName == "" || other.OifName == r.OifName) && !reflect.DeepEqual(other, r) {
+			return true
+		}
+	}
+	return false
+}
+
+// Probe selectors must agree with the interface of every route in their table.
+// Empty crash tables retain only the rule's lm-up- interface-name evidence.
+func probeTableMatches(r netlink.Rule, routes []netlink.Route, names map[int]string) bool {
+	if r.OifName == "" {
+		return true
+	}
+	for _, route := range routes {
+		if route.Table == r.Table && names[route.LinkIndex] != r.OifName {
+			return false
+		}
+	}
+	return true
 }
 
 // removeLeftovers deletes what an earlier run left behind: rules of our shape
@@ -324,11 +371,18 @@ func removeLeftovers() error {
 	if err != nil {
 		return err
 	}
+	var owned []netlink.Rule
 	for _, r := range rules {
-		if ours(r) && ownedTable(r.Table, routes, names) {
-			if err := netlink.RuleDel(&r); err != nil {
-				return fmt.Errorf("delete leftover %v: %w", r, err)
+		if ours(r) && ownedTable(r.Table, routes, names) && probeTableMatches(r, routes, names) {
+			if probeDeletionAmbiguous(r, rules) {
+				return fmt.Errorf("ambiguous probe rule in table %d: manual cleanup required", r.Table)
 			}
+			owned = append(owned, r)
+		}
+	}
+	for _, r := range owned {
+		if err := netlink.RuleDel(&r); err != nil {
+			return fmt.Errorf("delete leftover %v: %w", r, err)
 		}
 	}
 	for _, r := range routes {
@@ -503,6 +557,9 @@ func (d *Dataplane) teardown(disable func(netlink.Link) error) error {
 		}
 	}
 	rules, err := d.ownRules()
+	if err != nil {
+		return err // preserve ambiguous rules and their table routes for a retry
+	}
 	for _, r := range rules {
 		if delErr := netlink.RuleDel(&r); delErr != nil {
 			err = errors.Join(err, fmt.Errorf("delete rule %v: %w", r, delErr))

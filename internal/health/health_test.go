@@ -4,9 +4,28 @@ import (
 	"context"
 	"net"
 	"net/netip"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestProbeOnInterfaceRequiresInterface(t *testing.T) {
+	_, err := ProbeOnInterface(context.Background(), "", netip.MustParseAddr("127.0.0.1"), netip.MustParseAddrPort("127.0.0.1:1"), time.Second)
+	if err == nil || !strings.Contains(err.Error(), "interface is required") {
+		t.Fatalf("empty interface: %v", err)
+	}
+}
+
+func TestProbeOnInterfaceUnsupported(t *testing.T) {
+	if runtime.GOOS == "linux" {
+		t.Skip("Linux interface binding is covered by container integration tests")
+	}
+	_, err := ProbeOnInterface(context.Background(), "lm-up-test", netip.MustParseAddr("127.0.0.1"), netip.MustParseAddrPort("127.0.0.1:1"), time.Second)
+	if err == nil || !strings.Contains(err.Error(), "unsupported") {
+		t.Fatalf("interface binding on %s: %v", runtime.GOOS, err)
+	}
+}
 
 func TestTracker(t *testing.T) {
 	type step struct {

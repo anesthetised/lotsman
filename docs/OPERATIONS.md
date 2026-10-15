@@ -110,6 +110,17 @@ the endpoint's UDP payload limit. `config check` rejects these invalid settings
 before a tunnel is started. These checks do not validate I packet lengths or
 the UDP size of S1–S3-padded handshake packets.
 
+Providers may assign the same tunnel IP. Health probes bind to the selected
+upstream interface as well as its source IP, and policy routing selects by both.
+Host applications using a provider tunnel must also bind its interface; binding
+only the provider source IP no longer selects that provider's route. Provider
+outer UDP transport and endpoint DNS resolution still use ordinary host routing.
+
+Startup cleans both legacy source-only and current interface-qualified probe
+rules when ownership is clear. If a legacy rule's deletion could also remove a
+foreign rule, startup stops with a manual-cleanup error. Uninstall also reports
+the collision and preserves ambiguous interfaces and routes for inspection.
+
 `systemctl reload lotsman` (SIGHUP) applies the file live, without dropping tunnels: upstreams are
 added, removed or replaced (a changed provider config counts as a replacement), profiles and
 `health` are swapped in, and every client is re-evaluated. Clients whose upstream was removed are
