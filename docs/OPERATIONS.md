@@ -74,6 +74,10 @@ reinstall the previous binary, move the backup over `lotsman.db`, start. The uni
 `config check` before `serve` and stops retrying after five failed starts in five minutes, so a
 broken upgrade shows up in `systemctl status lotsman` instead of crash-looping.
 
+The database, its `-wal`/`-shm` files and the backups hold client private keys, so Lotsman keeps
+them 0600 and tightens existing ones on start; only the daemon's user can read them. The state
+directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
+
 ## Configuration
 
 `/etc/lotsman/lotsman.yaml` — see `deploy/lotsman.example.yaml` for a commented example.
@@ -228,4 +232,6 @@ still using `iptables-legacy` allow `lm0 → lm-up-*` and the replies by hand. T
 must be open for input.
 
 **Restart left rules behind.** Lotsman removes its rules, routes and nftables table on shutdown and
-recreates them on start, so a crash is harmless.
+recreates them on start, so a crash is harmless. It only removes rules and routes of the exact
+shape it installs (`from <addr>/32 [fwmark N] lookup N`, priorities 3000/4000/5000) in tables
+1000-1099 that hold nothing else, and never uses a table that already has routes or rules.

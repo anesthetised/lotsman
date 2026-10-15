@@ -4,7 +4,9 @@ import (
 	"database/sql"
 	"errors"
 	"net/netip"
+	"os"
 	"path/filepath"
+	"syscall"
 	"testing"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
@@ -132,10 +134,9 @@ func TestDevices(t *testing.T) {
 	}
 }
 
-// The first release had no device column and never set user_version; its
-// databases must migrate in place.
-func TestMigrateFromVersion1(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "old.db")
+// seedVersion1 writes a first-release database with one peer and returns its key.
+func seedVersion1(t *testing.T, path string) awgconf.Key {
+	t.Helper()
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		t.Fatal(err)
@@ -151,6 +152,14 @@ func TestMigrateFromVersion1(t *testing.T) {
 		t.Fatal(err)
 	}
 	db.Close()
+	return key
+}
+
+// The first release had no device column and never set user_version; its
+// databases must migrate in place.
+func TestMigrateFromVersion1(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "old.db")
+	key := seedVersion1(t, path)
 
 	s, err := Open(path)
 	if err != nil {
@@ -244,4 +253,114 @@ func TestReopenKeepsData(t *testing.T) {
 	if err != nil || got.PrivateKey != p.PrivateKey {
 		t.Errorf("after reopen: %+v, %v", got, err)
 	}
+}
+
+// withUmask022 sets the process-wide umask for one test. Tests in this package
+// do not run in parallel, so nothing else observes it.
+func withUmask022(t *testing.T) {
+	t.Helper()
+	old := syscall.Umask(0o022)
+	t.Cleanup(func() { syscall.Umask(old) })
+}
+
+func assertMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	fi, err := os.Stat(path)
+	if err != nil {
+		t.Errorf("%s: %v", filepath.Base(path), err)
+		return
+	}
+	if got := fi.Mode().Perm(); got != want {
+		t.Errorf("%s mode = %04o, want %04o", filepath.Base(path), got, want)
+	}
+}
+
+func TestOpenCreatesPrivateFiles(t *testing.T) {
+	withUmask022(t)
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "lotsman.db")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.CreateUser("alice")
+	if _, err := s.AddPeer("alice", DefaultDevice, "nl", subnet); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		assertMode(t, p, 0o600)
+	}
+	assertMode(t, dir, 0o755) // directories are not ours to change
+}
+
+func TestOpenTightensExistingFiles(t *testing.T) {
+	withUmask022(t)
+	path := filepath.Join(t.TempDir(), "lotsman.db")
+	s, err := Open(path) // stays open so the sidecars exist
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	s.CreateUser("alice")
+	oldBackup := path + ".v1-20260101-000000.bak"
+	if err := os.WriteFile(oldBackup, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := []string{path, path + "-wal", path + "-shm", oldBackup}
+	for _, p := range files {
+		if err := os.Chmod(p, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s2, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	for _, p := range files {
+		assertMode(t, p, 0o600)
+	}
+	if users, err := s2.ListUsers(); err != nil || len(users) != 1 {
+		t.Errorf("data after tightening: %v, %v", users, err)
+	}
+}
+
+func TestMigrationBackupIsPrivateAndRestorable(t *testing.T) {
+	withUmask022(t)
+	path := filepath.Join(t.TempDir(), "lotsman.db")
+	key := seedVersion1(t, path)
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Close()
+	backups, _ := filepath.Glob(path + ".v1-*.bak")
+	if len(backups) != 1 {
+		t.Fatalf("backups = %v", backups)
+	}
+	assertMode(t, backups[0], 0o600)
+	assertMode(t, path, 0o600)
+
+	// Rollback: put the backup back and migrate again; keys must survive.
+	if err := os.Rename(backups[0], path); err != nil {
+		t.Fatal(err)
+	}
+	s, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	p, err := s.Peer("alice", DefaultDevice, "nl")
+	if err != nil || p.PrivateKey != key {
+		t.Errorf("peer after rollback: %+v, %v", p, err)
+	}
+	assertMode(t, path, 0o600)
 }

@@ -9,6 +9,13 @@
 // forwarded packet from the downstream interface that is not going into an
 // upstream, so a peer without a rule loses connectivity instead of leaking
 // through the host's own uplink.
+//
+// Lotsman shares the host's rule and route space with other software, so it
+// only touches what it can prove it created: a rule of exactly the shape it
+// installs (see ours) pointing at a table in [tableBase, tableLimit) whose
+// routes are all default routes over lm-up- interfaces (see ownedTable). A
+// table that holds anything else is never used or cleaned. Rules and routes
+// of that shape left by a crash are removed at Setup.
 package linux
 
 import (
@@ -18,6 +25,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/google/nftables"
@@ -32,6 +40,7 @@ import (
 
 const (
 	tableBase         = 1000 // routing tables of upstreams start here; a table id doubles as the flow mark
+	tableLimit        = 1100 // upstream tables are picked from [tableBase, tableLimit)
 	pinRulePriority   = 3000 // "from <peer>/32 fwmark <table> lookup <table>", flows opened before a move
 	probeRulePriority = 4000 // "from <upstream addr> lookup <table>", for health probes
 	peerRulePriority  = 5000 // "from <peer>/32 lookup <table>"
@@ -59,11 +68,11 @@ func (d *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, m
 		return err
 	}
 	d.down = down.Name
-	if err := deleteRules(pinRulePriority, probeRulePriority, peerRulePriority); err != nil {
-		return err
-	}
 	d.tables = map[string]int{}
 	d.alive = map[string]bool{}
+	if err := removeLeftovers(); err != nil {
+		return err
+	}
 	for _, up := range ups {
 		if err := d.addUpstream(up); err != nil {
 			return err
@@ -108,65 +117,243 @@ func (d *Dataplane) addUpstream(up dataplane.Interface) error {
 	}
 	table, known := d.tables[up.Name]
 	if !known {
-		table = d.allocateTable()
+		var err error
+		if table, err = d.allocateTable(); err != nil {
+			return fmt.Errorf("table for %s: %w", up.Name, err)
+		}
 		d.tables[up.Name] = table
 	}
 	link, err := netlink.LinkByName(up.Name)
 	if err != nil {
 		return err
 	}
-	err = netlink.RouteReplace(&netlink.Route{
-		LinkIndex: link.Attrs().Index,
-		Table:     table,
-		Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
-		Scope:     netlink.SCOPE_LINK,
-	})
-	if err != nil {
+	if err := addDefaultRoute(link.Attrs().Index, table); err != nil {
 		return fmt.Errorf("default route for %s in table %d: %w", up.Name, table, err)
 	}
 	return addRule(up.Addr.Addr(), table, probeRulePriority)
 }
 
+// addDefaultRoute adds the table's only route. It never replaces: an existing
+// route is accepted only if it is already exactly this one.
+func addDefaultRoute(linkIndex, table int) error {
+	err := netlink.RouteAdd(&netlink.Route{
+		LinkIndex: linkIndex,
+		Table:     table,
+		Dst:       &net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)},
+		Scope:     netlink.SCOPE_LINK,
+	})
+	if !errors.Is(err, os.ErrExist) {
+		return err
+	}
+	routes, listErr := rangeRoutes(table)
+	if listErr != nil {
+		return listErr
+	}
+	if len(routes) == 1 && routes[0].LinkIndex == linkIndex && isDefault(routes[0]) {
+		return nil
+	}
+	return fmt.Errorf("table already holds a different route: %w", err)
+}
+
 func (d *Dataplane) removeUpstream(name string) error {
 	table := d.tables[name]
-	delete(d.tables, name)
-	delete(d.alive, name)
-	all, err := netlink.RuleList(netlink.FAMILY_V4)
+	rules, err := d.ownRules()
 	if err != nil {
 		return err
 	}
-	for _, r := range all {
-		if r.Table == table && (r.Priority == pinRulePriority || r.Priority == probeRulePriority || r.Priority == peerRulePriority) {
+	for _, r := range rules {
+		if r.Table == table {
 			if err := netlink.RuleDel(&r); err != nil {
 				return fmt.Errorf("delete rule for %s: %w", name, err)
 			}
 		}
 	}
-	return flushTable(table)
+	if err := flushTable(table); err != nil {
+		return err
+	}
+	// Forgotten only once clean, so a failed removal is retried by the next reload.
+	delete(d.tables, name)
+	delete(d.alive, name)
+	return nil
 }
 
-// allocateTable returns the lowest table id not in use, so ids are stable
-// for upstreams that stay across a reload.
-func (d *Dataplane) allocateTable() int {
-	used := map[int]bool{}
-	for _, t := range d.tables {
-		used[t] = true
+// allocateTable returns the lowest table id in range that no one uses: it has
+// no route and no rule of any kind, so nothing foreign is ever adopted. Ids
+// stay stable for upstreams that remain across a reload.
+func (d *Dataplane) allocateTable() (int, error) {
+	routes, err := rangeRoutes(0)
+	if err != nil {
+		return 0, err
 	}
-	for t := tableBase; ; t++ {
-		if !used[t] {
-			return t
+	rules, err := netlink.RuleList(netlink.FAMILY_V4)
+	if err != nil {
+		return 0, err
+	}
+	for t := tableBase; t < tableLimit; t++ {
+		if interfaceOfTable(d.tables, t) == "" && !tableBusy(t, routes, rules) {
+			return t, nil
 		}
 	}
+	return 0, fmt.Errorf("no free routing table in %d-%d: all hold other routes or rules", tableBase, tableLimit-1)
 }
 
+// tableBusy reports whether any route or rule refers to the table.
+func tableBusy(table int, routes []netlink.Route, rules []netlink.Rule) bool {
+	for _, r := range routes {
+		if r.Table == table {
+			return true
+		}
+	}
+	for _, r := range rules {
+		if r.Table == table {
+			return true
+		}
+	}
+	return false
+}
+
+// rangeRoutes lists IPv4 routes of the tables in [tableBase, tableLimit), or
+// only of one table when it is nonzero.
+func rangeRoutes(table int) ([]netlink.Route, error) {
+	var out []netlink.Route
+	err := netlink.RouteListFilteredIter(netlink.FAMILY_V4, &netlink.Route{}, netlink.RT_FILTER_TABLE, func(r netlink.Route) bool {
+		if r.Table >= tableBase && r.Table < tableLimit && (table == 0 || r.Table == table) {
+			out = append(out, r)
+		}
+		return true
+	})
+	return out, err
+}
+
+func linkNames() (map[int]string, error) {
+	links, err := netlink.LinkList()
+	if err != nil {
+		return nil, err
+	}
+	names := make(map[int]string, len(links))
+	for _, l := range links {
+		names[l.Attrs().Index] = l.Attrs().Name
+	}
+	return names, nil
+}
+
+func isDefault(r netlink.Route) bool {
+	if r.Dst == nil {
+		return true
+	}
+	ones, _ := r.Dst.Mask.Size()
+	return ones == 0
+}
+
+// ourRoute reports whether r has the shape of the route addDefaultRoute installs:
+// a default route with no gateway over an lm-up- interface.
+func ourRoute(r netlink.Route, names map[int]string) bool {
+	return isDefault(r) && len(r.Gw) == 0 && strings.HasPrefix(names[r.LinkIndex], upstreamPrefix)
+}
+
+// ownedTable reports whether table is one Lotsman may clean: in range, and
+// every route in it is ours (an empty table qualifies, e.g. after a crash took
+// the interface and with it the route).
+func ownedTable(table int, routes []netlink.Route, names map[int]string) bool {
+	if table < tableBase || table >= tableLimit {
+		return false
+	}
+	for _, r := range routes {
+		if r.Table == table && !ourRoute(r, names) {
+			return false
+		}
+	}
+	return true
+}
+
+// ours reports whether r has exactly the shape of a rule Lotsman installs, in a
+// table of its range. Any extra selector (iif, dport, goto, ...) makes it foreign.
+//
+//	pin:   priority 3000, from <peer>/32 fwmark <table>/0xffffffff lookup <table>
+//	probe: priority 4000, from <upstream addr>/32 lookup <table>
+//	peer:  priority 5000, from <peer>/32 lookup <table>
+func ours(r netlink.Rule) bool {
+	if r.Table < tableBase || r.Table >= tableLimit || r.Src == nil {
+		return false
+	}
+	if ones, bits := r.Src.Mask.Size(); bits != 32 || ones != 32 {
+		return false
+	}
+	want := netlink.NewRule()
+	want.Family, want.Src, want.Table, want.Priority = netlink.FAMILY_V4, r.Src, r.Table, r.Priority
+	switch r.Priority {
+	case pinRulePriority:
+		mask := uint32(0xffffffff)
+		want.Mark, want.Mask = uint32(r.Table), &mask
+	case probeRulePriority, peerRulePriority:
+	default:
+		return false
+	}
+	return reflect.DeepEqual(r, *want)
+}
+
+// ownRules lists our rules that point at the tables this instance allocated.
+func (d *Dataplane) ownRules() ([]netlink.Rule, error) {
+	all, err := netlink.RuleList(netlink.FAMILY_V4)
+	if err != nil {
+		return nil, err
+	}
+	var out []netlink.Rule
+	for _, r := range all {
+		if ours(r) && interfaceOfTable(d.tables, r.Table) != "" {
+			out = append(out, r)
+		}
+	}
+	return out, nil
+}
+
+// removeLeftovers deletes what an earlier run left behind: rules of our shape
+// and routes in tables that pass ownedTable. Everything else stays.
+func removeLeftovers() error {
+	routes, err := rangeRoutes(0)
+	if err != nil {
+		return err
+	}
+	names, err := linkNames()
+	if err != nil {
+		return err
+	}
+	rules, err := netlink.RuleList(netlink.FAMILY_V4)
+	if err != nil {
+		return err
+	}
+	for _, r := range rules {
+		if ours(r) && ownedTable(r.Table, routes, names) {
+			if err := netlink.RuleDel(&r); err != nil {
+				return fmt.Errorf("delete leftover %v: %w", r, err)
+			}
+		}
+	}
+	for _, r := range routes {
+		if ownedTable(r.Table, routes, names) {
+			if err := netlink.RouteDel(&r); err != nil {
+				return fmt.Errorf("delete leftover route in table %d: %w", r.Table, err)
+			}
+		}
+	}
+	return nil
+}
+
+// flushTable deletes the routes of the table that are ours.
 func flushTable(table int) error {
-	routes, err := netlink.RouteListFiltered(netlink.FAMILY_V4, &netlink.Route{Table: table}, netlink.RT_FILTER_TABLE)
+	routes, err := rangeRoutes(table)
+	if err != nil {
+		return err
+	}
+	names, err := linkNames()
 	if err != nil {
 		return err
 	}
 	for _, r := range routes {
-		if err := netlink.RouteDel(&r); err != nil {
-			return err
+		if ourRoute(r, names) {
+			if err := netlink.RouteDel(&r); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -177,7 +364,7 @@ func (d *Dataplane) Route(peer netip.Addr, upstream string) error {
 	if !ok {
 		return fmt.Errorf("unknown upstream %q", upstream)
 	}
-	rules, err := rulesFor(peer)
+	rules, err := d.rulesFor(peer)
 	if err != nil {
 		return err
 	}
@@ -214,7 +401,7 @@ func (d *Dataplane) Route(peer netip.Addr, upstream string) error {
 }
 
 func (d *Dataplane) Unroute(peer netip.Addr) error {
-	rules, err := rulesFor(peer)
+	rules, err := d.rulesFor(peer)
 	if err != nil {
 		return err
 	}
@@ -235,7 +422,7 @@ func (d *Dataplane) SetAlive(upstream string, alive bool) error {
 	if alive {
 		return nil
 	}
-	all, err := netlink.RuleList(netlink.FAMILY_V4)
+	all, err := d.ownRules()
 	if err != nil {
 		return err
 	}
@@ -259,7 +446,12 @@ func interfaceOfTable(tables map[string]int, table int) string {
 }
 
 func (d *Dataplane) Teardown() error {
-	err := deleteRules(pinRulePriority, probeRulePriority, peerRulePriority)
+	rules, err := d.ownRules()
+	for _, r := range rules {
+		if delErr := netlink.RuleDel(&r); delErr != nil {
+			err = errors.Join(err, fmt.Errorf("delete rule %v: %w", r, delErr))
+		}
+	}
 	for _, table := range d.tables {
 		err = errors.Join(err, flushTable(table))
 	}
@@ -328,35 +520,18 @@ func addPinRule(peer netip.Addr, table int) error {
 }
 
 // rulesFor lists the peer's plain and pin rules.
-func rulesFor(peer netip.Addr) ([]netlink.Rule, error) {
-	all, err := netlink.RuleList(netlink.FAMILY_V4)
+func (d *Dataplane) rulesFor(peer netip.Addr) ([]netlink.Rule, error) {
+	all, err := d.ownRules()
 	if err != nil {
 		return nil, err
 	}
 	var out []netlink.Rule
 	for _, r := range all {
-		if (r.Priority == peerRulePriority || r.Priority == pinRulePriority) && r.Src != nil && r.Src.IP.Equal(peer.AsSlice()) {
+		if (r.Priority == peerRulePriority || r.Priority == pinRulePriority) && r.Src.IP.Equal(peer.AsSlice()) {
 			out = append(out, r)
 		}
 	}
 	return out, nil
-}
-
-func deleteRules(priorities ...int) error {
-	all, err := netlink.RuleList(netlink.FAMILY_V4)
-	if err != nil {
-		return err
-	}
-	for _, r := range all {
-		for _, p := range priorities {
-			if r.Priority == p {
-				if err := netlink.RuleDel(&r); err != nil {
-					return fmt.Errorf("delete rule %v: %w", r, err)
-				}
-			}
-		}
-	}
-	return nil
 }
 
 func hostNet(a netip.Addr) *net.IPNet {

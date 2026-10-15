@@ -64,6 +64,7 @@ type Daemon struct {
 	assignments    map[netip.Addr]string      // peer address → upstream name
 	unroutePending map[netip.Addr]bool        // cleanup must finish before routing this address again
 	devicePeers    map[awgconf.Key]store.Peer // added peers, retained until device and route cleanup succeed
+	aliveFailed    map[string]string          // upstream → last SetAlive error; the kernel is stale until it succeeds
 	wake           chan struct{}              // nudges Run to reprobe and reconcile now
 	ready          chan struct{}              // closed after the first reconcile
 
@@ -79,6 +80,7 @@ func New(d Deps) *Daemon {
 		assignments:    map[netip.Addr]string{},
 		unroutePending: map[netip.Addr]bool{},
 		devicePeers:    map[awgconf.Key]store.Peer{},
+		aliveFailed:    map[string]string{},
 		wake:           make(chan struct{}, 1),
 		ready:          make(chan struct{}),
 		probes:         map[string]*[2]uint64{},
@@ -270,7 +272,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 			errs = append(errs, err)
 		}
 		// A replaced upstream starts unknown again; nothing may stay pinned to it.
-		if err := d.dp.SetAlive(u.Device.Name(), u.Tracker.State() == health.Up); err != nil {
+		if err := d.applyAlive(u); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -297,6 +299,7 @@ func (d *Daemon) dropUpstream(u *Upstream) {
 			}
 		}
 	}
+	delete(d.aliveFailed, u.Name)
 	u.Device.Close()
 }
 
@@ -344,11 +347,12 @@ func (d *Daemon) probeAll(ctx context.Context) {
 			defer d.mu.Unlock()
 			d.countProbe(u.Name, err == nil)
 			before := u.Tracker.State()
-			if u.Tracker.Observe(err == nil, latency) {
+			changed := u.Tracker.Observe(err == nil, latency)
+			if changed {
 				d.log.Info("upstream health changed", "upstream", u.Name, "from", before, "to", u.Tracker.State(), "err", err)
-				if aerr := d.dp.SetAlive(u.Device.Name(), u.Tracker.State() == health.Up); aerr != nil {
-					d.log.Error("set alive", "upstream", u.Name, "err", aerr)
-				}
+			}
+			if _, stale := d.aliveFailed[u.Name]; changed || stale {
+				_ = d.applyAlive(u) // failure is logged and retried next round
 			}
 			if err == nil {
 				return
@@ -362,6 +366,25 @@ func (d *Daemon) probeAll(ctx context.Context) {
 		})
 	}
 	wg.Wait()
+}
+
+// applyAlive pushes the observed health to the dataplane, which drops flow pins
+// to a dead upstream. A failure is remembered so the next probe round retries
+// it, and logged only when the error changes; the observed health is untouched.
+func (d *Daemon) applyAlive(u *Upstream) error {
+	err := d.dp.SetAlive(u.Device.Name(), u.Tracker.State() == health.Up)
+	if err == nil {
+		if _, stale := d.aliveFailed[u.Name]; stale {
+			d.log.Info("set alive recovered", "upstream", u.Name)
+			delete(d.aliveFailed, u.Name)
+		}
+		return nil
+	}
+	if d.aliveFailed[u.Name] != err.Error() {
+		d.log.Error("set alive", "upstream", u.Name, "err", err)
+	}
+	d.aliveFailed[u.Name] = err.Error()
+	return err
 }
 
 // Reconcile makes the device peer list and the kernel routes match the store

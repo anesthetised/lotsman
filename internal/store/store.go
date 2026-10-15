@@ -5,7 +5,11 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/netip"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"modernc.org/sqlite"
@@ -83,7 +87,13 @@ type Store struct {
 	db *sql.DB
 }
 
+// Open opens the database at path, creating it if needed. The database, its
+// WAL/SHM sidecars and migration backups hold client private keys, so they are
+// kept 0600. The directory is left alone: the caller owns its mode.
 func Open(path string) (*Store, error) {
+	if err := makePrivate(path); err != nil {
+		return nil, err
+	}
 	db, err := sql.Open("sqlite", path+"?_pragma=foreign_keys(1)&_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)")
 	if err != nil {
 		return nil, err
@@ -93,6 +103,33 @@ func Open(path string) (*Store, error) {
 		return nil, err
 	}
 	return &Store{db: db}, nil
+}
+
+// makePrivate creates path as 0600 before SQLite writes anything (an empty file
+// is a valid empty database; SQLite gives the -wal/-shm sidecars the mode of the
+// main file) and tightens files left over from earlier versions, including
+// migration backups made before they were created private.
+func makePrivate(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return err
+	}
+	f.Close()
+	old, err := filepath.Glob(glob(path) + ".v*.bak")
+	if err != nil {
+		return err
+	}
+	for _, p := range append([]string{path, path + "-wal", path + "-shm"}, old...) {
+		if err := os.Chmod(p, 0o600); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+	}
+	return nil
+}
+
+// glob escapes the glob metacharacters of a literal path.
+func glob(path string) string {
+	return strings.NewReplacer(`\`, `\\`, "*", `\*`, "?", `\?`, "[", `\[`).Replace(path)
 }
 
 // migrate brings the schema up to date. When there is anything to apply it
@@ -108,7 +145,14 @@ func migrate(db *sql.DB, path string) error {
 	}
 	if version > 0 {
 		backup := fmt.Sprintf("%s.v%d-%s.bak", path, version, time.Now().UTC().Format("20060102-150405"))
+		// VACUUM INTO accepts an empty existing file, so the backup is born 0600.
+		f, err := os.OpenFile(backup, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+		if err != nil {
+			return fmt.Errorf("backup before migration: %w", err)
+		}
+		f.Close()
 		if _, err := db.Exec(`VACUUM INTO ?`, backup); err != nil {
+			os.Remove(backup)
 			return fmt.Errorf("backup before migration: %w", err)
 		}
 	}
