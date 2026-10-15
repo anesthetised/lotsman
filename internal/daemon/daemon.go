@@ -160,7 +160,7 @@ func (d *Daemon) start(ctx context.Context) error {
 		return err
 	}
 	for _, u := range d.cfg.Upstreams {
-		up, err := d.openUpstream(ctx, u)
+		up, err := d.openUpstream(ctx, u, d.cfg.Health)
 		if err != nil {
 			return err
 		}
@@ -178,8 +178,10 @@ func (d *Daemon) start(ctx context.Context) error {
 }
 
 // openUpstream loads the provider config and starts its device (still down).
-func (d *Daemon) openUpstream(ctx context.Context, u config.Upstream) (*Upstream, error) {
-	up, err := LoadUpstream(ctx, u, d.cfg.Health)
+// Health settings are passed in because Reload opens upstreams before d.cfg
+// switches to the incoming configuration.
+func (d *Daemon) openUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Upstream, error) {
+	up, err := LoadUpstream(ctx, u, h)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +250,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 			d.dropUpstream(old)
 			d.log.Info("upstream replaced", "upstream", u.Name)
 		}
-		up, err := d.openUpstream(ctx, u)
+		up, err := d.openUpstream(ctx, u, cfg.Health)
 		if err != nil {
 			errs = append(errs, err)
 			continue

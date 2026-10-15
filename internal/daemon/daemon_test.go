@@ -602,3 +602,55 @@ health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 1, up_after: 1}
 		t.Errorf("expected profile error after reload, got %v", err)
 	}
 }
+
+// Upstreams opened by a reload (added or replaced) must use the incoming health
+// thresholds, like the ones it retains.
+func TestReloadAppliesIncomingThresholdsToNewUpstreams(t *testing.T) {
+	for _, downAfter := range []int{1, 3} { // the harness starts with 2
+		t.Run(fmt.Sprintf("down_after %d", downAfter), func(t *testing.T) {
+			h := newHarness(t)
+			ctx := context.Background()
+			t.Cleanup(h.d.stop)
+			if err := h.d.start(ctx); err != nil {
+				t.Fatal(err)
+			}
+			providerConf(t, h.dir, "de", "10.9.0.3/32", 0)  // replaced
+			providerConf(t, h.dir, "fi", "10.10.0.2/32", 0) // added
+			text := fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir)
+			text = strings.Replace(text, "  - {name: de,", "  - {name: fi, conf: "+h.dir+"/fi.conf, geo: FI}\n  - {name: de,", 1)
+			text = strings.Replace(text, "down_after: 2", fmt.Sprintf("down_after: %d", downAfter), 1)
+			cfg, err := config.Parse([]byte(text))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := h.d.Reload(ctx, cfg); err != nil {
+				t.Fatal(err)
+			}
+			for _, a := range []string{"10.8.0.2", "10.9.0.3", "10.10.0.2"} {
+				h.setHealthy(a, false)
+			}
+			states := func() map[string]health.State {
+				out := map[string]health.State{}
+				for _, u := range h.d.Status().Upstreams {
+					out[u.Name] = u.State
+				}
+				return out
+			}
+			for round := 1; round <= downAfter; round++ {
+				h.d.probeAll(ctx)
+				want := health.Unknown
+				if round == downAfter {
+					want = health.Down
+				}
+				for name, got := range states() {
+					if got != want {
+						t.Errorf("after %d failed probes %s is %v, want %v", round, name, got, want)
+					}
+				}
+			}
+			if len(states()) != 3 {
+				t.Fatalf("upstreams = %v, want nl, fi, de", states())
+			}
+		})
+	}
+}
