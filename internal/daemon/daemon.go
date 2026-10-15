@@ -57,14 +57,15 @@ type Daemon struct {
 	probe   ProbeFunc
 	log     *slog.Logger
 
-	mu          sync.Mutex
-	cfg         *config.Config
-	down        *tunnel.Device
-	ups         []*Upstream
-	assignments map[netip.Addr]string      // peer address → upstream name
-	devicePeers map[awgconf.Key]store.Peer // peers currently added to the downstream device
-	wake        chan struct{}              // nudges Run to reprobe and reconcile now
-	ready       chan struct{}              // closed after the first reconcile
+	mu             sync.Mutex
+	cfg            *config.Config
+	down           *tunnel.Device
+	ups            []*Upstream
+	assignments    map[netip.Addr]string      // peer address → upstream name
+	unroutePending map[netip.Addr]bool        // cleanup must finish before routing this address again
+	devicePeers    map[awgconf.Key]store.Peer // added peers, retained until device and route cleanup succeed
+	wake           chan struct{}              // nudges Run to reprobe and reconcile now
+	ready          chan struct{}              // closed after the first reconcile
 
 	// Monotonic counters for metrics.
 	probes   map[string]*[2]uint64 // upstream → {ok, fail}
@@ -75,12 +76,13 @@ type Daemon struct {
 func New(d Deps) *Daemon {
 	return &Daemon{
 		version: d.Version, cfg: d.Config, id: d.Identity, store: d.Store, dp: d.Dataplane, newTUN: d.NewTUN, probe: d.Probe, log: d.Log,
-		assignments: map[netip.Addr]string{},
-		devicePeers: map[awgconf.Key]store.Peer{},
-		wake:        make(chan struct{}, 1),
-		ready:       make(chan struct{}),
-		probes:      map[string]*[2]uint64{},
-		reroutes:    map[string]uint64{},
+		assignments:    map[netip.Addr]string{},
+		unroutePending: map[netip.Addr]bool{},
+		devicePeers:    map[awgconf.Key]store.Peer{},
+		wake:           make(chan struct{}, 1),
+		ready:          make(chan struct{}),
+		probes:         map[string]*[2]uint64{},
+		reroutes:       map[string]uint64{},
 	}
 }
 
@@ -285,15 +287,14 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	return errors.Join(errs...)
 }
 
-// dropUpstream takes an upstream out of service. Its peers are unrouted so
-// the firewall blocks them until the next Reconcile finds them a new one.
+// dropUpstream takes an upstream out of service. Failed peer cleanup stays
+// pending until Reconcile can unroute it, before selecting another upstream.
 func (d *Daemon) dropUpstream(u *Upstream) {
 	for ip, name := range d.assignments {
 		if name == u.Name {
-			if err := d.dp.Unroute(ip); err != nil {
+			if err := d.unroute(ip); err != nil {
 				d.log.Error("unroute", "peer", ip, "err", err)
 			}
-			delete(d.assignments, ip)
 		}
 	}
 	u.Device.Close()
@@ -391,15 +392,22 @@ func (d *Daemon) Reconcile() error {
 		if wanted[key] {
 			continue
 		}
-		errs = append(errs, d.down.RemovePeer(key), d.dp.Unroute(p.IP))
+		if err := errors.Join(d.down.RemovePeer(key), d.unroute(p.IP)); err != nil {
+			errs = append(errs, err)
+			continue
+		}
 		delete(d.devicePeers, key)
-		delete(d.assignments, p.IP)
 		d.log.Info("peer removed", "peer", p.IP)
 	}
 	return errors.Join(errs...)
 }
 
 func (d *Daemon) route(p store.Peer) error {
+	if d.unroutePending[p.IP] {
+		if err := d.unroute(p.IP); err != nil {
+			return err
+		}
+	}
 	profile, ok := d.cfg.Profile(p.Profile)
 	if !ok {
 		return fmt.Errorf("peer %s/%s/%s: profile %q is not in the config", p.User, p.Device, p.Profile, p.Profile)
@@ -408,9 +416,11 @@ func (d *Daemon) route(p store.Peer) error {
 	want, ok := policy.Select(profile, d.candidates(), current)
 	switch {
 	case !ok && current != "":
-		delete(d.assignments, p.IP)
+		if err := d.unroute(p.IP); err != nil {
+			return err
+		}
 		d.log.Warn("no healthy upstream, peer is now blocked", "peer", p.IP, "user", p.User, "device", p.Device, "profile", p.Profile)
-		return d.dp.Unroute(p.IP)
+		return nil
 	case !ok:
 		return nil
 	case want == current:
@@ -422,6 +432,18 @@ func (d *Daemon) route(p store.Peer) error {
 	d.assignments[p.IP] = want
 	d.reroutes[want]++
 	d.log.Info("peer routed", "peer", p.IP, "user", p.User, "device", p.Device, "profile", p.Profile, "from", current, "to", want)
+	return nil
+}
+
+// unroute keeps both the assignment and retry state until all routes and pins
+// are removed. In particular, a reloaded upstream can reuse the same name.
+func (d *Daemon) unroute(ip netip.Addr) error {
+	if err := d.dp.Unroute(ip); err != nil {
+		d.unroutePending[ip] = true
+		return err
+	}
+	delete(d.unroutePending, ip)
+	delete(d.assignments, ip)
 	return nil
 }
 

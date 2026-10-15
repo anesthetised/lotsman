@@ -96,6 +96,11 @@ blocked for a moment and rerouted on the same pass. `listen`, `subnet` and `stat
 live; a reload that touches them is rejected as a whole and logged. A config that fails validation is
 logged and ignored. A changed client MTU only reaches clients that re-import their config.
 
+If route cleanup fails, the daemon logs the error and retries on subsequent reconciliations.
+It retains the previous assignment in status until cleanup succeeds, and finishes removing old
+routes and flow pins before routing that peer again, including through a replacement upstream
+with the same name. Removing a peer revokes its downstream key even while route cleanup is pending.
+
 ## Users
 
 ```bash
