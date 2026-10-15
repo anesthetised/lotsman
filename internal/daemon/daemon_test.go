@@ -243,7 +243,7 @@ func TestClientConfig(t *testing.T) {
 }
 
 // harness runs a daemon on netstack devices with a fake dataplane and a probe
-// whose results the test controls per upstream address.
+// whose results the test controls per upstream interface.
 type harness struct {
 	d       *Daemon
 	st      *store.Store
@@ -251,7 +251,7 @@ type harness struct {
 	cfg     *config.Config
 	dir     string
 	mu      sync.Mutex
-	healthy map[netip.Addr]bool
+	healthy map[string]bool
 }
 
 const harnessConfig = `
@@ -285,13 +285,13 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { st.Close() })
 
-	h := &harness{st: st, dp: fake.New(), cfg: cfg, dir: dir, healthy: map[netip.Addr]bool{}}
-	h.setHealthy("10.8.0.2", true)
-	h.setHealthy("10.9.0.2", true)
-	probe := func(_ context.Context, source netip.Addr, _ netip.AddrPort, _ time.Duration) (time.Duration, error) {
+	h := &harness{st: st, dp: fake.New(), cfg: cfg, dir: dir, healthy: map[string]bool{}}
+	h.setHealthy("lm-up-nl", true)
+	h.setHealthy("lm-up-de", true)
+	probe := func(_ context.Context, iface string, _ netip.Addr, _ netip.AddrPort, _ time.Duration) (time.Duration, error) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
-		if h.healthy[source] {
+		if h.healthy[iface] {
 			return time.Millisecond, nil
 		}
 		return 0, errors.New("probe failed")
@@ -329,10 +329,10 @@ func (h *harness) run(t *testing.T) (stop func()) {
 	return stop
 }
 
-func (h *harness) setHealthy(addr string, ok bool) {
+func (h *harness) setHealthy(iface string, ok bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.healthy[netip.MustParseAddr(addr)] = ok
+	h.healthy[iface] = ok
 }
 
 // metric finds one sample by name and a subset of labels; ok is false if absent.
@@ -418,7 +418,7 @@ func TestDaemon(t *testing.T) {
 	}
 
 	// NL dies: the eu profile falls back to DE, the nl-only profile is blocked.
-	h.setHealthy("10.8.0.2", false)
+	h.setHealthy("lm-up-nl", false)
 	eventually(t, "failover to de", routedVia(euPeer.IP, "lm-up-de"))
 	eventually(t, "nl-only peer blocked", func() bool { _, ok := h.dp.RouteOf(nlPeer.IP); return !ok })
 	st := h.d.Status()
@@ -448,7 +448,7 @@ func TestDaemon(t *testing.T) {
 
 	// NL recovers: the preferred tier wins again, and the flows the eu peer
 	// opened through DE stay there because DE is still alive.
-	h.setHealthy("10.8.0.2", true)
+	h.setHealthy("lm-up-nl", true)
 	eventually(t, "return to nl", func() bool {
 		return routedVia(euPeer.IP, "lm-up-nl")() && routedVia(nlPeer.IP, "lm-up-nl")()
 	})
@@ -474,21 +474,25 @@ func TestProbeFailureReresolvesEndpoint(t *testing.T) {
 	dns := &fakeResolver{hosts: map[string]string{"localhost": "127.0.0.1"}}
 	useResolver(t, dns)
 	h := newHarness(t)
+	// Providers may assign identical tunnel addresses. Only DE will fail.
+	providerConf(t, h.dir, "de", "10.8.0.2/32", 0)
 	h.run(t)
 	eventually(t, "start", h.dp.Ready)
 
 	dns.set("localhost", "127.0.0.2")
-	h.setHealthy("10.8.0.2", false) // nl starts failing its probes
-	eventually(t, "nl endpoint re-resolved", func() bool {
+	h.setHealthy("lm-up-de", false) // de starts failing its probes
+	eventually(t, "only de down and endpoint re-resolved despite shared source", func() bool {
 		h.d.mu.Lock()
 		defer h.d.mu.Unlock()
-		return h.d.ups[0].Conf.Peers[0].Endpoint == "127.0.0.2:51820"
+		return h.d.ups[1].Tracker.State() == health.Down &&
+			h.d.ups[0].Tracker.State() == health.Up &&
+			h.d.ups[1].Conf.Peers[0].Endpoint == "127.0.0.2:51820"
 	})
 	h.d.mu.Lock()
-	de := h.d.ups[1].Conf.Peers[0].Endpoint
+	nl := h.d.ups[0].Conf.Peers[0].Endpoint
 	h.d.mu.Unlock()
-	if de != "127.0.0.1:51820" {
-		t.Errorf("healthy upstream was re-resolved: %q", de)
+	if nl != "127.0.0.1:51820" {
+		t.Errorf("healthy upstream was re-resolved: %q", nl)
 	}
 }
 
@@ -549,7 +553,7 @@ func TestReload(t *testing.T) {
 
 	// Drop NL from the config: its peers move to DE, its device is gone.
 	providerConf(t, h.dir, "fi", "10.10.0.2/32", 0)
-	h.setHealthy("10.10.0.2", true)
+	h.setHealthy("lm-up-fi", true)
 	cfg2, err := config.Parse([]byte(fmt.Sprintf(`
 endpoint: vpn.example.org:51820
 state_dir: %s
@@ -584,7 +588,7 @@ health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 1, up_after: 1}
 
 	// Same upstream with a changed provider config is replaced, not kept.
 	providerConf(t, h.dir, "fi", "10.11.0.2/32", 1300)
-	h.setHealthy("10.11.0.2", true)
+	h.setHealthy("lm-up-fi", true)
 	if err := h.d.Reload(ctx, cfg2); err != nil {
 		t.Fatal(err)
 	}
@@ -626,8 +630,8 @@ func TestReloadAppliesIncomingThresholdsToNewUpstreams(t *testing.T) {
 			if err := h.d.Reload(ctx, cfg); err != nil {
 				t.Fatal(err)
 			}
-			for _, a := range []string{"10.8.0.2", "10.9.0.3", "10.10.0.2"} {
-				h.setHealthy(a, false)
+			for _, iface := range []string{"lm-up-nl", "lm-up-de", "lm-up-fi"} {
+				h.setHealthy(iface, false)
 			}
 			states := func() map[string]health.State {
 				out := map[string]health.State{}

@@ -30,7 +30,7 @@ func serve(ctx context.Context, configPath string) error {
 
 	d := daemon.New(daemon.Deps{
 		Version: version, Config: e.cfg, Identity: e.id, Store: e.store,
-		Dataplane: linux.New(), NewTUN: tunnel.CreateTUN, Probe: health.Probe, Log: log,
+		Dataplane: linux.New(), NewTUN: tunnel.CreateTUN, Probe: health.ProbeOnInterface, Log: log,
 	})
 	if err := writePID(e.cfg.StateDir); err != nil {
 		return err

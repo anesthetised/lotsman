@@ -69,7 +69,7 @@ func TestRouteCleanupRetry(t *testing.T) {
 				h.d.dp = &failingUnroute{Dataplane: h.dp, failures: failures}
 				switch reason {
 				case "no healthy upstream", "upstream recovers":
-					h.setHealthy("10.8.0.2", false)
+					h.setHealthy("lm-up-nl", false)
 					h.d.probeAll(ctx)
 					h.d.probeAll(ctx)
 				case "peer removed":
@@ -123,7 +123,7 @@ func TestRouteCleanupRetry(t *testing.T) {
 					}
 					assertPending()
 					if reason == "upstream recovers" && i == 0 {
-						h.setHealthy("10.8.0.2", true)
+						h.setHealthy("lm-up-nl", true)
 						h.d.probeAll(ctx)
 					}
 					if reason == "peer removed" {

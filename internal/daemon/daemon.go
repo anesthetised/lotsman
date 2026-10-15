@@ -31,7 +31,7 @@ import (
 // DownstreamInterface is the TUN users' tunnels terminate on.
 const DownstreamInterface = "lm0"
 
-type ProbeFunc func(ctx context.Context, source netip.Addr, target netip.AddrPort, timeout time.Duration) (time.Duration, error)
+type ProbeFunc func(ctx context.Context, iface string, source netip.Addr, target netip.AddrPort, timeout time.Duration) (time.Duration, error)
 
 // TUNFunc creates the interface a device runs on: a kernel TUN in production,
 // a netstack one in tests.
@@ -352,7 +352,7 @@ func (d *Daemon) probeAll(ctx context.Context) {
 	var wg sync.WaitGroup
 	for _, u := range ups {
 		wg.Go(func() {
-			latency, err := d.probe(ctx, u.Addr.Addr(), target, timeout)
+			latency, err := d.probe(ctx, u.InterfaceName(), u.Addr.Addr(), target, timeout)
 			d.mu.Lock()
 			defer d.mu.Unlock()
 			d.countProbe(u.Name, err == nil)
