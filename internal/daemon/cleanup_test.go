@@ -1,0 +1,146 @@
+package daemon
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/netip"
+	"testing"
+
+	"github.com/anesthetised/lotsman/internal/config"
+	"github.com/anesthetised/lotsman/internal/dataplane/fake"
+	"github.com/anesthetised/lotsman/internal/store"
+)
+
+var errUnroute = errors.New("temporary unroute failure")
+
+type failingUnroute struct {
+	*fake.Dataplane
+	failures int
+}
+
+func (f *failingUnroute) Unroute(ip netip.Addr) error {
+	if f.failures > 0 {
+		f.failures--
+		return errUnroute
+	}
+	return f.Dataplane.Unroute(ip)
+}
+
+func TestRouteCleanupRetry(t *testing.T) {
+	for _, reason := range []string{"no healthy upstream", "upstream recovers", "peer removed", "upstream removed", "upstream replaced"} {
+		for _, failures := range []int{1, 3} {
+			t.Run(fmt.Sprintf("%s/%d failures", reason, failures), func(t *testing.T) {
+				h := newHarness(t)
+				if _, err := h.st.CreateUser("alice"); err != nil {
+					t.Fatal(err)
+				}
+				peer, err := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
+				if err != nil {
+					t.Fatal(err)
+				}
+				ctx := context.Background()
+				// Drive reconciliations explicitly so injected failures are deterministic.
+				t.Cleanup(h.d.stop)
+				if err := h.d.start(ctx); err != nil {
+					t.Fatal(err)
+				}
+				h.d.probeAll(ctx)
+				if err := h.d.Reconcile(); err != nil {
+					t.Fatal(err)
+				}
+				// Leave an old flow pinned to the other, still healthy upstream.
+				for _, upstream := range []string{"lm-up-de", "lm-up-nl"} {
+					if err := h.dp.Route(peer.IP, upstream); err != nil {
+						t.Fatal(err)
+					}
+				}
+				if !h.dp.PinnedTo(peer.IP, "lm-up-de") {
+					t.Fatal("setup did not create a flow pin")
+				}
+				h.d.dp = &failingUnroute{Dataplane: h.dp, failures: failures}
+				switch reason {
+				case "no healthy upstream", "upstream recovers":
+					h.setHealthy("10.8.0.2", false)
+					h.d.probeAll(ctx)
+					h.d.probeAll(ctx)
+				case "peer removed":
+					if err := h.st.DeletePeer("alice", store.DefaultDevice, "nl"); err != nil {
+						t.Fatal(err)
+					}
+				case "upstream removed", "upstream replaced":
+					cfg, err := config.Parse([]byte(fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir)))
+					if err != nil {
+						t.Fatal(err)
+					}
+					if reason == "upstream removed" {
+						cfg.Upstreams = cfg.Upstreams[1:]
+					} else {
+						providerConf(t, h.dir, "nl", "10.8.0.2/32", 1300)
+					}
+					if err := h.d.Reload(ctx, cfg); err != nil {
+						t.Fatal(err)
+					}
+					// The replacement can recover before cleanup is retried.
+					h.d.probeAll(ctx)
+				}
+				// Reload already attempted the first cleanup in these two cases.
+				first := 0
+				if reason == "upstream removed" || reason == "upstream replaced" {
+					first = 1
+				}
+				assertPending := func() {
+					t.Helper()
+					if got, _ := h.dp.RouteOf(peer.IP); got != "lm-up-nl" || !h.dp.PinnedTo(peer.IP, "lm-up-de") {
+						t.Fatal("injected failure did not preserve the stale route and pin")
+					}
+					if st := h.d.Status(); len(st.Peers) != 1 || st.Peers[0].Upstream != "nl" {
+						t.Fatalf("cleanup reported complete while forwarding state remains: %+v", st.Peers)
+					}
+				}
+				if first == 1 {
+					assertPending()
+				}
+				for i := first; i < failures; i++ {
+					if err := h.d.Reconcile(); !errors.Is(err, errUnroute) {
+						t.Fatalf("failed cleanup %d: %v", i+1, err)
+					}
+					assertPending()
+					if reason == "upstream recovers" && i == 0 {
+						h.setHealthy("10.8.0.2", true)
+						h.d.probeAll(ctx)
+					}
+					if reason == "peer removed" {
+						peers, err := h.d.down.Peers()
+						if err != nil || len(peers) != 0 {
+							t.Fatalf("removed peer still authorized on downstream: %d peers, %v", len(peers), err)
+						}
+					}
+				}
+				if err := h.d.Reconcile(); err != nil {
+					t.Fatal(err)
+				}
+				want := ""
+				wantUpstream := ""
+				if reason == "upstream replaced" || reason == "upstream recovers" {
+					want = "lm-up-nl"
+					wantUpstream = "nl"
+				}
+				if got, _ := h.dp.RouteOf(peer.IP); got != want {
+					t.Errorf("route after recovery = %q, want %q", got, want)
+				}
+				if h.dp.PinnedTo(peer.IP, "lm-up-de") {
+					t.Error("stale flow pin survived successful cleanup")
+				}
+				st := h.d.Status()
+				if reason == "peer removed" {
+					if len(st.Peers) != 0 {
+						t.Errorf("removed peer still reported after cleanup: %+v", st.Peers)
+					}
+				} else if len(st.Peers) != 1 || st.Peers[0].Upstream != wantUpstream {
+					t.Errorf("status after cleanup: %+v", st.Peers)
+				}
+			})
+		}
+	}
+}

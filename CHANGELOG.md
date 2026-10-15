@@ -5,6 +5,10 @@ All notable changes to Lotsman are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- Retry failed route and flow-pin cleanup after upstream failure, peer removal, and upstream
+  removal or replacement on reload, instead of forgetting stale forwarding state (#7).
+
 ## [0.2.0] - 2026-09-18
 
 ### Added
