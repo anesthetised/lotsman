@@ -57,6 +57,41 @@ profiles: [{name: nl, prefer: [{geo: NL}]}, {name: auto}]
 	return path
 }
 
+func TestConfigCheckRejectsUnsafeUpstream(t *testing.T) {
+	for _, tc := range []struct {
+		name, old, replacement, wantError string
+	}{
+		{"negative MTU", "MTU = 1400", "MTU = -1", "MTU minus S4 must be at least 68"},
+		{"padding exhausts MTU", "S4 = 8", "S4 = 1333", "MTU minus S4 must be at least 68"},
+		{"oversized wire MTU", "MTU = 1400", "MTU = 65468", "MTU plus S4 and transport overhead"},
+		{"oversized IPv4 junk", "S4 = 8", "S4 = 8\nJc = 1\nJmin = 65508\nJmax = 65508", "junk packet size must not exceed 65507"},
+		{"inverted junk", "S4 = 8", "S4 = 8\nJc = 1\nJmin = 70\nJmax = 40", "Jmin must not exceed Jmax"},
+		{"missing peer key", "PublicKey =", "# PublicKey =", "PublicKey is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			path := testConfig(t)
+			providerPath := filepath.Join(filepath.Dir(path), "nl.conf")
+			provider, err := os.ReadFile(providerPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(provider), tc.old) {
+				t.Fatalf("fixture does not contain %q", tc.old)
+			}
+			if err := os.WriteFile(providerPath, []byte(strings.Replace(string(provider), tc.old, tc.replacement, 1)), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			out, err := capture(t, "-config", path, "config", "check")
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) || !strings.Contains(err.Error(), "upstream nl:") {
+				t.Fatalf("config check error = %v, want upstream nl and %q", err, tc.wantError)
+			}
+			if strings.Contains(out, "config OK") {
+				t.Fatalf("invalid config reported OK: %s", out)
+			}
+		})
+	}
+}
+
 func TestCLI(t *testing.T) {
 	cfg := testConfig(t)
 

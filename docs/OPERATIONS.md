@@ -97,6 +97,19 @@ Subnet prefixes with host bits set are rejected: use `10.77.0.0/24`, not
 `10.77.0.255/24`. The network address, gateway, and broadcast address are reserved
 and are never allocated to clients.
 
+Provider configurations require a nonzero public key for each peer. With active
+junk packets (`Jc > 0`), `Jmin` must not exceed `Jmax`; equal bounds produce a
+fixed size. Ordered unequal bounds have an exclusive upper limit. Junk packets,
+active I signature packets, and the initiation together must fit a 128-packet
+send batch, and each generated junk packet must fit the endpoint's UDP payload
+limit (65507 bytes for IPv4, 65527 for IPv6).
+
+An omitted or zero provider MTU uses 1420. The MTU minus provider `S4` padding
+must be at least 68; MTU plus `S4` and the 32-byte transport header/tag must fit
+the endpoint's UDP payload limit. `config check` rejects these invalid settings
+before a tunnel is started. These checks do not validate I packet lengths or
+the UDP size of S1–S3-padded handshake packets.
+
 `systemctl reload lotsman` (SIGHUP) applies the file live, without dropping tunnels: upstreams are
 added, removed or replaced (a changed provider config counts as a replacement), profiles and
 `health` are swapped in, and every client is re-evaluated. Clients whose upstream was removed are

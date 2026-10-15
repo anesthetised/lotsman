@@ -179,6 +179,7 @@ func TestParseJunkBounds(t *testing.T) {
 		{"dormant inverted range", Params{Jmin: 70, Jmax: 40}, ""},
 		{"dormant oversized range", Params{Jmin: 1, Jmax: ^uint32(0)}, ""},
 		{"maximum count", Params{Jc: 127, Jmin: 1, Jmax: 2}, ""},
+		{"maximum count with inert signature", Params{Jc: 127, I: [5]string{"ignored"}}, ""},
 		{"count with five signatures", Params{Jc: 122, I: [5]string{"<r 1>", "<r 1>", "<r 1>", "<r 1>", "<r 1>"}}, ""},
 		{"count with sparse signatures", Params{Jc: 126, I: [5]string{"", "", "<r 1>"}}, ""},
 		{"maximum fixed size", Params{Jc: 1, Jmin: 65527, Jmax: 65527}, ""},

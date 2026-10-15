@@ -104,7 +104,8 @@ func Parse(r io.Reader) (*Config, error) {
 		// to StdNetBind, whose message pool has conn.IdealBatchSize (128) slots.
 		packets := uint64(p.Jc) + 1
 		for _, signature := range p.I {
-			if signature != "" {
+			// AWG ignores strings without tags instead of creating a packet.
+			if strings.Contains(signature, "<") {
 				packets++
 			}
 		}
