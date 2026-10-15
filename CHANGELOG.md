@@ -6,6 +6,8 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Reject client subnet prefixes with host bits set before creating users or peers;
+  report the canonical network prefix instead of failing later during IP allocation (#20).
 - Disable downstream ingress before removing routing and firewall protection on shutdown,
   including failed startup. Retain protection if disabling fails and retry cleanup after closing
   the downstream device, before closing upstreams (#8).

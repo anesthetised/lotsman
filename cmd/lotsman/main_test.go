@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
+	"github.com/anesthetised/lotsman/internal/config"
+	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/store"
 )
 
@@ -205,5 +207,73 @@ func TestCLIRejectsTrailingArgs(t *testing.T) {
 		if after := peers(); !reflect.DeepEqual(after, before) {
 			t.Errorf("%v changed stored peers:\nbefore %+v\nafter  %+v", args, before, after)
 		}
+	}
+}
+
+func TestCLIRejectsSubnetHostBits(t *testing.T) {
+	path := testConfig(t)
+	original, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := capture(t, "-config", path, "user", "add", "alice", "-profile", "nl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, err := openEnv(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.store.Close()
+	peers, err := e.store.ListPeers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	invalid := append(append([]byte(nil), original...), []byte("subnet: 10.77.0.255/24\n")...)
+	if err := os.WriteFile(path, invalid, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"config", "check"}, {"user", "add", "bob", "-profile", "nl"}} {
+		out, err := capture(t, append([]string{"-config", path}, args...)...)
+		if err == nil || !strings.Contains(err.Error(), "subnet: host bits must be zero") || out != "" {
+			t.Errorf("%v: output = %q, error = %v; want subnet host-bits error", args, out, err)
+		}
+	}
+	if after, err := e.store.ListPeers(); err != nil || !reflect.DeepEqual(after, peers) {
+		t.Errorf("rejected config changed stored peers: %+v, %v", after, err)
+	}
+	if users, err := e.store.ListUsers(); err != nil || len(users) != 1 || users[0].Name != "alice" {
+		t.Errorf("rejected config created a user: %+v, %v", users, err)
+	}
+	if err := os.WriteFile(path, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	after, err := capture(t, "-config", path, "user", "show", "alice", "-profile", "nl")
+	if err != nil || after != before {
+		t.Errorf("canonical config no longer reproduces stored peer: %v", err)
+	}
+}
+
+func TestCanonicalSubnetGateway(t *testing.T) {
+	cfg, err := config.Load(testConfig(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ subnet, gateway string }{
+		{"0.0.0.0/0", "0.0.0.1/0"},
+		{"10.77.0.0/16", "10.77.0.1/16"},
+		{"10.77.42.0/24", "10.77.42.1/24"},
+		{"255.255.255.0/24", "255.255.255.1/24"},
+	} {
+		t.Run(tc.subnet, func(t *testing.T) {
+			cfg.Subnet = netip.MustParsePrefix(tc.subnet)
+			if err := cfg.Validate(); err != nil {
+				t.Fatal(err)
+			}
+			got := daemon.Gateway(cfg)
+			if got.String() != tc.gateway || !cfg.Subnet.Contains(got.Addr()) {
+				t.Errorf("Gateway = %s, want %s inside %s", got, tc.gateway, cfg.Subnet)
+			}
+		})
 	}
 }

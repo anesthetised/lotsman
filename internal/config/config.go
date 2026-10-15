@@ -110,6 +110,9 @@ func (c *Config) Validate() error {
 	if !c.Subnet.Addr().Is4() || c.Subnet.Bits() > 24 {
 		return fmt.Errorf("subnet: must be an IPv4 prefix of /24 or larger, got %s", c.Subnet)
 	}
+	if c.Subnet != c.Subnet.Masked() {
+		return fmt.Errorf("subnet: host bits must be zero, got %s (use %s)", c.Subnet, c.Subnet.Masked())
+	}
 	if len(c.DNS) == 0 {
 		return fmt.Errorf("dns: at least one resolver is required")
 	}

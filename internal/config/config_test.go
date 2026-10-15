@@ -104,6 +104,24 @@ func TestValidationErrors(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsSubnetHostBits(t *testing.T) {
+	cfg, err := Parse([]byte(minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, subnet := range []string{"10.77.0.1/24", "10.77.0.255/24", "10.77.0.255/16", "0.0.0.1/0"} {
+		t.Run(subnet, func(t *testing.T) {
+			cfg.Subnet = netip.MustParsePrefix(subnet)
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "subnet: host bits must be zero") {
+				t.Errorf("Validate error = %v, want subnet host-bits error", err)
+			}
+			if cfg.Subnet.String() != subnet {
+				t.Errorf("Validate changed subnet to %s", cfg.Subnet)
+			}
+		})
+	}
+}
+
 func replaceTopLevelField(yaml, field, replacement string) string {
 	lines := strings.Split(yaml, "\n")
 	start, end := -1, len(lines)

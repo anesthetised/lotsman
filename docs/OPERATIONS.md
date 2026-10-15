@@ -86,12 +86,16 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 |---|---|
 | `listen` | UDP address the downstream device binds to. |
 | `endpoint` | `host:port` written into client configs. |
-| `subnet` | IPv4 range for clients; `.1` is the gateway. |
+| `subnet` | Canonical IPv4 network prefix, /24 or larger; the first host address is the gateway. |
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
 | `state_dir` | Server identity, SQLite database, pid and status files. |
 | `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `conf` path, free-form `geo` and `provider` labels. |
 | `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider}` matchers; empty = any upstream. |
 | `health` | `interval`, `probe` (`ip:port` reachable through every upstream), `down_after`, `up_after`. |
+
+Subnet prefixes with host bits set are rejected: use `10.77.0.0/24`, not
+`10.77.0.255/24`. The network address, gateway, and broadcast address are reserved
+and are never allocated to clients.
 
 `systemctl reload lotsman` (SIGHUP) applies the file live, without dropping tunnels: upstreams are
 added, removed or replaced (a changed provider config counts as a replacement), profiles and
