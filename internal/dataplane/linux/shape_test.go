@@ -36,6 +36,8 @@ func TestOursMatchesOnlyTheRulesWeInstall(t *testing.T) {
 	}{
 		{"peer", shapeRule(peerRulePriority, "10.77.0.5", 1000), true},
 		{"probe", shapeRule(probeRulePriority, "10.8.0.2", 1099), true},
+		{"qualified probe", shapeRule(probeRulePriority, "10.8.0.2", 1099, func(r *netlink.Rule) { r.OifName = "lm-up-a" }), true},
+		{"foreign qualified probe", shapeRule(probeRulePriority, "10.8.0.2", 1099, func(r *netlink.Rule) { r.OifName = "eth0" }), false},
 		{"pin", shapeRule(pinRulePriority, "10.77.0.5", 1003, pin(1003, &full)), true},
 		{"pin with another mark", shapeRule(pinRulePriority, "10.77.0.5", 1003, pin(7, &full)), false},
 		{"pin with partial mask", shapeRule(pinRulePriority, "10.77.0.5", 1003, pin(1003, &partial)), false},
