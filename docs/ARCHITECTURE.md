@@ -21,7 +21,7 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 | Forwarding | Kernel: real TUNs, policy routing (`ip rule`/tables), nftables | NAT, conntrack and MSS clamping come from the kernel; the Go code stays small. Linux only. |
 | Preference | One peer per (user, profile) | The preference is encoded in which key the user connects with; no side channel needed. |
 | State | YAML for upstreams/profiles, SQLite for users/peers | Operators edit and version the YAML; users are created at runtime. |
-| Fail-closed | Mandatory | User traffic must never leave via the host's own IP. nftables drops anything from `lm0` not routed into an `lm-up-*`. |
+| Fail-closed | Mandatory | User traffic must never leave via the host's own IP. nftables admits only authorized peers from `lm0` into an `lm-up-*`; all other forwarding from `lm0` is dropped. |
 | Host firewalls | Accept rules inserted into foreign forward chains | Docker's `FORWARD DROP` and ufw would otherwise silently drop forwarded traffic; same approach as Tailscale. |
 
 ## AmneziaWG implementation notes (verified 2026-09-17)
@@ -58,6 +58,26 @@ Client tunnel MTU = `min(1500 − 60 − S4_down, min over upstreams (upstream M
 60 bytes = IPv4 (20) + UDP (8) + WireGuard transport header (16) + Poly1305 tag (16). The same value is
 set on `lm0` and written into client configs; nftables additionally clamps TCP MSS to the route MTU.
 
+## Forwarding authorization and shutdown
+
+Approved on 2026-10-16 for #14 and #8. The nftables `authorized_peers` set starts
+empty. `Route` grants access only after installing routing rules; `Unroute` revokes
+access before deleting them. This separates forwarding permission from route
+selection without adding deny-rule priorities or changing live-flow pinning.
+Both outgoing requests and established replies require an authorized peer.
+
+Linux `Teardown` first sets the downstream link down, then removes its rules,
+routes and firewall state. It retains the downstream name before configuring the
+link so a partially failed setup can also be stopped. If finding or disabling the
+link fails, protection stays intact and the error is returned; an already absent
+link is safe to clean up. Keeping this step inside `Teardown` avoids a separate
+quiesce API and makes the ordering apply to every caller.
+
+The daemon keeps upstream TUNs open through cleanup because route ownership is
+proved against their interfaces. On a teardown error it closes downstream first
+and retries once while upstreams still exist, then closes upstreams. Persistent
+errors are logged; a later start reconciles owned leftovers.
+
 ## Failover semantics
 
 Switching a peer to another upstream changes the exit IP of *new* flows only. Existing flows are
@@ -66,7 +86,8 @@ routing table (`stamp_mark` chain, `ct mark set oifname map @pinmark`); later pa
 into routing (`restore_mark` chain, `meta mark set ct mark`); and when a peer moves off an upstream
 that is still alive, a per-peer rule `from <peer> fwmark <table> lookup <table>` (priority 3000,
 ahead of the plain `from <peer>` rule) keeps those flows on it. The pin rules are per peer, so
-`Unroute` removes them with everything else and a removed peer cannot leak; when an upstream goes
+`Unroute` revokes the peer in the nftables `authorized_peers` set before removing its rules,
+so even stale pins or main-table connected routes cannot authorize it; when an upstream goes
 down its pins are deleted and the flows follow the peer's current route. Only flows through a dead
 upstream are lost, and those were dead anyway.
 

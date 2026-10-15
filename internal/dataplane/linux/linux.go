@@ -6,9 +6,9 @@
 // route over that upstream's TUN. A peer is sent through an upstream by an
 // "ip rule from <peer>/32 lookup <table>". An nftables table masquerades what
 // leaves through an upstream, clamps TCP MSS to the route MTU, and drops any
-// forwarded packet from the downstream interface that is not going into an
-// upstream, so a peer without a rule loses connectivity instead of leaking
-// through the host's own uplink.
+// forwarded packet from the downstream interface unless its peer is authorized
+// and it is going into an upstream. Authorization is revoked before route
+// cleanup, so connected routes in main and stale policy rules cannot bypass it.
 //
 // Lotsman shares the host's rule and route space with other software, so it
 // only touches what it can prove it created: a rule of exactly the shape it
@@ -47,13 +47,15 @@ const (
 	nftTable          = "lotsman"
 	upstreamSetName   = "upstreams"
 	pinMapName        = "pinmark" // upstream interface → mark stamped on new flows leaving through it
-	upstreamPrefix    = "lm-up-"  // every upstream interface starts with this
+	peerSetName       = "authorized_peers"
+	upstreamPrefix    = "lm-up-" // every upstream interface starts with this
 )
 
 type Dataplane struct {
-	down   string
-	tables map[string]int  // upstream interface → routing table
-	alive  map[string]bool // upstream interface → flows may stay pinned to it
+	down    string
+	tables  map[string]int      // upstream interface → routing table
+	alive   map[string]bool     // upstream interface → flows may stay pinned to it
+	allowed map[netip.Addr]bool // peers admitted by the firewall, independent of routes
 }
 
 func New() *Dataplane {
@@ -64,10 +66,10 @@ func (d *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, m
 	if err := sysctl("net/ipv4/ip_forward", "1"); err != nil {
 		return err
 	}
+	d.down = down.Name // retained even if configuring the link only partly succeeds
 	if err := configureLink(down, mtu); err != nil {
 		return err
 	}
-	d.down = down.Name
 	d.tables = map[string]int{}
 	d.alive = map[string]bool{}
 	if err := removeLeftovers(); err != nil {
@@ -372,7 +374,7 @@ func (d *Dataplane) Route(peer netip.Addr, upstream string) error {
 	for _, r := range rules {
 		switch {
 		case r.Priority == peerRulePriority && r.Table == table:
-			return nil
+			return d.authorize(peer, true)
 		case r.Priority == peerRulePriority:
 			old = append(old, r)
 		case r.Priority == pinRulePriority && r.Table == table:
@@ -397,18 +399,54 @@ func (d *Dataplane) Route(peer netip.Addr, upstream string) error {
 			return fmt.Errorf("remove old rule for %s: %w", peer, err)
 		}
 	}
-	return nil
+	return d.authorize(peer, true)
 }
 
 func (d *Dataplane) Unroute(peer netip.Addr) error {
+	return d.unroute(peer, netlink.RuleDel)
+}
+
+func (d *Dataplane) unroute(peer netip.Addr, deleteRule func(*netlink.Rule) error) error {
+	// Revoke before touching routes: even a failed cleanup must not leave a
+	// peer authorized by an old policy rule or a connected route in main.
+	if err := d.authorize(peer, false); err != nil {
+		return err
+	}
 	rules, err := d.rulesFor(peer)
 	if err != nil {
 		return err
 	}
 	for _, r := range rules {
-		if err := netlink.RuleDel(&r); err != nil {
+		if err := deleteRule(&r); err != nil {
 			return fmt.Errorf("remove rule for %s: %w", peer, err)
 		}
+	}
+	return nil
+}
+
+func (d *Dataplane) authorize(peer netip.Addr, allowed bool) error {
+	if d.allowed[peer] == allowed {
+		return nil
+	}
+	c := &nftables.Conn{}
+	set := &nftables.Set{Table: &nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable}, Name: peerSetName}
+	elements := []nftables.SetElement{{Key: peer.AsSlice()}}
+	var err error
+	if allowed {
+		err = c.SetAddElements(set, elements)
+	} else {
+		err = c.SetDeleteElements(set, elements)
+	}
+	if err == nil {
+		err = c.Flush()
+	}
+	if err != nil {
+		return fmt.Errorf("authorize %s=%v: %w", peer, allowed, err)
+	}
+	if allowed {
+		d.allowed[peer] = true
+	} else {
+		delete(d.allowed, peer)
 	}
 	return nil
 }
@@ -446,6 +484,24 @@ func interfaceOfTable(tables map[string]int, table int) string {
 }
 
 func (d *Dataplane) Teardown() error {
+	return d.teardown(netlink.LinkSetDown)
+}
+
+func (d *Dataplane) teardown(disable func(netlink.Link) error) error {
+	// Stop ingress while routing and firewall protection still exist. The
+	// daemon keeps TUNs open until cleanup finishes so route ownership remains
+	// provable. If disabling fails, leave all protection intact for its retry.
+	if d.down != "" {
+		link, err := netlink.LinkByName(d.down)
+		if err != nil {
+			var missing netlink.LinkNotFoundError
+			if !errors.As(err, &missing) {
+				return fmt.Errorf("find downstream %s: %w", d.down, err)
+			}
+		} else if err := disable(link); err != nil {
+			return fmt.Errorf("disable downstream %s: %w", d.down, err)
+		}
+	}
 	rules, err := d.ownRules()
 	for _, r := range rules {
 		if delErr := netlink.RuleDel(&r); delErr != nil {
@@ -562,6 +618,10 @@ func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) erro
 	}
 
 	table := c.AddTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable})
+	peers := &nftables.Set{Table: table, Name: peerSetName, KeyType: nftables.TypeIPAddr}
+	if err := c.AddSet(peers, nil); err != nil {
+		return err
+	}
 	upSet := &nftables.Set{Table: table, Name: upstreamSetName, KeyType: nftables.TypeIFName, KeyByteOrder: binaryutil.NativeEndian}
 	if err := c.AddSet(upSet, d.upstreamElements(ups)); err != nil {
 		return err
@@ -622,8 +682,16 @@ func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) erro
 	}
 
 	rule(forward, iifIs(down), oifInUps, tcpSyn, clampMSS)
-	rule(forward, iifIs(down), oifInUps, accepting)
-	rule(forward, iifInUps, oifIs(down), ctEstablished, accepting)
+	peerInSet := func(offset uint32) []expr.Any {
+		return []expr.Any{
+			&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
+			&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.NFPROTO_IPV4}},
+			&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: offset, Len: 4},
+			&expr.Lookup{SourceRegister: 1, SetName: peers.Name, SetID: peers.ID},
+		}
+	}
+	rule(forward, iifIs(down), oifInUps, peerInSet(12), accepting)                // IPv4 source
+	rule(forward, iifInUps, oifIs(down), peerInSet(16), ctEstablished, accepting) // IPv4 destination
 	rule(forward, iifIs(down), dropping)
 	rule(forward, iifInUps, dropping)
 	rule(postrouting, oifInUps, []expr.Any{&expr.Masq{}})
@@ -645,6 +713,7 @@ func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) erro
 	if err := c.Flush(); err != nil {
 		return fmt.Errorf("install nftables rules: %w", err)
 	}
+	d.allowed = map[netip.Addr]bool{}
 	return openForeignForwardChains(c, down)
 }
 

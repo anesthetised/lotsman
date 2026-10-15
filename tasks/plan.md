@@ -17,6 +17,37 @@ Issues #6 and #7 already existed and are reused; #8 through #22 were created for
 the remaining audit findings. Read the current issue before starting: its state or
 the implementation may have changed since this snapshot.
 
+## Approved follow-up slice (2026-10-16)
+
+The user approved nftables peer authorization for #14 and disabling the downstream
+interface before teardown for #8. Implement these sequentially from current main,
+with packet regressions in disposable containers. No push, PR, or benchmark is
+part of this slice. The earlier authorization paragraph describes the original
+plan preparation, not this follow-up.
+
+- #14: the Linux firewall starts with no authorized peers. `Route` grants access
+  after installing rules; `Unroute` revokes access before deleting rules. Failed
+  rule cleanup remains retryable while the peer stays blocked after revocation.
+  Local verification: `just test`, `just lint`, explicit gofmt check,
+  `just test-integration`, and amd64/arm64 builds passed. The packet regression
+  failed on the original implementation and when the outbound authorization
+  check was removed in a disposable review copy. It covers never-assigned,
+  revoked, reauthorized, and repeatedly failed rule-cleanup cases. Kernel rule
+  deletion failures were injected at the call boundary, not produced by Linux.
+- #8: Linux `Teardown` must disable downstream ingress before removing protection;
+  failure to disable it preserves rules and returns an error. The daemon closes
+  downstream and retries cleanup once before closing upstreams, preserving route
+  ownership evidence. Packet tests cover the boundary after teardown but before
+  downstream close, including partial setup, and inspect protection before the
+  link-down call. Disable failures are injected at the call boundary, not produced
+  by Linux. Lifecycle tests cover zero, one, and repeated teardown failures.
+  Local verification: `just test`, `just lint`, explicit gofmt check,
+  `just test-integration`, and amd64/arm64 builds passed with both fixes applied.
+  The shutdown packet regression failed before the fix for complete and partial
+  startup. In disposable review copies, skipping link-down broke the packet and
+  preservation tests; restoring the old daemon stop broke the cleanup retry tests.
+  The existing routing-ownership and live-flow-pinning regressions also passed.
+
 ## Working rules
 
 - Use the existing package boundaries and dependencies first. Read the relevant
@@ -161,14 +192,14 @@ pinning, and Linux end-to-end coverage after integration.
 
 ## Decisions that remain open
 
-No architectural choice below is approved by this plan.
+The #14 choice is approved by the follow-up above; the other choices below remain open.
 
 | Issue | Alternatives / trade-off | Recommended discussion starting point |
 |---|---|---|
 | #9 | Explicitly reserved/rejected occupied IDs are simpler; discovered or persisted allocation supports more host layouts but adds lifecycle state. | Prove ownership and refuse unsafe collisions first; agree on crash-leftover compatibility before implementation. |
 | #10 | Reject duplicate tunnel IPs with a clear error, or support them through independently selected probe routes. Supporting them is useful for provider configs but touches more contracts. | Inspect how often real provider configs overlap, then choose deliberately; do not silently rewrite provider IPs. |
 | #13 | Implement address-specific binding, or reject addresses the existing bind cannot honor. Rejection is smaller but does not deliver the documented address-specific behavior. | Prefer honoring the documented setting if existing library interfaces allow a bounded change; otherwise present explicit rejection as an interim option. |
-| #14 | Explicit deny routing versus firewall authorization independent of route selection. Both must preserve existing live-flow pinning. | Use the smallest mechanism that proves the existing `Unroute` contract under main-table fallback. |
+| #14 | Approved: nftables peer authorization independent of route selection. | Preserve live-flow pinning; revoke before route cleanup and test actual packets with an upstream /24. |
 | #20 | Reject host bits, or normalize with `Masked()`. Normalization is convenient but can alter the interpretation of existing configs. | Prefer explicit validation failure over silently changing a running deployment's address plan. |
 
 For #6, the existing issue specifies blocking affected peers. Do not replace that
