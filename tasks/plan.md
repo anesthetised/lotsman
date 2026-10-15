@@ -35,8 +35,18 @@ plan preparation, not this follow-up.
   revoked, reauthorized, and repeatedly failed rule-cleanup cases. Kernel rule
   deletion failures were injected at the call boundary, not produced by Linux.
 - #8: Linux `Teardown` must disable downstream ingress before removing protection;
-  failure to disable it must preserve rules and return an error. Implementation
-  and packet evidence follow #14.
+  failure to disable it preserves rules and returns an error. The daemon closes
+  downstream and retries cleanup once before closing upstreams, preserving route
+  ownership evidence. Packet tests cover the boundary after teardown but before
+  downstream close, including partial setup, and inspect protection before the
+  link-down call. Disable failures are injected at the call boundary, not produced
+  by Linux. Lifecycle tests cover zero, one, and repeated teardown failures.
+  Local verification: `just test`, `just lint`, explicit gofmt check,
+  `just test-integration`, and amd64/arm64 builds passed with both fixes applied.
+  The shutdown packet regression failed before the fix for complete and partial
+  startup. In disposable review copies, skipping link-down broke the packet and
+  preservation tests; restoring the old daemon stop broke the cleanup retry tests.
+  The existing routing-ownership and live-flow-pinning regressions also passed.
 
 ## Working rules
 

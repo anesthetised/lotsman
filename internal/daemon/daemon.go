@@ -208,14 +208,22 @@ func (d *Daemon) interfaces() []dataplane.Interface {
 func (d *Daemon) stop() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if err := d.dp.Teardown(); err != nil {
+	err := d.dp.Teardown() // disables ingress before removing forwarding protection
+	if err != nil {
 		d.log.Error("dataplane teardown", "err", err)
-	}
-	for _, u := range d.ups {
-		u.Device.Close()
 	}
 	if d.down != nil {
 		d.down.Close()
+	}
+	// Closing downstream also stops ingress if disabling it failed. Retry
+	// cleanup before upstream TUNs disappear, while ownership is still known.
+	if err != nil {
+		if retryErr := d.dp.Teardown(); retryErr != nil {
+			d.log.Error("dataplane teardown after downstream close", "err", retryErr)
+		}
+	}
+	for _, u := range d.ups {
+		u.Device.Close()
 	}
 }
 

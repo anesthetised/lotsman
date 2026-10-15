@@ -6,6 +6,9 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Disable downstream ingress before removing routing and firewall protection on shutdown,
+  including failed startup. Retain protection if disabling fails and retry cleanup after closing
+  the downstream device, before closing upstreams (#8).
 - Deny peers without an upstream assignment in nftables, including upstream connected subnets;
   revoke forwarding before route cleanup so stale rules cannot keep a peer connected (#14).
 - `user add`, `user show` and `user rm` reject unexpected arguments instead of ignoring them;

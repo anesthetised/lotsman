@@ -14,9 +14,9 @@ import (
 	"github.com/anesthetised/lotsman/internal/dataplane"
 )
 
-// packetNetwork puts both ends of the gateway in disposable namespaces. The
+// packetLinks puts both ends of the gateway in disposable namespaces. The
 // upstream /24 deliberately creates the main-table route behind issue #14.
-func packetNetwork(t *testing.T) *Dataplane {
+func packetLinks(t *testing.T) {
 	t.Helper()
 	for _, ns := range []string{"lm-client", "lm-provider"} {
 		packetCommand(t, "ip", "netns", "add", ns)
@@ -27,6 +27,7 @@ func packetNetwork(t *testing.T) *Dataplane {
 		{"lm-up-a", "provider0", "lm-provider", "10.8.0.1/24"},
 	} {
 		packetCommand(t, "ip", "link", "add", link.name, "type", "veth", "peer", "name", link.peer)
+		t.Cleanup(func() { packetCommand(t, "ip", "link", "del", link.name) })
 		packetCommand(t, "ip", "link", "set", link.peer, "netns", link.ns)
 		packetCommand(t, "ip", "-n", link.ns, "addr", "add", link.addr, "dev", link.peer)
 		packetCommand(t, "ip", "-n", link.ns, "link", "set", link.peer, "up")
@@ -45,6 +46,11 @@ func packetNetwork(t *testing.T) *Dataplane {
 	if out, err := nft.CombinedOutput(); err != nil {
 		t.Fatalf("provider counter: %v: %s", err, out)
 	}
+}
+
+func packetNetwork(t *testing.T) *Dataplane {
+	t.Helper()
+	packetLinks(t)
 	d := New()
 	t.Cleanup(func() {
 		if err := d.Teardown(); err != nil {
@@ -71,8 +77,13 @@ func packetCommand(t *testing.T, name string, args ...string) string {
 
 func checkPeerPackets(t *testing.T, allowed bool) {
 	t.Helper()
+	checkPeerPacketsTo(t, "10.8.0.1", allowed)
+}
+
+func checkPeerPacketsTo(t *testing.T, destination string, allowed bool) {
+	t.Helper()
 	packetCommand(t, "ip", "netns", "exec", "lm-provider", "nft", "reset", "counter", "ip", "observe", "requests")
-	out, err := exec.Command("ip", "netns", "exec", "lm-client", "ping", "-n", "-c", "1", "-W", "1", "10.8.0.1").CombinedOutput()
+	out, err := exec.Command("ip", "netns", "exec", "lm-client", "ping", "-n", "-c", "1", "-W", "1", destination).CombinedOutput()
 	if allowed && err != nil {
 		t.Fatalf("authorized packet failed: %v: %s", err, out)
 	}

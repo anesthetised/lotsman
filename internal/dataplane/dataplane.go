@@ -32,6 +32,9 @@ type Dataplane interface {
 	// dead drops every pin to it, so those flows follow their peer's current
 	// route instead of a black hole.
 	SetAlive(upstreamInterface string, alive bool) error
-	// Teardown removes everything Setup and Route created.
+	// Teardown disables downstream ingress before removing resources created
+	// by Setup and Route, including after a failed Setup. If disabling ingress
+	// fails, it preserves routing/firewall protection and returns an error.
+	// It is safe to retry, including after the downstream device is closed.
 	Teardown() error
 }

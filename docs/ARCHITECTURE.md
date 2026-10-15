@@ -58,6 +58,26 @@ Client tunnel MTU = `min(1500 − 60 − S4_down, min over upstreams (upstream M
 60 bytes = IPv4 (20) + UDP (8) + WireGuard transport header (16) + Poly1305 tag (16). The same value is
 set on `lm0` and written into client configs; nftables additionally clamps TCP MSS to the route MTU.
 
+## Forwarding authorization and shutdown
+
+Approved on 2026-10-16 for #14 and #8. The nftables `authorized_peers` set starts
+empty. `Route` grants access only after installing routing rules; `Unroute` revokes
+access before deleting them. This separates forwarding permission from route
+selection without adding deny-rule priorities or changing live-flow pinning.
+Both outgoing requests and established replies require an authorized peer.
+
+Linux `Teardown` first sets the downstream link down, then removes its rules,
+routes and firewall state. It retains the downstream name before configuring the
+link so a partially failed setup can also be stopped. If finding or disabling the
+link fails, protection stays intact and the error is returned; an already absent
+link is safe to clean up. Keeping this step inside `Teardown` avoids a separate
+quiesce API and makes the ordering apply to every caller.
+
+The daemon keeps upstream TUNs open through cleanup because route ownership is
+proved against their interfaces. On a teardown error it closes downstream first
+and retries once while upstreams still exist, then closes upstreams. Persistent
+errors are logged; a later start reconciles owned leftovers.
+
 ## Failover semantics
 
 Switching a peer to another upstream changes the exit IP of *new* flows only. Existing flows are

@@ -66,10 +66,10 @@ func (d *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, m
 	if err := sysctl("net/ipv4/ip_forward", "1"); err != nil {
 		return err
 	}
+	d.down = down.Name // retained even if configuring the link only partly succeeds
 	if err := configureLink(down, mtu); err != nil {
 		return err
 	}
-	d.down = down.Name
 	d.tables = map[string]int{}
 	d.alive = map[string]bool{}
 	if err := removeLeftovers(); err != nil {
@@ -484,6 +484,24 @@ func interfaceOfTable(tables map[string]int, table int) string {
 }
 
 func (d *Dataplane) Teardown() error {
+	return d.teardown(netlink.LinkSetDown)
+}
+
+func (d *Dataplane) teardown(disable func(netlink.Link) error) error {
+	// Stop ingress while routing and firewall protection still exist. The
+	// daemon keeps TUNs open until cleanup finishes so route ownership remains
+	// provable. If disabling fails, leave all protection intact for its retry.
+	if d.down != "" {
+		link, err := netlink.LinkByName(d.down)
+		if err != nil {
+			var missing netlink.LinkNotFoundError
+			if !errors.As(err, &missing) {
+				return fmt.Errorf("find downstream %s: %w", d.down, err)
+			}
+		} else if err := disable(link); err != nil {
+			return fmt.Errorf("disable downstream %s: %w", d.down, err)
+		}
+	}
 	rules, err := d.ownRules()
 	for _, r := range rules {
 		if delErr := netlink.RuleDel(&r); delErr != nil {

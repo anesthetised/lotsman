@@ -203,6 +203,12 @@ scrape_configs:
   removed. A client without an assignment is denied from the start, including destinations in an
   upstream's connected subnet. Nothing leaves through the server's own address.
 
+On shutdown, Linux disables `lm0` before removing routes or firewall protection.
+If disabling fails, those protections remain and the error is logged. The daemon
+closes downstream and retries cleanup once before closing upstreams. The same
+order applies after a failed start; repeated shutdown is safe. Cleanup errors
+that persist are logged, and owned leftovers are reconciled at the next start.
+
 ## Identity and secrets
 
 `state_dir/identity.json` holds the server key and the S1–S4/H1–H4 parameters every client config
