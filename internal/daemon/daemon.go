@@ -403,16 +403,9 @@ func (d *Daemon) Reconcile() error {
 	wanted := map[awgconf.Key]bool{}
 	for _, p := range peers {
 		wanted[p.PublicKey] = true
-		if _, ok := d.devicePeers[p.PublicKey]; !ok {
-			err := d.down.AddPeer(awgconf.Peer{PublicKey: p.PublicKey, AllowedIPs: []netip.Prefix{netip.PrefixFrom(p.IP, 32)}})
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			d.devicePeers[p.PublicKey] = p
-		}
-		errs = append(errs, d.route(p))
 	}
+	// Revoke first: a new peer may reuse an old peer's IP, and removing the old
+	// one afterwards would unroute the new one.
 	for key, p := range d.devicePeers {
 		if wanted[key] {
 			continue
@@ -423,6 +416,25 @@ func (d *Daemon) Reconcile() error {
 		}
 		delete(d.devicePeers, key)
 		d.log.Info("peer removed", "peer", p.IP)
+	}
+	// Addresses whose old peer cleanup is unresolved stay unassigned.
+	held := map[netip.Addr]bool{}
+	for _, p := range d.devicePeers {
+		held[p.IP] = true
+	}
+	for _, p := range peers {
+		if _, ok := d.devicePeers[p.PublicKey]; !ok {
+			if held[p.IP] {
+				continue
+			}
+			err := d.down.AddPeer(awgconf.Peer{PublicKey: p.PublicKey, AllowedIPs: []netip.Prefix{netip.PrefixFrom(p.IP, 32)}})
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			d.devicePeers[p.PublicKey] = p
+		}
+		errs = append(errs, d.route(p))
 	}
 	return errors.Join(errs...)
 }

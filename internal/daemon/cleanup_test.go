@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 
+	"github.com/anesthetised/lotsman/internal/awgconf"
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/dataplane/fake"
 	"github.com/anesthetised/lotsman/internal/health"
@@ -160,5 +162,97 @@ func TestRouteCleanupRetry(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// replacePeer starts a daemon with alice's peer routed via nl, then swaps it for
+// bob's peer, which the allocator gives the same IP, with no reconcile between.
+func replacePeer(t *testing.T) (h *harness, oldPeer, newPeer store.Peer) {
+	t.Helper()
+	h = newHarness(t)
+	for _, u := range []string{"alice", "bob"} {
+		if _, err := h.st.CreateUser(u); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldPeer, err := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	t.Cleanup(h.d.stop)
+	if err := h.d.start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	h.d.probeAll(ctx)
+	if err := h.d.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.st.DeletePeer("alice", store.DefaultDevice, "nl"); err != nil {
+		t.Fatal(err)
+	}
+	newPeer, err = h.st.AddPeer("bob", store.DefaultDevice, "nl", h.cfg.Subnet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newPeer.IP != oldPeer.IP || newPeer.PublicKey == oldPeer.PublicKey {
+		t.Fatalf("setup: allocator did not reuse the IP for a new key: old %v new %v", oldPeer, newPeer)
+	}
+	return h, oldPeer, newPeer
+}
+
+func deviceKeys(t *testing.T, h *harness) []awgconf.Key {
+	t.Helper()
+	peers, err := h.d.down.Peers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var keys []awgconf.Key
+	for _, p := range peers {
+		keys = append(keys, p.PublicKey)
+	}
+	return keys
+}
+
+func TestReconcileReusedPeerIP(t *testing.T) {
+	h, old, peer := replacePeer(t)
+	if err := h.d.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := h.dp.RouteOf(peer.IP); got != "lm-up-nl" {
+		t.Errorf("new peer route = %q, want lm-up-nl", got)
+	}
+	if keys := deviceKeys(t, h); !slices.Equal(keys, []awgconf.Key{peer.PublicKey}) {
+		t.Errorf("device peers = %v, want only the new key (old %v)", keys, old.PublicKey)
+	}
+	if st := h.d.Status(); len(st.Peers) != 1 || st.Peers[0].User != "bob" || st.Peers[0].Upstream != "nl" {
+		t.Errorf("status = %+v", st.Peers)
+	}
+}
+
+// While the old peer's cleanup fails, the new peer must neither be authorized
+// nor routed over the unresolved state; the next successful pass converges.
+func TestReconcileReusedPeerIPCleanupRetry(t *testing.T) {
+	h, old, peer := replacePeer(t)
+	h.d.dp = &failingUnroute{Dataplane: h.dp, failures: 2}
+	for i := 0; i < 2; i++ {
+		if err := h.d.Reconcile(); !errors.Is(err, errUnroute) {
+			t.Fatalf("pass %d: %v", i+1, err)
+		}
+		if got, _ := h.dp.RouteOf(peer.IP); got != "lm-up-nl" {
+			t.Fatalf("pass %d: old route must stay until cleanup succeeds, got %q", i+1, got)
+		}
+		if keys := deviceKeys(t, h); slices.Contains(keys, peer.PublicKey) {
+			t.Fatalf("pass %d: new key authorized over unresolved old state", i+1)
+		}
+	}
+	if err := h.d.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := h.dp.RouteOf(peer.IP); got != "lm-up-nl" {
+		t.Errorf("new peer route = %q, want lm-up-nl", got)
+	}
+	if keys := deviceKeys(t, h); !slices.Equal(keys, []awgconf.Key{peer.PublicKey}) {
+		t.Errorf("device peers = %v, want only the new key (old %v)", keys, old.PublicKey)
 	}
 }
