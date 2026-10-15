@@ -90,6 +90,39 @@ func Parse(r io.Reader) (*Config, error) {
 	if cfg.Interface.PrivateKey.IsZero() {
 		return nil, fmt.Errorf("[Interface] has no PrivateKey")
 	}
+	for i, p := range cfg.Peers {
+		if p.PublicKey.IsZero() {
+			return nil, fmt.Errorf("[Peer] %d: PublicKey is required", i+1)
+		}
+	}
+	p := cfg.Interface.Params
+	if p.Jc > 0 {
+		if p.Jmin > p.Jmax {
+			return nil, fmt.Errorf("[Interface] Jmin must not exceed Jmax")
+		}
+		// The pinned AWG sender passes I packets, junk and initiation together
+		// to StdNetBind, whose message pool has conn.IdealBatchSize (128) slots.
+		packets := uint64(p.Jc) + 1
+		for _, signature := range p.I {
+			if signature != "" {
+				packets++
+			}
+		}
+		if packets > 128 {
+			return nil, fmt.Errorf("[Interface] Jc plus signature packets and handshake must not exceed 128")
+		}
+		// JunkPackets uses min+fastrandn(max-min): max is exclusive unless
+		// min == max, when it generates a fixed size (including zero).
+		largest := p.Jmax
+		if p.Jmin < p.Jmax {
+			largest--
+		}
+		// IPv6's maximum UDP payload is 65535-8; upstream loading must apply
+		// the smaller IPv4 limit when that is the endpoint's address family.
+		if largest > 65527 {
+			return nil, fmt.Errorf("[Interface] junk packet size must not exceed 65527")
+		}
+	}
 	return cfg, nil
 }
 
