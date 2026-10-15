@@ -4,6 +4,7 @@ package tunnel
 import (
 	"fmt"
 	"log/slog"
+	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -23,12 +24,23 @@ type Device struct {
 // New starts a device on t. The caller owns t's creation (a real TUN on Linux,
 // a netstack one in tests) so this package stays portable.
 func New(name string, t tun.Device, log *slog.Logger) *Device {
+	return newWithBind(name, t, conn.NewDefaultBind(), log)
+}
+
+// NewBound creates a downstream device bound to one numeric local address and
+// its family. Unspecified addresses are family-specific; mapped IPv6 uses IPv4.
+// Socket binding happens during Up, which reports binding errors.
+func NewBound(name string, t tun.Device, addr netip.Addr, log *slog.Logger) *Device {
+	return newWithBind(name, t, newAddressBind(addr), log)
+}
+
+func newWithBind(name string, t tun.Device, bind conn.Bind, log *slog.Logger) *Device {
 	log = log.With("device", name)
 	logger := &device.Logger{
 		Verbosef: func(format string, args ...any) { log.Debug(fmt.Sprintf(format, args...)) },
 		Errorf:   func(format string, args ...any) { log.Error(fmt.Sprintf(format, args...)) },
 	}
-	return &Device{name: name, dev: device.NewDevice(t, conn.NewDefaultBind(), logger)}
+	return &Device{name: name, dev: device.NewDevice(t, bind, logger)}
 }
 
 // CreateTUN opens a kernel TUN interface with the given name and MTU.
