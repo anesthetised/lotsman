@@ -96,6 +96,11 @@ blocked for a moment and rerouted on the same pass. `listen`, `subnet` and `stat
 live; a reload that touches them is rejected as a whole and logged. A config that fails validation is
 logged and ignored. A changed client MTU only reaches clients that re-import their config.
 
+Removing a profile blocks its existing clients on the next reconciliation, even if their upstream
+stays healthy and configured. Their routes and flow pins are removed and their current assignment
+is cleared; reconciliation still reports the missing profile until it is restored or those peers
+are removed.
+
 If route cleanup fails, the daemon logs the error and retries on subsequent reconciliations.
 It retains the previous assignment in status until cleanup succeeds, and finishes removing old
 routes and flow pins before routing that peer again, including through a replacement upstream
