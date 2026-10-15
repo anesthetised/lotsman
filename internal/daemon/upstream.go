@@ -50,6 +50,26 @@ func LoadUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Ups
 	if peer.Endpoint, err = resolveEndpoint(ctx, endpoint); err != nil {
 		return nil, fmt.Errorf("upstream %s: %w", u.Name, err)
 	}
+	remote, err := netip.ParseAddrPort(peer.Endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("upstream %s: resolved endpoint: %w", u.Name, err)
+	}
+	// Ordinary UDP payload limits, also used by the pinned AWG StdNetBind.
+	payloadMax := 65507
+	if remote.Addr().Is6() && !remote.Addr().Is4In6() {
+		payloadMax = 65527
+	}
+	if p := conf.Interface.Params; p.Jc > 0 {
+		// Parse has already checked ordering; the upper bound is exclusive
+		// except for a fixed-size range.
+		largest := p.Jmax
+		if p.Jmin < p.Jmax {
+			largest--
+		}
+		if largest > uint32(payloadMax) {
+			return nil, fmt.Errorf("upstream %s: [Interface] junk packet size must not exceed %d for endpoint %s", u.Name, payloadMax, peer.Endpoint)
+		}
+	}
 	addr, ok := firstIPv4(conf.Interface.Addresses)
 	if !ok {
 		return nil, fmt.Errorf("upstream %s: [Interface] Address has no IPv4", u.Name)
@@ -57,6 +77,18 @@ func LoadUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Ups
 	m := conf.Interface.MTU
 	if m == 0 {
 		m = mtu.DefaultWireGuard
+	}
+	// Linux TUN needs at least 68 bytes, including for the client MTU after
+	// subtracting S4. Compare thresholds to avoid overflowing on a huge MTU.
+	s4 := int(conf.Interface.S4)
+	if m < 68+s4 {
+		return nil, fmt.Errorf("upstream %s: [Interface] MTU minus S4 must be at least 68 (MTU %d, S4 %d)", u.Name, m, s4)
+	}
+	// AWG reserves a 16-byte transport header and 16-byte authentication tag.
+	// Its content padding clamps to the positive TUN MTU, without rounding
+	// past it, so no additional alignment allowance is needed.
+	if m > payloadMax-32-s4 {
+		return nil, fmt.Errorf("upstream %s: [Interface] MTU plus S4 and transport overhead exceeds UDP payload limit %d for endpoint %s", u.Name, payloadMax, peer.Endpoint)
 	}
 	return &Upstream{
 		Upstream: u,

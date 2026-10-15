@@ -6,6 +6,8 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Reject missing upstream peer keys, unsafe active junk ranges/counts, and MTUs
+  that exceed the padding-adjusted tunnel or UDP limits during configuration loading (#19).
 - Validate advertised endpoints before creating users or rendering client configs:
   require a nonempty host and a numeric UDP port from 1 to 65535 (#21).
 - Reject client subnet prefixes with host bits set before creating users or peers;

@@ -139,6 +139,82 @@ func TestParseErrors(t *testing.T) {
 	}
 }
 
+func TestParsePeerPublicKeys(t *testing.T) {
+	iface := "[Interface]\nPrivateKey = " + privB64 + "\n"
+	validPeer := "[Peer]\nPublicKey = " + pubB64 + "\n"
+	zeroKey := (Key{}).String()
+	for _, tc := range []struct {
+		name, peers, wantError string
+	}{
+		{"no peers", "", ""},
+		{"valid peer", validPeer, ""},
+		{"optional zero preshared key", validPeer + "PresharedKey = " + zeroKey + "\n", ""},
+		{"missing public key", "[Peer]\nAllowedIPs = 0.0.0.0/0\n", "[Peer] 1: PublicKey is required"},
+		{"zero public key", "[Peer]\nPublicKey = " + zeroKey + "\n", "[Peer] 1: PublicKey is required"},
+		{"second peer missing public key", validPeer + "[Peer]\n", "[Peer] 2: PublicKey is required"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse(strings.NewReader(iface + tc.peers))
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("Parse error = %v, want %q", err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestParseJunkBounds(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		params    Params
+		wantError string
+	}{
+		{"plain defaults", Params{}, ""},
+		{"zero length", Params{Jc: 1}, ""},
+		{"fixed size", Params{Jc: 1, Jmin: 70, Jmax: 70}, ""},
+		{"ordered range", Params{Jc: 1, Jmin: 40, Jmax: 70}, ""},
+		{"dormant inverted range", Params{Jmin: 70, Jmax: 40}, ""},
+		{"dormant oversized range", Params{Jmin: 1, Jmax: ^uint32(0)}, ""},
+		{"maximum count", Params{Jc: 127, Jmin: 1, Jmax: 2}, ""},
+		{"maximum count with inert signature", Params{Jc: 127, I: [5]string{"ignored"}}, ""},
+		{"count with five signatures", Params{Jc: 122, I: [5]string{"<r 1>", "<r 1>", "<r 1>", "<r 1>", "<r 1>"}}, ""},
+		{"count with sparse signatures", Params{Jc: 126, I: [5]string{"", "", "<r 1>"}}, ""},
+		{"maximum fixed size", Params{Jc: 1, Jmin: 65527, Jmax: 65527}, ""},
+		{"exclusive upper size", Params{Jc: 1, Jmin: 65527, Jmax: 65528}, ""},
+		{"inverted range", Params{Jc: 1, Jmin: 70, Jmax: 40}, "Jmin must not exceed Jmax"},
+		{"count overflow", Params{Jc: ^uint32(0)}, "Jc plus signature packets and handshake must not exceed 128"},
+		{"too many junk packets", Params{Jc: 128}, "Jc plus signature packets and handshake must not exceed 128"},
+		{"too many with signatures", Params{Jc: 123, I: [5]string{"<r 1>", "<r 1>", "<r 1>", "<r 1>", "<r 1>"}}, "Jc plus signature packets and handshake must not exceed 128"},
+		{"oversized fixed packet", Params{Jc: 1, Jmin: 65528, Jmax: 65528}, "junk packet size must not exceed 65527"},
+		{"oversized range", Params{Jc: 1, Jmax: 65529}, "junk packet size must not exceed 65527"},
+		{"maximum uint32 size", Params{Jc: 1, Jmax: ^uint32(0)}, "junk packet size must not exceed 65527"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			key, err := ParseKey(privB64)
+			if err != nil {
+				t.Fatal(err)
+			}
+			input := (&Config{Interface: Interface{PrivateKey: key, Params: tc.params}}).String()
+			cfg, err := Parse(strings.NewReader(input))
+			if tc.wantError != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+					t.Fatalf("Parse error = %v, want %q", err, tc.wantError)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.Interface.Params != tc.params {
+				t.Fatalf("params = %+v, want %+v", cfg.Interface.Params, tc.params)
+			}
+		})
+	}
+}
+
 func TestRoundTrip(t *testing.T) {
 	cfg, err := Parse(strings.NewReader(providerConf))
 	if err != nil {
