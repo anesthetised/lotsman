@@ -8,6 +8,8 @@ import (
 	"io/fs"
 	"net/netip"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"modernc.org/sqlite"
@@ -105,19 +107,29 @@ func Open(path string) (*Store, error) {
 
 // makePrivate creates path as 0600 before SQLite writes anything (an empty file
 // is a valid empty database; SQLite gives the -wal/-shm sidecars the mode of the
-// main file) and tightens files left over from earlier versions.
+// main file) and tightens files left over from earlier versions, including
+// migration backups made before they were created private.
 func makePrivate(path string) error {
 	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
 	if err != nil {
 		return err
 	}
 	f.Close()
-	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+	old, err := filepath.Glob(glob(path) + ".v*.bak")
+	if err != nil {
+		return err
+	}
+	for _, p := range append([]string{path, path + "-wal", path + "-shm"}, old...) {
 		if err := os.Chmod(p, 0o600); err != nil && !errors.Is(err, fs.ErrNotExist) {
 			return err
 		}
 	}
 	return nil
+}
+
+// glob escapes the glob metacharacters of a literal path.
+func glob(path string) string {
+	return strings.NewReplacer(`\`, `\\`, "*", `\*`, "?", `\?`, "[", `\[`).Replace(path)
 }
 
 // migrate brings the schema up to date. When there is anything to apply it

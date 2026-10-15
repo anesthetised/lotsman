@@ -306,7 +306,11 @@ func TestOpenTightensExistingFiles(t *testing.T) {
 	}
 	defer s.Close()
 	s.CreateUser("alice")
-	files := []string{path, path + "-wal", path + "-shm"}
+	oldBackup := path + ".v1-20260101-000000.bak"
+	if err := os.WriteFile(oldBackup, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	files := []string{path, path + "-wal", path + "-shm", oldBackup}
 	for _, p := range files {
 		if err := os.Chmod(p, 0o644); err != nil {
 			t.Fatal(err)
