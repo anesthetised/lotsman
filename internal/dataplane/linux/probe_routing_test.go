@@ -4,6 +4,7 @@ package linux
 
 import (
 	"bytes"
+	"fmt"
 	"net"
 	"net/netip"
 	"os"
@@ -66,7 +67,7 @@ func TestProbeRoutesWithOverlappingAddresses(t *testing.T) {
 	}
 }
 
-func runUninstall(t *testing.T) ([]byte, error) {
+func runUninstall(t *testing.T, stubs map[string]string) ([]byte, error) {
 	t.Helper()
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "INSTALLED")
@@ -75,8 +76,16 @@ func runUninstall(t *testing.T) ([]byte, error) {
 	}
 	// No package/path manifest entries and a stub systemctl keep the test to
 	// actual routing cleanup inside the disposable container.
-	if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatal(err)
+	if stubs == nil {
+		stubs = map[string]string{}
+	}
+	if _, exists := stubs["systemctl"]; !exists {
+		stubs["systemctl"] = "#!/bin/sh\nexit 0\n"
+	}
+	for name, script := range stubs {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o700); err != nil {
+			t.Fatal(err)
+		}
 	}
 	script, err := os.ReadFile("../../../deploy/uninstall.sh")
 	if err != nil {
@@ -100,7 +109,7 @@ func TestProbeUninstallOwnership(t *testing.T) {
 	foreignRule(t, probeRulePriority, "10.8.0.2", 1020, func(r *netlink.Rule) { r.OifName = "lm-up-a" })
 	foreignRule(t, probeRulePriority, "10.9.0.2", 1022)
 	foreignRule(t, probeRulePriority, "10.10.0.2", 1023, func(r *netlink.Rule) { r.OifName = "lm-up-gone" })
-	if out, err := runUninstall(t); err != nil {
+	if out, err := runUninstall(t, nil); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, out)
 	}
 	if got := rulesAt(t, probeRulePriority); !reflect.DeepEqual(got, foreign) {
@@ -144,7 +153,7 @@ func TestAmbiguousProbeCleanupPreservesState(t *testing.T) {
 				err = d.Teardown()
 			case "uninstall":
 				var out []byte
-				out, err = runUninstall(t)
+				out, err = runUninstall(t, nil)
 				if !strings.Contains(string(out), "manual") {
 					t.Errorf("uninstall did not explain incomplete cleanup: %s", out)
 				}
@@ -181,5 +190,85 @@ func TestProbeLeftoverOwnership(t *testing.T) {
 		if r.OifName != foreign[i].OifName || !r.Src.IP.Equal(foreign[i].Src.IP) || r.Table != foreign[i].Table {
 			t.Errorf("foreign probe rule changed: got %v, want %v", r, foreign[i])
 		}
+	}
+}
+
+func TestUninstallStopsIngressBeforeRemovingProtection(t *testing.T) {
+	for _, failure := range []string{"none", "disable", "inspect"} {
+		t.Run(failure, func(t *testing.T) {
+			d := packetNetwork(t)
+			if err := d.Route(netip.MustParseAddr("10.77.0.2"), "lm-up-a"); err != nil {
+				t.Fatal(err)
+			}
+			packetCommand(t, "iptables", "-P", "FORWARD", "ACCEPT")
+			dummy(t, "lm-up-b")
+			foreignRoute(t, "lm-up-a", 1050, "0.0.0.0/0")
+			foreignRule(t, probeRulePriority, "10.9.0.2", 1050, func(r *netlink.Rule) { r.OifName = "lm-up-b" })
+			foreignRule(t, probeRulePriority, "10.9.0.2", 1050)
+			t.Cleanup(func() {
+				// Remove the qualified collision before any source-only deletion.
+				packetCommand(t, "ip", "rule", "del", "priority", "4000", "from", "10.9.0.2", "oif", "lm-up-b", "lookup", "1050")
+				packetCommand(t, "ip", "rule", "del", "priority", "4000", "from", "10.9.0.2", "lookup", "1050")
+			})
+			checkPeerPackets(t, true)
+			routes := routingState(t)
+			firewall := packetCommand(t, "nft", "list", "table", "inet", nftTable)
+			boundary := filepath.Join(t.TempDir(), "nft-delete-boundary")
+			ip, err := exec.LookPath("ip")
+			if err != nil {
+				t.Fatal(err)
+			}
+			nft, err := exec.LookPath("nft")
+			if err != nil {
+				t.Fatal(err)
+			}
+			stubs := map[string]string{
+				"systemctl": "#!/bin/sh\nif [ \"$1\" = disable ]; then exit 1; fi\nexit 0\n",
+				"nft":       fmt.Sprintf("#!/bin/sh\n%s -o link show dev lm0 > %s\nexec %s \"$@\"\n", ip, boundary, nft),
+			}
+			if failure != "none" {
+				command := "link set dev lm0 down"
+				if failure == "inspect" {
+					command = "-o link show"
+				}
+				stubs["ip"] = fmt.Sprintf("#!/bin/sh\nif [ \"$*\" = \"%s\" ]; then exit 1; fi\nexec %s \"$@\"\n", command, ip)
+			}
+			out, err := runUninstall(t, stubs)
+			if err == nil {
+				t.Fatalf("uninstall should report incomplete cleanup: %s", out)
+			}
+			if failure != "none" {
+				if got := routingState(t); !reflect.DeepEqual(got, routes) {
+					t.Errorf("failed disable changed preserved routing: %v", got)
+				}
+				wantError := "disable downstream"
+				if failure == "inspect" {
+					wantError = "inspect downstream"
+				}
+				if !strings.Contains(string(out), wantError) {
+					t.Errorf("missing %s error: %s", failure, out)
+				}
+				if _, err := os.Stat(boundary); !os.IsNotExist(err) {
+					t.Error("nft cleanup ran after failed ingress disable")
+				}
+				if got := packetCommand(t, "nft", "list", "table", "inet", nftTable); got != firewall {
+					t.Error("failed disable changed firewall")
+				}
+				checkPeerPackets(t, true)
+				return
+			}
+			flags, err := os.ReadFile(boundary)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(flags), "state DOWN") {
+				t.Errorf("downstream was not down at nft deletion: %s", flags)
+			}
+			link, err := netlink.LinkByName("lm0")
+			if err != nil || link.Attrs().Flags&net.FlagUp != 0 {
+				t.Errorf("retained downstream must be down: %v, %v", link, err)
+			}
+			checkPeerPackets(t, false)
+		})
 	}
 }

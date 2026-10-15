@@ -11,6 +11,19 @@ fi
 
 systemctl disable --now lotsman 2>/dev/null || true
 
+# A failed stop can leave the daemon and downstream alive. Stop ingress before
+# removing protection, including when ambiguous routing state must be retained.
+if ! links=$(ip -o link show); then
+	echo "cannot inspect downstream: preserving firewall and routing" >&2
+	exit 1
+fi
+if printf '%s\n' "$links" | awk -F': ' '$2 == "lm0" || $2 ~ /^lm0@/ { found=1 } END { exit !found }'; then
+	if ! ip link set dev lm0 down; then
+		echo "cannot disable downstream lm0: preserving firewall and routing" >&2
+		exit 1
+	fi
+fi
+
 # Lotsman removes its own rules and interfaces on stop; clean up if it crashed.
 nft delete table inet lotsman 2>/dev/null || true
 
