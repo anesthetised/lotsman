@@ -6,6 +6,13 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- `user add`, `user show` and `user rm` reject unexpected arguments instead of ignoring them;
+  `user rm alice phone -profile nl` used to delete the whole user (#15).
+- Create the initial server identity atomically, so concurrent first starts share one complete
+  identity and never overwrite an existing key (#16).
+- A peer that reuses a freed IP is routed in the same reconcile that revokes the old peer's key;
+  if the old peer's cleanup fails, the new peer waits for the retry (#17).
+- Upstreams added or replaced on reload use the incoming `health` thresholds (#18).
 - Block clients whose profile is removed on reload, clearing their routes, flow pins, and
   reported assignment even when their upstream remains configured (#6).
 - Retry failed route and flow-pin cleanup after upstream failure, peer removal, and upstream
