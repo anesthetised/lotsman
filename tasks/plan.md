@@ -72,6 +72,55 @@ Approved behavior choices:
 - #20: reject subnet prefixes with host bits set, with a clear validation error;
   do not normalize them silently.
 
+### Local verification snapshot
+
+The remaining audit work is implemented locally on `fix/audit-followup`, through
+code commit `d2dc48c`, with documentation recorded afterward. The GitHub issues
+remain open pending publication/integration; this snapshot is evidence, not a
+second completion tracker. No push or PR was performed.
+
+- #22: `go test -race ./internal/config` passed. A temporary Go overlay replacing
+  both name regexes with `.*` passed against the original tests and failed the
+  repaired upstream/profile-name cases. Real production source was not weakened.
+- #20/#21: focused config/store/daemon/CLI race tests and vet passed. Regressions
+  failed before their guards, and now prove invalid config checks and client
+  commands produce the intended errors without creating users or changing peers.
+  Canonical allocation/gateway boundaries and existing peer output are preserved.
+  An overlay removing host-bit rejection failed the corresponding regression.
+- #19: parse/load-only malformed and valid-boundary tests passed, including
+  fixed/exclusive junk ranges, runtime batch capacity, inert I strings, peer
+  keys, integer extremes, and endpoint-family MTU/S4 bounds. Invalid fixtures
+  never reached device startup or allocation. Boundary and inert-I overlay
+  mutations failed as expected. I allocation lengths and S1–S3 wire lengths are
+  explicitly deferred to #32.
+- #10: `go test -tags integration ./cmd/lotsman -run TestEndToEnd -count=1 -v
+  -timeout 180s` passed in a disposable Linux container for distinct and identical
+  provider IPs. Each outer UDP endpoint was blocked/restored independently while
+  checking health, real client exit, reload, and live-flow pinning. An isolated
+  overlay removing both interface binding and the output-interface route selector
+  failed waiting for DE to become independently down. Focused binding, routing,
+  legacy/detached ownership, foreign-state, and uninstall tests also passed.
+  Independent review found an uninstall ordering regression: a disposable packet
+  test captured one forwarded request before the correction and zero afterward.
+  Injected inspect/disable failures preserve firewall and routing; these are call
+  boundary injections, not real kernel failures.
+- #13: container `go test -race -tags integration ./internal/tunnel -count=1
+  -timeout=90s` and focused `TestDaemonListenAddress` passed. Tests inspect actual
+  sockets and datagrams for assigned/loopback/wildcard IPv4 and IPv6, scoped IPv6,
+  mapped IPv4, lifecycle/reopen, send batches, and bind errors. Authenticated daemon
+  echo succeeds only on permitted addresses/families. Default-bind baselines and
+  constructor overlays failed the new exposure assertions. Existing AWG transport
+  and stock WireGuard interoperability passed. A diagnostic wildcard reply-source
+  check failed against both the pinned default and custom bind; no introduced
+  regression was established, and that diagnostic was not retained as a test.
+  Throughput remains unmeasured.
+
+On the integrated code, every command in the verification gate below passed:
+`just test`, `just lint`, `test -z "$(gofmt -l .)"`, `just test-integration`,
+`just build amd64`, and `just build arm64`. New networking regressions ran only in
+disposable containers without host networking. These are local results; no CI
+result is claimed for unpublished commits. No dependency files changed.
+
 ## Working rules
 
 - Use the existing package boundaries and dependencies first. Read the relevant
@@ -291,6 +340,10 @@ once the change has actually been integrated under the repository workflow.
 
 ## Deferred investigation and exclusions
 
+- [#32](https://github.com/anesthetised/lotsman/issues/32): validate I packet
+  allocation lengths and S1–S3-padded handshake wire sizes. Found by static pinned
+  runtime inspection during #19; no dangerous allocation or handshake was run.
+  The user requested a separate task rather than expanding this run's #19 slice.
 - IPv6 DNS on a client with native IPv6 may bypass the IPv4-only tunnel or fail.
   Official-client behavior was not tested. Coordinate a separate investigation
   with [#4](https://github.com/anesthetised/lotsman/issues/4); do not claim either

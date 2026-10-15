@@ -152,7 +152,7 @@ func (d *Daemon) start(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", DownstreamInterface, err)
 	}
-	d.down = tunnel.New(DownstreamInterface, downTUN, d.log)
+	d.down = tunnel.NewBound(DownstreamInterface, downTUN, listen.Addr(), d.log)
 	downCfg := awgconf.Config{Interface: awgconf.Interface{
 		PrivateKey: d.id.PrivateKey, ListenPort: listen.Port(), Params: d.id.Params,
 	}}
