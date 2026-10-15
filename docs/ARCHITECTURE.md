@@ -80,6 +80,21 @@ errors are logged; a later start reconciles owned leftovers.
 
 ## Failover semantics
 
+Health probes bind to both the provider source address and its TUN interface.
+Priority-4000 rules select `from <provider>/32 oif lm-up-<name> lookup <table>`;
+providers with overlapping tunnel IPs therefore remain independently observable.
+The output-interface selector applies to locally originated device-bound sockets,
+not forwarded client traffic. Peer and live-flow pin rules retain their existing
+selectors. Ordinary provider transport sockets and endpoint DNS resolution remain
+on host routing.
+
+Cleanup recognizes the old source-only probe shape for upgrades. It checks a
+qualified rule's interface against the owned table and rejects ambiguous probe
+deletions before removing routes: Linux treats omitted deletion selectors as
+wildcards, so blindly deleting a legacy rule could delete a foreign qualified one.
+Uninstall inspects rules before removing interface ownership evidence and handles
+detached crash-leftover interfaces explicitly.
+
 Switching a peer to another upstream changes the exit IP of *new* flows only. Existing flows are
 pinned: every new flow leaving through an upstream gets a conntrack mark equal to that upstream's
 routing table (`stamp_mark` chain, `ct mark set oifname map @pinmark`); later packets carry the mark
