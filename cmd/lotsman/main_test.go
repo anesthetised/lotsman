@@ -6,10 +6,12 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
+	"github.com/anesthetised/lotsman/internal/store"
 )
 
 // capture runs the CLI and returns what it printed to stdout.
@@ -155,5 +157,53 @@ func TestCLI(t *testing.T) {
 	}
 	if _, err := capture(t); err == nil {
 		t.Error("no command accepted")
+	}
+}
+
+// Go's flag package stops at the first positional argument, so anything after
+// it must be rejected rather than silently ignored (and then acted on).
+func TestCLIRejectsTrailingArgs(t *testing.T) {
+	cfg := testConfig(t)
+	for _, a := range [][]string{
+		{"alice", "-profile", "nl"},
+		{"alice", "-profile", "auto"},
+		{"alice", "-device", "phone", "-profile", "nl"},
+		{"alice", "-device", "phone", "-profile", "auto"},
+	} {
+		if _, err := capture(t, append([]string{"-config", cfg, "user", "add"}, a...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	peers := func() []store.Peer {
+		e, err := openEnv(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer e.store.Close()
+		ps, err := e.store.ListPeers()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ps
+	}
+	before := peers()
+	if len(before) != 4 {
+		t.Fatalf("setup: %d peers, want 4", len(before))
+	}
+
+	for _, args := range [][]string{
+		{"user", "rm", "alice", "phone", "-profile", "nl"},
+		{"user", "rm", "alice", "phone"},
+		{"user", "rm", "alice", "-device", "phone", "extra"},
+		{"user", "add", "bob", "phone", "-profile", "nl"},
+		{"user", "show", "alice", "phone", "-profile", "nl"},
+	} {
+		_, err := capture(t, append([]string{"-config", cfg}, args...)...)
+		if err == nil || !strings.Contains(err.Error(), "unexpected argument") {
+			t.Errorf("%v: err = %v, want unexpected argument", args, err)
+		}
+		if after := peers(); !reflect.DeepEqual(after, before) {
+			t.Errorf("%v changed stored peers:\nbefore %+v\nafter  %+v", args, before, after)
+		}
 	}
 }

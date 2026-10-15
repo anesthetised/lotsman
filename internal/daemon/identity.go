@@ -30,16 +30,29 @@ type identityFile struct {
 	H3, H4     string
 }
 
+// LoadOrCreateIdentity returns the saved identity, creating it on first use.
+// Safe across concurrent callers and processes: exactly one creator publishes
+// a complete file, the others load the winner's.
 func LoadOrCreateIdentity(stateDir string) (Identity, error) {
 	path := filepath.Join(stateDir, "identity.json")
-	data, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		id, err := newIdentity()
-		if err != nil {
-			return Identity{}, err
-		}
-		return id, saveIdentity(path, id)
+	id, err := loadIdentity(path)
+	if !errors.Is(err, os.ErrNotExist) {
+		return id, err
 	}
+	if id, err = newIdentity(); err != nil {
+		return Identity{}, err
+	}
+	if err := saveIdentity(path, id); err != nil {
+		if errors.Is(err, os.ErrExist) {
+			return loadIdentity(path)
+		}
+		return Identity{}, err
+	}
+	return id, nil
+}
+
+func loadIdentity(path string) (Identity, error) {
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return Identity{}, err
 	}
@@ -61,6 +74,8 @@ func LoadOrCreateIdentity(stateDir string) (Identity, error) {
 	return id, nil
 }
 
+// saveIdentity publishes id at path atomically and never replaces an existing
+// file; it returns an error matching os.ErrExist if path is already taken.
 func saveIdentity(path string, id Identity) error {
 	f := identityFile{
 		PrivateKey: id.PrivateKey.String(),
@@ -75,7 +90,25 @@ func saveIdentity(path string, id Identity) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o600)
+	// Write a private temp file in the same directory, then hard-link it into
+	// place: link fails if path exists, and readers never see a partial file.
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".identity-*.tmp") // mode 0600
+	if err != nil {
+		return err
+	}
+	defer os.Remove(tmp.Name())
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Link(tmp.Name(), path)
 }
 
 // newIdentity draws parameters from the ranges the AmneziaWG documentation

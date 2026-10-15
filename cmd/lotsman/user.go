@@ -141,6 +141,11 @@ func parseUserArgs(cmd string, args []string, profileRequired bool) (userArgs, e
 	if err := fs.Parse(args[1:]); err != nil {
 		return a, err
 	}
+	// Flag parsing stops at the first positional argument; whatever follows
+	// would be silently ignored, e.g. `user rm alice phone -profile nl`.
+	if fs.NArg() > 0 {
+		return a, fmt.Errorf("%s: unexpected argument %q (flags go after NAME as -flag value)", cmd, fs.Arg(0))
+	}
 	fs.Visit(func(f *flag.Flag) {
 		if f.Name == "device" {
 			a.deviceSet = true

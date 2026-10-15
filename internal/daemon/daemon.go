@@ -160,7 +160,7 @@ func (d *Daemon) start(ctx context.Context) error {
 		return err
 	}
 	for _, u := range d.cfg.Upstreams {
-		up, err := d.openUpstream(ctx, u)
+		up, err := d.openUpstream(ctx, u, d.cfg.Health)
 		if err != nil {
 			return err
 		}
@@ -178,8 +178,10 @@ func (d *Daemon) start(ctx context.Context) error {
 }
 
 // openUpstream loads the provider config and starts its device (still down).
-func (d *Daemon) openUpstream(ctx context.Context, u config.Upstream) (*Upstream, error) {
-	up, err := LoadUpstream(ctx, u, d.cfg.Health)
+// Health settings are passed in because Reload opens upstreams before d.cfg
+// switches to the incoming configuration.
+func (d *Daemon) openUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Upstream, error) {
+	up, err := LoadUpstream(ctx, u, h)
 	if err != nil {
 		return nil, err
 	}
@@ -248,7 +250,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 			d.dropUpstream(old)
 			d.log.Info("upstream replaced", "upstream", u.Name)
 		}
-		up, err := d.openUpstream(ctx, u)
+		up, err := d.openUpstream(ctx, u, cfg.Health)
 		if err != nil {
 			errs = append(errs, err)
 			continue
@@ -401,16 +403,9 @@ func (d *Daemon) Reconcile() error {
 	wanted := map[awgconf.Key]bool{}
 	for _, p := range peers {
 		wanted[p.PublicKey] = true
-		if _, ok := d.devicePeers[p.PublicKey]; !ok {
-			err := d.down.AddPeer(awgconf.Peer{PublicKey: p.PublicKey, AllowedIPs: []netip.Prefix{netip.PrefixFrom(p.IP, 32)}})
-			if err != nil {
-				errs = append(errs, err)
-				continue
-			}
-			d.devicePeers[p.PublicKey] = p
-		}
-		errs = append(errs, d.route(p))
 	}
+	// Revoke first: a new peer may reuse an old peer's IP, and removing the old
+	// one afterwards would unroute the new one.
 	for key, p := range d.devicePeers {
 		if wanted[key] {
 			continue
@@ -421,6 +416,25 @@ func (d *Daemon) Reconcile() error {
 		}
 		delete(d.devicePeers, key)
 		d.log.Info("peer removed", "peer", p.IP)
+	}
+	// Addresses whose old peer cleanup is unresolved stay unassigned.
+	held := map[netip.Addr]bool{}
+	for _, p := range d.devicePeers {
+		held[p.IP] = true
+	}
+	for _, p := range peers {
+		if _, ok := d.devicePeers[p.PublicKey]; !ok {
+			if held[p.IP] {
+				continue
+			}
+			err := d.down.AddPeer(awgconf.Peer{PublicKey: p.PublicKey, AllowedIPs: []netip.Prefix{netip.PrefixFrom(p.IP, 32)}})
+			if err != nil {
+				errs = append(errs, err)
+				continue
+			}
+			d.devicePeers[p.PublicKey] = p
+		}
+		errs = append(errs, d.route(p))
 	}
 	return errors.Join(errs...)
 }
