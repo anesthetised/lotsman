@@ -5,10 +5,10 @@
 Prepared on 2026-10-15 for the audit of commit
 `e6efaca96e1bb4ca073c9c62df67f8ba9766ba0f`.
 
-The current request authorizes creating issues and this plan. Product fixes have
-not started. Start implementation only when the user requests it, and agree on the
-scope, expected outcome, delegation, and time/resource budget for a substantial run.
-Once a scope is approved, continue within it without repeatedly requesting approval.
+The initial request authorized creating issues and this plan. Implementation was
+subsequently authorized; current completion and evidence live in GitHub Issues.
+Start new implementation only within the user's authorized scope. Once a scope is
+approved, continue within it without repeatedly requesting approval.
 
 Tasks and their acceptance criteria live in
 [GitHub Issues](https://github.com/anesthetised/lotsman/issues). This file is the
@@ -47,6 +47,30 @@ plan preparation, not this follow-up.
   startup. In disposable review copies, skipping link-down broke the packet and
   preservation tests; restoring the old daemon stop broke the cleanup retry tests.
   The existing routing-ownership and live-flow-pinning regressions also passed.
+
+## Approved remaining audit work (2026-10-16)
+
+The user authorized parallel follow-up work on #10, #13, #19, #20, #21, and #22.
+Use GPT-6-Luna at medium effort for the focused #22 test repair and GPT-6.1-Sol
+at medium effort for the other implementation/research assignments. The parent
+reviews and integrates each issue-sized slice. Keep #10 and #13 network contract
+changes sequential; independent research can proceed without edit ownership.
+Assignments stop at their focused acceptance/checkpoint. No push, PR, benchmark,
+or dependency upgrade is included.
+
+Approved behavior choices:
+
+- #10: support identical provider tunnel IPs by binding health probes to their
+  intended interface and selecting routes by source IP and output interface.
+  Host processes bound only to a provider source IP no longer implicitly select
+  that provider's route; they must also bind the interface.
+- #13: honor the exact downstream listen address and address family. In particular,
+  `0.0.0.0` is IPv4-only and `[::]` is IPv6-only. The default no longer opens an
+  additional IPv6 socket. Keep upstream binds unchanged. The simpler downstream
+  bind loses default-bind UDP batching/offload optimizations; throughput impact
+  is unmeasured and no benchmark is included.
+- #20: reject subnet prefixes with host bits set, with a clear validation error;
+  do not normalize them silently.
 
 ## Working rules
 
@@ -192,7 +216,9 @@ pinning, and Linux end-to-end coverage after integration.
 
 ## Decisions that remain open
 
-The #14 choice is approved by the follow-up above; the other choices below remain open.
+The #10, #13, #14, and #20 choices are approved by the follow-ups above. Their
+original alternatives below remain for context; consult current issues for the
+other tasks' decisions and completion.
 
 | Issue | Alternatives / trade-off | Recommended discussion starting point |
 |---|---|---|

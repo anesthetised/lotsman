@@ -68,34 +68,61 @@ health:
 }
 
 func TestValidationErrors(t *testing.T) {
-	cases := map[string]string{
-		"unknown field":          "bogus: 1\n",
-		"missing endpoint":       "endpoint: ''\n",
-		"endpoint without port":  "endpoint: vpn.example.org\n",
-		"ipv6 subnet":            "subnet: fd00::/64\n",
-		"subnet too small":       "subnet: 10.0.0.0/30\n",
-		"empty dns":              "dns: []\n",
-		"bad upstream name":      "upstreams: [{name: 'Bad Name', conf: /x}]\n",
-		"upstream name too long": "upstreams: [{name: redshield-nl, conf: /x}]\nprofiles: [{name: p}]\n",
-		"duplicate upstream":     "upstreams: [{name: a, conf: /x}, {name: a, conf: /y}]\nprofiles: [{name: p}]\n",
-		"upstream without conf":  "upstreams: [{name: a}]\n",
-		"no profiles":            "profiles: []\n",
-		"duplicate profile":      "profiles: [{name: p}, {name: p}]\n",
-		"prefer matches nothing": "profiles: [{name: p, prefer: [{geo: XX}]}]\n",
-		"zero health interval":   "health: {interval: 0s}\n",
-		"probe without port":     "health: {probe: 1.1.1.1}\n",
-		"down_after zero":        "health: {down_after: 0}\n",
-		"metrics without port":   "metrics: {listen: 10.77.0.1}\n",
-		"metrics on any address": "metrics: {listen: 0.0.0.0:9100}\n",
-		"metrics on any v6":      "metrics: {listen: '[::]:9100'}\n",
+	cases := map[string]struct {
+		field string
+		value string
+		want  string
+	}{
+		"unknown field":          {"bogus", "bogus: 1\n", "field bogus not found"},
+		"missing endpoint":       {"endpoint", "endpoint: ''\n", "endpoint:"},
+		"endpoint without port":  {"endpoint", "endpoint: vpn.example.org\n", "endpoint:"},
+		"ipv6 subnet":            {"subnet", "subnet: fd00::/64\n", "subnet:"},
+		"subnet too small":       {"subnet", "subnet: 10.0.0.0/30\n", "subnet:"},
+		"empty dns":              {"dns", "dns: []\n", "dns:"},
+		"bad upstream name":      {"upstreams", "upstreams: [{name: 'Bad Name', conf: /x}]\n", "upstreams[0]: name"},
+		"upstream name too long": {"upstreams", "upstreams: [{name: redshield-nl, conf: /x}]\n", "upstreams[0]: name"},
+		"duplicate upstream":     {"upstreams", "upstreams: [{name: a, conf: /x}, {name: a, conf: /y}]\n", "duplicate name"},
+		"upstream without conf":  {"upstreams", "upstreams: [{name: a}]\n", "conf path is required"},
+		"no profiles":            {"profiles", "profiles: []\n", "profiles: at least one"},
+		"bad profile name":       {"profiles", "profiles: [{name: 'Bad Name'}]\n", "profiles[0]: name"},
+		"duplicate profile":      {"profiles", "profiles: [{name: p}, {name: p}]\n", "duplicate name"},
+		"prefer matches nothing": {"profiles", "profiles: [{name: p, prefer: [{geo: XX}]}]\n", "matches no upstream"},
+		"zero health interval":   {"health", "health: {interval: 0s}\n", "health.interval:"},
+		"probe without port":     {"health", "health: {probe: 1.1.1.1}\n", "health.probe:"},
+		"down_after zero":        {"health", "health: {down_after: 0}\n", "health.down_after"},
+		"metrics without port":   {"metrics", "metrics: {listen: 10.77.0.1}\n", "metrics.listen:"},
+		"metrics on any address": {"metrics", "metrics: {listen: 0.0.0.0:9100}\n", "would expose user names"},
+		"metrics on any v6":      {"metrics", "metrics: {listen: '[::]:9100'}\n", "would expose user names"},
 	}
-	for name, override := range cases {
+	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
-			if _, err := Parse([]byte(minimal + override)); err == nil {
-				t.Fatal("expected error")
+			input := replaceTopLevelField(minimal, tc.field, tc.value)
+			if _, err := Parse([]byte(input)); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Parse error = %v, want error containing %q", err, tc.want)
 			}
 		})
 	}
+}
+
+func replaceTopLevelField(yaml, field, replacement string) string {
+	lines := strings.Split(yaml, "\n")
+	start, end := -1, len(lines)
+	for i, line := range lines {
+		if strings.HasPrefix(line, field+":") {
+			start = i
+			for j := i + 1; j < len(lines); j++ {
+				if lines[j] != "" && !strings.HasPrefix(lines[j], " ") {
+					end = j
+					break
+				}
+			}
+			break
+		}
+	}
+	if start == -1 {
+		return yaml + replacement
+	}
+	return strings.Join(lines[:start], "\n") + "\n" + replacement + strings.Join(lines[end:], "\n")
 }
 
 func TestMetricsListen(t *testing.T) {
