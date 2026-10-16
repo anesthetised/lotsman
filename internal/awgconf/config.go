@@ -124,6 +124,10 @@ func Parse(r io.Reader) (*Config, error) {
 			return nil, fmt.Errorf("[Interface] junk packet size must not exceed 65527")
 		}
 	}
+	// Smaller IPv4 limits are applied once the endpoint is known.
+	if err := p.CheckWireSizes(65527); err != nil {
+		return nil, err
+	}
 	return cfg, nil
 }
 

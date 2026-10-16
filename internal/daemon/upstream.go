@@ -70,6 +70,9 @@ func LoadUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Ups
 			return nil, fmt.Errorf("upstream %s: [Interface] junk packet size must not exceed %d for endpoint %s", u.Name, payloadMax, peer.Endpoint)
 		}
 	}
+	if err := conf.Interface.Params.CheckWireSizes(payloadMax); err != nil {
+		return nil, fmt.Errorf("upstream %s: %w for endpoint %s", u.Name, err, peer.Endpoint)
+	}
 	addr, ok := firstIPv4(conf.Interface.Addresses)
 	if !ok {
 		return nil, fmt.Errorf("upstream %s: [Interface] Address has no IPv4", u.Name)
