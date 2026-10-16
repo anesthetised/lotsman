@@ -72,12 +72,13 @@ Approved behavior choices:
 - #20: reject subnet prefixes with host bits set, with a clear validation error;
   do not normalize them silently.
 
-### Local verification snapshot
+### Integration status and local verification
 
-The remaining audit work is implemented locally on `fix/audit-followup`, through
-code commit `d2dc48c`, with documentation recorded afterward. The GitHub issues
-remain open pending publication/integration; this snapshot is evidence, not a
-second completion tracker. No push or PR was performed.
+As of 2026-10-16 every audit issue (#6–#22, #29, #32) is closed and merged to
+`main` through PRs #23–#40. The only open PR is #27 (upstream tags), labelled
+`parked`: it conflicts with `internal/config/*` after #20/#21/#22 and needs a
+rebase before review. The notes below are the local evidence recorded before
+publication; GitHub remains the completion tracker.
 
 - #22: `go test -race ./internal/config` passed. A temporary Go overlay replacing
   both name regexes with `.*` passed against the original tests and failed the
@@ -91,8 +92,8 @@ second completion tracker. No push or PR was performed.
   fixed/exclusive junk ranges, runtime batch capacity, inert I strings, peer
   keys, integer extremes, and endpoint-family MTU/S4 bounds. Invalid fixtures
   never reached device startup or allocation. Boundary and inert-I overlay
-  mutations failed as expected. I allocation lengths and S1–S3 wire lengths are
-  explicitly deferred to #32.
+  mutations failed as expected. I allocation lengths and S1–S3 wire lengths were
+  deferred to #32 (done, see below).
 - #10: `go test -tags integration ./cmd/lotsman -run TestEndToEnd -count=1 -v
   -timeout 180s` passed in a disposable Linux container for distinct and identical
   provider IPs. Each outer UDP endpoint was blocked/restored independently while
@@ -114,12 +115,30 @@ second completion tracker. No push or PR was performed.
   check failed against both the pinned default and custom bind; no introduced
   regression was established, and that diagnostic was not retained as a test.
   Throughput remains unmeasured.
+- #29 (PR #39): `run()` rejects trailing arguments once, before dispatch, for
+  `version`, `serve`, `config check`, `user list`, and `upstream status`.
+  Documented argument-free invocations are unchanged. The regression covers all
+  five commands and fails without the check. Side effect: `lotsman serve -config X`
+  is now rejected; the global `-config` flag must precede the command. The
+  shipped unit file and docs never used the old form.
+- #32 (PR #40): config load rejects I-chain allocations and S1–S3-padded handshake
+  sizes that the pinned runtime would mishandle. The check mirrors the runtime's
+  chain parser (checked against its source) and bounds S1+148, S2+92, and S3+64
+  by the UDP maximum (65507 for IPv4, 65527 for IPv6). Boundary-shift and
+  missing-negative-check mutations fail the tests. Nothing dangerous was
+  allocated or sent.
 
 On the integrated code, every command in the verification gate below passed:
 `just test`, `just lint`, `test -z "$(gofmt -l .)"`, `just test-integration`,
 `just build amd64`, and `just build arm64`. New networking regressions ran only in
-disposable containers without host networking. These are local results; no CI
-result is claimed for unpublished commits. No dependency files changed.
+disposable containers without host networking. No dependency files changed.
+
+Known test flake: locally, on Docker 29.8.2 on arm64, `TestDaemonListenAddress`
+fails with `allowed echo: i/o timeout` on repeated runs in one process
+(`-count=2`) and on the subtest that runs second; each subtest passes alone. CI
+(amd64) is green on `main` and on #39/#40. The cause is unknown and no fix is
+claimed; a hypothesis that `Ready()` races peer setup was checked and did not
+hold, because `Ready()` closes after the first reconcile.
 
 ## Working rules
 
@@ -340,10 +359,6 @@ once the change has actually been integrated under the repository workflow.
 
 ## Deferred investigation and exclusions
 
-- [#32](https://github.com/anesthetised/lotsman/issues/32): validate I packet
-  allocation lengths and S1–S3-padded handshake wire sizes. Found by static pinned
-  runtime inspection during #19; no dangerous allocation or handshake was run.
-  The user requested a separate task rather than expanding this run's #19 slice.
 - IPv6 DNS on a client with native IPv6 may bypass the IPv4-only tunnel or fail.
   Official-client behavior was not tested. Coordinate a separate investigation
   with [#4](https://github.com/anesthetised/lotsman/issues/4); do not claim either
