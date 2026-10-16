@@ -16,6 +16,10 @@ All notable changes to Lotsman are documented here. The format follows
   require a nonempty host and a numeric UDP port from 1 to 65535 (#21).
 - Reject client subnet prefixes with host bits set before creating users or peers;
   report the canonical network prefix instead of failing later during IP allocation (#20).
+- Reject provider configs before device startup when S1, S2 or S3 plus their 148/92/64-byte
+  handshake message exceed the endpoint family's UDP payload limit (65507 IPv4, 65527 IPv6),
+  or when an I1–I5 chain has a negative tag size, a packet size above that limit, or a size
+  sum that overflows. Strings the runtime ignores or refuses to build stay accepted (#32).
 - Disable downstream ingress before removing routing and firewall protection on shutdown,
   including failed startup. Retain protection if disabling fails and retry cleanup after closing
   the downstream device, before closing upstreams (#8).
