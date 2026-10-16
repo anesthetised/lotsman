@@ -245,6 +245,29 @@ func TestCLIRejectsTrailingArgs(t *testing.T) {
 	}
 }
 
+func TestCLIRejectsArgumentsOnArgumentlessCommands(t *testing.T) {
+	cfg := testConfig(t)
+	for _, args := range [][]string{
+		{"version", "extra"},
+		{"serve", "extra"},
+		{"serve", "-config", cfg},
+		{"config", "check", "extra"},
+		{"user", "list", "alice"},
+		{"upstream", "status", "-json"},
+	} {
+		_, err := capture(t, append([]string{"-config", cfg}, args...)...)
+		if err == nil || !strings.Contains(err.Error(), "unexpected argument") {
+			t.Errorf("%v: err = %v, want unexpected argument", args, err)
+		}
+	}
+	if _, err := capture(t, "-config", cfg, "config", "check"); err != nil {
+		t.Errorf("config check: %v", err)
+	}
+	if _, err := capture(t, "-config", cfg, "user", "list"); err != nil {
+		t.Errorf("user list: %v", err)
+	}
+}
+
 func TestCLIRejectsSubnetHostBits(t *testing.T) {
 	path := testConfig(t)
 	original, err := os.ReadFile(path)

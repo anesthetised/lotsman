@@ -63,6 +63,13 @@ func run(args []string) error {
 	rest = rest[1:]
 
 	switch cmd {
+	case "version", "serve", "config check", "user list", "upstream status":
+		if len(rest) > 0 {
+			return fmt.Errorf("%s: unexpected argument %q", cmd, rest[0])
+		}
+	}
+
+	switch cmd {
 	case "version":
 		fmt.Println(version)
 		return nil

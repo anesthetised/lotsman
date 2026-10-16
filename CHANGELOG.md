@@ -23,6 +23,8 @@ All notable changes to Lotsman are documented here. The format follows
   revoke forwarding before route cleanup so stale rules cannot keep a peer connected (#14).
 - `user add`, `user show` and `user rm` reject unexpected arguments instead of ignoring them;
   `user rm alice phone -profile nl` used to delete the whole user (#15).
+- `version`, `serve`, `config check`, `user list` and `upstream status` reject unexpected
+  arguments and flags instead of ignoring them (#29).
 - Create the initial server identity atomically, so concurrent first starts share one complete
   identity and never overwrite an existing key (#16).
 - A peer that reuses a freed IP is routed in the same reconcile that revokes the old peer's key;
