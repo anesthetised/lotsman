@@ -11,6 +11,9 @@ All notable changes to Lotsman are documented here. The format follows
   raised to go1.27.4 for GO-2026-6859 (#54).
 
 ### Fixed
+- Upstreams that fail to open on reload, and devices left down after a dataplane error, are
+  retried every health round instead of staying out of service until the next SIGHUP; the
+  failure is logged once as "not running, will retry" (#52).
 - `user add` and `user rm` send SIGUSR1, which only reconciles, instead of SIGHUP, so a
   half-edited `lotsman.yaml` is no longer applied; SIGHUP still reloads, then reconciles. The CLI
   signals only a process running its own executable and explains on stderr when it refuses (#49).

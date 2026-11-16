@@ -138,7 +138,11 @@ added, removed or replaced (a changed provider config counts as a replacement), 
 endpoint resolved before the running upstream is touched (the lookup is bounded by the probe
 timeout and does not block status, metrics or client changes); if any of that fails, including an
 unreadable provider file, the old upstream keeps running and routing its clients, and the error is
-logged and counted in `lotsman_reloads_total{result="error"}`. Clients whose upstream was removed are
+logged and counted in `lotsman_reloads_total{result="error"}`. An upstream that is configured but
+cannot be opened (a new one whose file, DNS or TUN fails, or a replacement whose device fails after
+the old one closed) stays out of service and is retried every health interval; the error is logged
+once as `upstream is not running, will retry every health round`, and `upstream added` marks the
+recovery. A failed dataplane update is retried the same way. Clients whose upstream was removed are
 blocked for a moment and rerouted on the same pass. `listen`, `subnet` and `state_dir` cannot change
 live; a reload that touches them is rejected as a whole and logged. A config that fails validation is
 logged and ignored. A changed client MTU only reaches clients that re-import their config.
