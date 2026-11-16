@@ -1,9 +1,9 @@
 # Architecture
 
 Lotsman is a self-hosted AmneziaWG 2.0 gateway. Users connect with the official Amnezia client;
-Lotsman terminates their tunnel and forwards traffic into one of several upstreams, AmneziaWG tunnels
-or Outline (Shadowsocks) servers (the operator's own provider subscriptions), chosen by the user's
-profile preference and live health.
+Lotsman terminates their tunnel and forwards traffic into one of several upstreams, AmneziaWG tunnels,
+Outline (Shadowsocks) servers or VLESS + REALITY servers (the operator's own provider subscriptions),
+chosen by the user's profile preference and live health.
 
 ```
 user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing──▶ [lm-up-N TUN] ──AWG2──▶ provider ──▶ internet
@@ -24,7 +24,7 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 | State | YAML for upstreams/profiles, SQLite for users/peers | Operators edit and version the YAML; users are created at runtime. |
 | Fail-closed | Mandatory | User traffic must never leave via the host's own IP. nftables admits only authorized peers from `lm0` into an `lm-up-*`; all other forwarding from `lm0` is dropped. |
 | Host firewalls | Accept rules inserted into foreign forward chains | Docker's `FORWARD DROP` and ufw would otherwise silently drop forwarded traffic; same approach as Tailscale. |
-| Proxy upstreams | A userspace TCP/IP stack per upstream on its own TUN, flows re-originated through a pluggable dialer (Shadowsocks first), each in its own unprivileged helper process | Keeps kernel routing, pinning and fail-closed identical for every upstream kind; a panic in the stack takes down one upstream, not the gateway; see [Proxy upstreams](#proxy-upstreams-outline). |
+| Proxy upstreams | A userspace TCP/IP stack per upstream on its own TUN, flows re-originated through a pluggable dialer (Shadowsocks, VLESS + REALITY through embedded xray-core), each in its own unprivileged helper process | Keeps kernel routing, pinning and fail-closed identical for every upstream kind; a panic in the stack takes down one upstream, not the gateway; see [Proxy upstreams](#proxy-upstreams-outline). |
 
 ## AmneziaWG implementation notes (verified 2026-09-17)
 
@@ -271,8 +271,9 @@ binary (`lotsman proxy-helper`, hidden), one per upstream; Shadowsocks too, so t
   `stats` (the flow counters). Closing the connection tells the helper to stop. The key travels
   only there, never in argv or the environment, which other processes can read through `/proc`.
   The daemon sends key text, never a parsed key: a static key file's contents or a dynamic key's
-  response as fetched. The helper parses either with `proxy.ParseConfig`, which loading uses for a
-  static key file too, and on `server` only when the text changed.
+  response as fetched. The helper parses either with `proxy.ParseSpecKey`: a `vless://` link, or
+  what `proxy.ParseConfig` reads, which loading uses for a static Outline key file too; on `server`
+  only when the text changed.
   The helper logs slog JSON records to stderr, and the daemon re-logs each with its level
   and attributes plus the upstream's name; other lines (a panic and its trace) are logged as errors,
   each cut at 4 KiB. Stderr rather than the control connection, because a panic or a fatal runtime
@@ -316,6 +317,70 @@ control connection (stderr is needed for panics anyway).
 TCP flow through kernel TUN, gVisor and Shadowsocks moved about 2 Gbit/s, and the TUN plus stack
 added roughly 1.5–4 ns of CPU per byte over the Shadowsocks client alone. The provider leg is
 expected to remain the bottleneck, as for AWG (see [Throughput](#throughput-2026-09-17)).
+
+**Addendum: VLESS upstreams (2026-11-16, #86).** VLESS with REALITY and XTLS Vision (Xray) disguises
+itself as TLS to a real third-party site, where Shadowsocks is increasingly caught by its
+fully-encrypted look; a profile can fail over between the two. VLESS is the stack's second dialer:
+`kind: vless`, a static `vless://` share link, TCP transport, UDP as XUDP.
+
+| Option | For | Against |
+|---|---|---|
+| **A. Embed `github.com/xtls/xray-core` (chosen)** | REALITY, Vision and the uTLS fingerprints are maintained upstream and move with every Xray release; MPL-2.0 is file-level copyleft | A heavy module set and +7 MB; xray needs a newer gVisor than amneziawg-go pinned; Xray's `v26.x` tags are not Go versions |
+| B. sing-box as a library | Cleaner Go API | GPL-3.0, already rejected for Outline |
+| C. Own client on `refraction-networking/utls` and `xtls/reality` | Small | REALITY's handshake and fingerprints would have to track Xray release by release; a mistake there is exactly what gets detected |
+
+- Embedding: per upstream one `core.Instance` built from proto structs (dispatcher, outbound
+  manager, policy, one VLESS outbound with REALITY over TCP), not from Xray's JSON loader
+  (`infra/conf`, which links every protocol); no inbound, DNS server or routing. The server and
+  every target are IP addresses, so the instance never resolves a name. A `vless://` link is
+  parsed by Lotsman (`proxy.ParseVLESS`), and its REALITY and VLESS fields are checked and
+  normalized exactly as `infra/conf` does (`transport_security.go` `REALITYConfig.Build`, client
+  branch; `vless.go`): Xray's client trusts its config, and the spike crashed the process in
+  REALITY's crawler, which runs when the server presents a real certificate, because a config
+  built without the loader lacks `spiderY`. A test runs that path in child processes with and
+  without the normalization, and a fuzz test checks that every key that parses has it.
+- Behaviour the stack absorbs: a VLESS dial returns before the server is reached, so the client's
+  handshake completes and a dead server surfaces as an error on the flow, which the relay turns into
+  a reset; each flow's context lives as long as the flow (the dialer keeps it); Xray's
+  `DialUDP` socket does not end its mux connection on `Close`, so the dialer cancels the flow's
+  context too; Xray's policy timeouts (5 min idle, 1–2 s after either direction ends) are raised to
+  1 h so idle sessions and half-closed flows survive. VLESS carries no half-close to the target.
+  Plain Vision refuses UDP to port 443 (QUIC), so browsers fall back to TCP; the
+  `xtls-rprx-vision-udp443` flow allows it.
+- Process-global state in Xray: its log handler (bridged to slog by `proxy.LogXray`, with Xray's
+  per-flow info messages as debug and errors and warnings rate-limited to one per kind per minute),
+  `internet.InitSystemDialer` (overwritten by every instance; unused, since the system dialer has no
+  options here), REALITY's crawler cache and `XRAY_*` environment variables (helpers run with an
+  empty environment). With one helper per upstream (#91) each instance has a process to itself;
+  in process, as in tests, several instances work side by side, and the last VLESS stack started
+  receives the log of all.
+- Keys: VLESS links are static. `proxy.ParseSpecKey` routes `vless://` text to `ParseVLESS` and
+  everything else to `ParseConfig`, which stays Outline's format, so an Outline dynamic key never
+  yields a VLESS upstream, and the kind in the config decides which parser loading uses.
+- Versions: xray-core v26.11.9 is pinned as `v1.260327.1-0.20261109052709-676eaf66f8f0`, the
+  pseudo-version of the release tag's commit; `go get -u` and Dependabot do not see Xray releases,
+  so they are bumped by hand (routine in OPERATIONS.md, "Updating Xray"). gVisor rises to xray's
+  `v0.0.0-20260122175437-89a5d21be8f0` for everything (one API change: the UDP forwarder handler
+  returns whether it handled the packet); amneziawg-go, the wireguard netstack used in tests and
+  the proxy stack pass with it. `klauspost/compress` is raised to v1.20.2 for GO-2026-6865.
+- Cost: the static linux/amd64 binary grows from 16.0 MB to 23.3 MB (+7.3 MB, +45%); linked modules
+  from 26 to 45, among them grpc, protobuf, quic-go, gopher-lua, miekg/dns, utls and reality, which
+  Xray's core packages import though nothing here uses them at run time. It also links
+  `golang.org/x/crypto/x509roots/fallback`, a root bundle Go uses only on a host without system
+  roots. In the spike, one bulk flow through TUN, gVisor and VLESS moved 4.2–4.4 Gbit/s up and
+  2.8 Gbit/s down in a container; the stack, not VLESS, is the bottleneck.
+- Licenses of the new modules: MPL-2.0 (xray-core, reality, gopher-luar; file-level copyleft,
+  satisfied as long as their files are used unmodified), BSD (utls, miekg/dns, netipx, protobuf,
+  x/ packages; klauspost/compress BSD and Apache-2.0), Apache-2.0 (grpc, go-proxyproto) and MIT
+  (quic-go, gopher-lua, blake3, go-brrr, cpuid), plus `juju/ratelimit` under LGPL-3.0 with
+  Canonical's exception that allows
+  conveying a statically linked combined work without the relinking materials of LGPL section 4d
+  and 4e.
+- Upstream issue: Xray's Vision server shares per-connection state between the two directions
+  without synchronization; the race detector reports it in the in-process test server every run
+  (the client side is not affected in our tests). Test files that run that server carry a `!race`
+  build constraint until it is fixed upstream; the report is drafted, and filing it waits for the
+  owner.
 
 ## Open items
 

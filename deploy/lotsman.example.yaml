@@ -39,6 +39,13 @@ upstreams:
   #   conf: /etc/lotsman/upstreams/ol-fi.key
   #   geo: FI
   #   tags: [eu]
+  # A VLESS + REALITY + XTLS Vision server (Xray): `conf` is a file (mode 0600)
+  # holding its vless:// share link. Otherwise like an Outline upstream.
+  # - name: vl-nl
+  #   kind: vless
+  #   conf: /etc/lotsman/upstreams/vl-nl.key
+  #   geo: NL
+  #   tags: [eu]
 
 # A user gets one client config per profile. `prefer` is an ordered list of
 # tiers; the first tier with a healthy upstream wins, lowest latency within a
@@ -59,8 +66,8 @@ health:
   # none down.
   probe: 1.1.1.1:443
   # probe: [1.1.1.1:443, 8.8.8.8:443]
-  # Resolvers queried over UDP and TCP through every Outline upstream; it is
-  # healthy when both get an answer from any of them.
+  # Resolvers queried over UDP and TCP through every Outline and VLESS upstream;
+  # one is healthy when both get an answer from any of them.
   dns: 1.1.1.1:53
   down_after: 3
   up_after: 2

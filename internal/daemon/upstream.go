@@ -68,9 +68,12 @@ func LoadUpstream(u config.Upstream, h config.Health) (*Upstream, error) {
 		return nil, fmt.Errorf("upstream %s: %w", u.Name, err)
 	}
 	var up *Upstream
-	if u.Proxy() {
+	switch {
+	case u.Kind == config.KindVLESS:
+		up, err = loadVLESS(source)
+	case u.Proxy():
 		up, err = loadProxy(source)
-	} else {
+	default:
 		up, err = loadAWG(source)
 	}
 	if err != nil {
@@ -104,6 +107,17 @@ func loadProxy(source []byte) (*Upstream, error) {
 	}
 	up.Key, up.keyText, up.Endpoint = key, text, key.Server()
 	return up, nil
+}
+
+// loadVLESS reads a vless:// link, a secret like an access key. VLESS keys
+// are static only.
+func loadVLESS(source []byte) (*Upstream, error) {
+	key, err := proxy.ParseVLESS(string(source))
+	if err != nil {
+		return nil, err
+	}
+	return &Upstream{Addr: config.ProxyAddress, MTU: mtu.Ethernet,
+		Key: key, keyText: strings.TrimSpace(string(source)), Endpoint: key.Server()}, nil
 }
 
 // fetchClient fetches dynamic keys; swapped in tests.

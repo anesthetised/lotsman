@@ -15,6 +15,15 @@ All notable changes to Lotsman are documented here. The format follows
   and `SSL_CERT_DIR` now reach the helper processes). TCP and UDP must use the same host; a config
   without a `udp` transport loads but stays down, as UDP is never sent around the server. The URL
   is never logged. New dependency: `github.com/gorilla/websocket` (#61).
+- VLESS upstreams: `kind: vless` with `conf` pointing at a file holding a `vless://` share link
+  for a VLESS + REALITY + XTLS Vision server over TCP (`flow=xtls-rprx-vision`, or
+  `xtls-rprx-vision-udp443` to let QUIC through). They run on the Outline upstreams' stack, in a
+  helper process each, with xray-core v26.11.9 embedded: TCP and UDP (XUDP), health by DNS over UDP
+  and TCP, `max_flows`, the same metrics, `config check` and `upstream status`. The link's REALITY
+  fields are validated as Xray's own loader does; errors and logs never quote the link. Xray's log
+  joins the daemon's (`component=xray`), per-flow messages at debug and errors rate-limited.
+  Static links only. The binary grows by about 7 MB. gVisor moves to xray's version and
+  klauspost/compress to v1.20.2 (GO-2026-6865) (#86).
 - Dynamic Outline keys: an `outline` upstream's key file may hold an `ssconf://` (or `https://`) URL.
   The key is fetched over verified HTTPS (redirects to `https://` only) at start, on every reload,
   and when the upstream fails its probes, at most every 5 minutes; a changed key applies to the

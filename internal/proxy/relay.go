@@ -123,17 +123,19 @@ func relayTCP(local *gonet.TCPConn, abort func(), remote transport.StreamConn) {
 
 // handleUDP runs on the stack's receive path for the first packet of every
 // new UDP flow (a new client address and port to a new destination), so it
-// must not block. A refused packet is dropped.
-func (s *Stack) handleUDP(r *udp.ForwarderRequest) {
+// must not block. A refused packet is dropped. It always reports the packet
+// handled, so the stack never answers with an ICMP port unreachable of its
+// own.
+func (s *Stack) handleUDP(r *udp.ForwarderRequest) bool {
 	if !s.begin() {
-		return
+		return true
 	}
 	var wq waiter.Queue
 	ep, err := r.CreateEndpoint(&wq)
 	if err != nil {
 		s.end()
 		s.log.Debug("udp accept", "err", err)
-		return
+		return true
 	}
 	dst := target(r.ID())
 	local := gonet.NewUDPConn(&wq, ep)
@@ -141,6 +143,7 @@ func (s *Stack) handleUDP(r *udp.ForwarderRequest) {
 		defer s.end()
 		s.relayUDP(local, dst)
 	}()
+	return true
 }
 
 // relayUDP carries one UDP flow until it is idle for UDPIdleTimeout, or

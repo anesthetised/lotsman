@@ -5,8 +5,9 @@
 - Linux with nftables and TUN (any mainstream distribution from the last few years).
 - Root: Lotsman creates TUN interfaces, sets sysctls, and programs policy routing and nftables.
 - UDP port reachable by your users (default 51820).
-- Per upstream, an AmneziaWG config from your provider routing `0.0.0.0/0`, or an Outline access
-  key (`ss://…`, `ssconf://…`, or an Outline `transport:` config such as a WebSocket key).
+- Per upstream, an AmneziaWG config from your provider routing `0.0.0.0/0`, an Outline access
+  key (`ss://…`, `ssconf://…`, or an Outline `transport:` config such as a WebSocket key), or a
+  VLESS + REALITY link (`vless://…`).
 
 ## Install
 
@@ -92,9 +93,9 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `subnet` | Canonical IPv4 network prefix, /24 or larger; the first host address is the gateway. |
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
 | `state_dir` | Server identity, SQLite database, pid and status files, cached dynamic Outline keys. |
-| `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, or `outline`), `conf` path (the provider's AmneziaWG config, or for `outline` a file with the access key or its `ssconf://` URL), free-form `geo` and `provider` labels, `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates), and for `outline` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams)). |
+| `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, `outline` or `vless`), `conf` path (the provider's AmneziaWG config, for `outline` a file with the access key or its `ssconf://` URL, for `vless` a file with the `vless://` link), free-form `geo` and `provider` labels, `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates), and for the proxy kinds `outline` and `vless` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams) and [VLESS upstreams](#vless-upstreams)). |
 | `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider, tag}` matchers (all given fields must match); empty = any upstream. Within a tier the lowest latency wins, so a tag such as `near` groups several countries into one tier. A matcher that matches no upstream, or only upstreams an earlier matcher already took, is ignored with a warning in `config check` and the reload log, so an upstream can be removed without editing every profile. A profile where no matcher matches any upstream is an error. |
-| `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline upstream; default `1.1.1.1:53`), `down_after`, `up_after`, and the optional `transfer` block (off when absent; see [Throttled upstreams](#throttled-upstreams-transfer-probe)). |
+| `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline and VLESS upstream; default `1.1.1.1:53`), `down_after`, `up_after`, and the optional `transfer` block (off when absent; see [Throttled upstreams](#throttled-upstreams-transfer-probe)). |
 
 `listen` binds exactly the configured numeric address; hostnames and an omitted
 host are unsupported. An occupied port, unavailable family, or unassigned address
@@ -297,10 +298,105 @@ query to a `health.dns` resolver gets an answer both over UDP and over TCP throu
 failing counts as a failed round. The reported latency is the UDP query's. `health.probe` is not
 used for Outline upstreams.
 
+### VLESS upstreams
+
+A VLESS server with REALITY and XTLS Vision, the Xray setup that panels such as 3x-ui and Marzban
+create, is an upstream like an Outline one: the same userspace stack in a helper process, the same
+health checks, `max_flows`, metrics and consequences as listed above. Put the server's share link,
+one `vless://…` line, into a file and point `conf` at it:
+
+```yaml
+upstreams:
+  - {name: vl-nl, kind: vless, conf: /etc/lotsman/upstreams/vl-nl.key, geo: NL, tags: [eu]}
+```
+
+```bash
+sudo install -m 0600 /dev/stdin /etc/lotsman/upstreams/vl-nl.key <<< 'vless://…'
+```
+
+The link carries the user ID, a password in effect: keep the file 0600 and root-only. Lotsman never
+logs it, and neither error messages nor `config check` quote any part of the link (`config check`
+shows the flow, `sni` and fingerprint). Links are static only; for a new link, replace the file and
+reload, which restarts the upstream. A link looks like
+
+```
+vless://<uuid>@<host>:<port>?security=reality&pbk=<key>&sni=<site>&flow=xtls-rprx-vision&type=tcp&fp=chrome&sid=<hex>&spx=%2F#name
+```
+
+| Part | Meaning |
+|---|---|
+| `uuid` | Required: the user ID, a UUID, or 1–30 characters that Xray maps to one. |
+| `host:port` | Required: the server. A hostname is resolved like an AmneziaWG endpoint (IPv4, at start, on reload and when probes fail); the Xray instance itself never resolves names. |
+| `security` | Required, `reality`. TLS, no security and the other Xray securities are refused. |
+| `type` | `tcp` (the default) or `raw`, Xray's newer name for it; `headerType`, if present, `none`. xhttp, gRPC, WebSocket and the other transports are refused. |
+| `encryption` | `none` or absent; VLESS encryption (`mlkem768x25519plus…`) is refused. |
+| `flow` | Required: `xtls-rprx-vision` or `xtls-rprx-vision-udp443` (see QUIC below). |
+| `sni` | Required: the site the server impersonates. |
+| `pbk` | Required: the server's REALITY public key, 32 bytes in unpadded base64url. |
+| `sid` | The REALITY short ID: up to 16 hex digits, an even number of them; empty by default. |
+| `fp` | The TLS fingerprint (uTLS ClientHello): `chrome` by default; `firefox`, `safari`, `ios`, `android`, `edge`, `360`, `qq`, `random`, `randomized` and the others Xray knows. `unsafe` and `hellogolang` are refused, as Xray does. |
+| `spx` | The path REALITY's crawler starts at (below); must start with `/`, default `/`. |
+| `pqv` | Optional: the server's ML-DSA-65 key (unpadded base64url, 1952 bytes) for post-quantum verification of its certificate. |
+
+The `#name` part is ignored. Any other parameter must be absent or empty (panels export empty
+`host=` and `path=`); one with a value is refused by name. Lotsman checks and normalizes the
+REALITY fields exactly as Xray's own config loader does, so a link Xray rejects is rejected here.
+
+How it differs from an Outline upstream:
+
+- The flows go through Xray (embedded, see [ARCHITECTURE.md](ARCHITECTURE.md)): one instance per
+  upstream in its helper, with this server as its only outbound.
+- The client's TCP handshake completes before the server is reached. A server that refuses
+  connections shows up as a reset after about 2 s, while Xray retries; one whose packets are
+  dropped, after Xray's connection attempts time out.
+- No half-close: when a client shuts down its sending side, the target sees nothing until the
+  connection ends. The rare protocol that waits for the client's end of stream before answering
+  hangs.
+- UDP travels inside a TCP connection to the server (XUDP), one per UDP flow: blocking the server's
+  TCP port blocks UDP too, and the server needs no UDP port.
+- QUIC: `xtls-rprx-vision` refuses UDP to port 443, as every Xray client does. Browsers then fall
+  back to HTTPS over TCP, whose TLS Vision passes through without the telltale TLS-in-TLS record
+  pattern. `xtls-rprx-vision-udp443` (client side only; the server's flow stays
+  `xtls-rprx-vision`) carries QUIC as UDP inside the connection instead, where Vision cannot
+  disguise it. Prefer the plain flow unless QUIC through this upstream matters.
+- A TCP flow without traffic for an hour ends, as does one whose other direction ended an hour
+  earlier.
+- When the server presents a real certificate instead of REALITY's (a wrong `pbk` or `sid`, which
+  makes the server relay the client to its `sni` site, an address hijack, or interception with a
+  certificate the host trusts), the flow fails and Xray logs `REALITY: received
+  real certificate (potential MITM or redirection)` as an error. It then fetches a page of the
+  `sni` site, starting at `spx`, as a browser would, to look less like a proxy client. The upstream
+  goes down by its probes.
+
+Xray's log appears in the daemon's with `component=xray` and the `upstream` attribute. Its per-flow
+messages, failed flows included, are debug messages; its errors and warnings keep their level once
+per minute per kind of message and are debug messages after that, so a failure repeated for every
+flow cannot flood the log. Each helper logs Xray's start (`core: Xray 26.11.9 started`) as a
+warning.
+
+**Updating Xray.** Lotsman pins `github.com/xtls/xray-core` by a pseudo-version: Xray tags its
+releases `v26.x.y`, which Go does not accept as versions of a module whose path has no `/v26`, so
+`go get -u`, `@latest` (stuck at `v1.260327.0`) and Dependabot never see a new release. Check the
+[releases](https://github.com/XTLS/Xray-core/releases) when preparing a Lotsman release and on
+Xray security advisories, and pin the release tag's commit:
+
+```bash
+git ls-remote https://github.com/XTLS/Xray-core refs/tags/v26.11.9   # the tag's commit
+go get github.com/xtls/xray-core@676eaf66f8f0                         # becomes v1.260327.1-0.20261109052709-676eaf66f8f0
+go mod tidy
+```
+
+Then compare Xray's `infra/conf/transport_security.go` (`REALITYConfig.Build`, the client branch)
+and `infra/conf/vless.go` with `internal/proxy/vless.go`, which replicates their checks; watch for
+a gVisor bump, which amneziawg-go and the proxy stack share; and run the full test suite including
+the Linux one (`just test`, `just lint`, `just test-integration`). Update the version named in this
+section and in ARCHITECTURE.md.
+
 ### Helper processes
 
-Each Outline upstream's stack runs in a child process of the daemon, so a crash in it (a bug in
-gVisor or the Outline SDK, or malicious input) takes down that upstream, not the gateway:
+Each proxy upstream's (Outline or VLESS) stack runs in a child process of the daemon, so a crash in
+it (a bug in gVisor, the Outline SDK or Xray, or malicious input) takes down that upstream, not the
+gateway:
 
 ```
 $ ps -o pid,ppid,user,args --ppid "$(pidof -s lotsman)"
@@ -308,12 +404,12 @@ $ ps -o pid,ppid,user,args --ppid "$(pidof -s lotsman)"
    4242    4200 65534    lotsman proxy-helper
 ```
 
-There is one per Outline upstream; the daemon logs `proxy helper started upstream=<name> pid=<pid>`
+There is one per proxy upstream; the daemon logs `proxy helper started upstream=<name> pid=<pid>`
 for each. A root daemon runs them as uid/gid 65534 without capabilities: they hold only the
 upstream's TUN descriptor, open outbound connections to the server and are not dumpable, so other
 processes of that user cannot read the key from their memory. The unit's `CapabilityBoundingSet`
 must include `CAP_SETUID` and `CAP_SETGID` for this (as `deploy/lotsman.service` does); without
-them every Outline upstream fails to start with `operation not permitted`. In Docker, the default
+them every proxy upstream fails to start with `operation not permitted`. In Docker, the default
 capabilities include both. Helpers ignore SIGTERM and SIGINT and die with the daemon. Their logs
 appear in the daemon's log with the `upstream` attribute, at the daemon's log level.
 
@@ -373,8 +469,8 @@ AmneziaWG device logs, including handshake diagnostics. In the systemd unit, add
 `Environment=LOTSMAN_LOG_LEVEL=debug` and restart; an invalid value stops `lotsman` before it starts.
 
 `STATE` is `up`, `down`, `unknown` (not probed to a verdict yet) or `degraded` (reachable, but
-failing its [transfer probes](#throttled-upstreams-transfer-probe)). `KIND` is `awg` or `outline`. `LAST HANDSHAKE` is the upstream device's handshake with its provider;
-an Outline upstream has none and shows `-`. `ROUTED` counts clients whose traffic is directed through the upstream — every client in the
+failing its [transfer probes](#throttled-upstreams-transfer-probe)). `KIND` is `awg`, `outline` or `vless`. `LAST HANDSHAKE` is the upstream device's handshake with its provider;
+a proxy upstream has none and shows `-`. `ROUTED` counts clients whose traffic is directed through the upstream — every client in the
 database is routed somewhere whether or not it is connected. `ACTIVE` counts those with a
 WireGuard handshake in the last three minutes, which is what "connected" means for WireGuard;
 `user list` shows each client's last handshake and current upstream (`blocked` when no healthy
@@ -395,11 +491,11 @@ the host can. Changing `metrics.listen` needs a restart.
 
 | Metric | Labels | Meaning |
 |---|---|---|
-| `lotsman_upstream_info` | `upstream`, `kind`, `interface` | always 1; `kind` is `awg` or `outline` |
+| `lotsman_upstream_info` | `upstream`, `kind`, `interface` | always 1; `kind` is `awg`, `outline` or `vless` |
 | `lotsman_upstream_up` | `upstream` | 1 while probes pass |
-| `lotsman_upstream_flows` | `upstream` | Outline only: TCP and UDP flows open now |
-| `lotsman_upstream_flows_refused_total` | `upstream` | Outline only: flows refused at `max_flows` |
-| `lotsman_proxy_restarts_total` | `upstream` | Outline only: times its helper process exited on its own (crash, kill) and was restarted |
+| `lotsman_upstream_flows` | `upstream` | Outline and VLESS only: TCP and UDP flows open now |
+| `lotsman_upstream_flows_refused_total` | `upstream` | Outline and VLESS only: flows refused at `max_flows` |
+| `lotsman_proxy_restarts_total` | `upstream` | Outline and VLESS only: times its helper process exited on its own (crash, kill) and was restarted |
 | `lotsman_upstream_probe_latency_seconds` | `upstream` | last successful probe |
 | `lotsman_upstream_probes_total` | `upstream`, `result` | `ok` / `fail` |
 | `lotsman_upstream_degraded` | `upstream` | 1 while it is reachable but fails its transfer probes; always 0 with `health.transfer` off |
@@ -542,7 +638,16 @@ error message) and run `lotsman config check`, which fetches the key once. If th
 `proxy helper exited` or `upstream device not up` instead, the helper itself is failing: see the
 next item.
 
-**An Outline upstream keeps restarting.** `lotsman_proxy_restarts_total` rising and `proxy helper
+**A VLESS upstream stays down.** As for Outline, its probes need DNS answers over UDP and TCP
+through the server, both carried over TCP. Run with `-log-level debug` and look at the
+`component=xray` lines of that upstream: `connection refused` or `i/o timeout` while dialing is the
+server or its port being unreachable. `received real certificate` means the server did not
+recognize the client and passed it on to its `sni` site, as it does with strangers: a wrong `pbk`
+or `sid` (or an `sni` the server does not serve), or something between the gateway and the server
+answering in its place. A wrong user ID passes REALITY and then fails with the connection closed.
+Check the link with an Xray client on another machine.
+
+**An Outline or VLESS upstream keeps restarting.** `lotsman_proxy_restarts_total` rising and `proxy helper
 exited` in the log mean its helper process dies. With `panic=…` it crashed: keep the lines logged
 as `proxy helper output` around it, they are the stack trace a bug report needs; the other
 upstreams are unaffected. `signal: killed` without a panic means something killed it: the OOM

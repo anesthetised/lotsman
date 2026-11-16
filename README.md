@@ -5,8 +5,8 @@ default, AWG 2.0 selectable) that
 routes each user to a working upstream VPN provider.
 
 Users connect with the official Amnezia app to a single server you run. Lotsman terminates their
-tunnel and forwards traffic into one of several upstreams — AmneziaWG tunnels or Outline
-(Shadowsocks) servers, your own subscriptions at providers like RedShield — choosing the upstream by the user's profile (geo, provider) and by
+tunnel and forwards traffic into one of several upstreams — AmneziaWG tunnels, Outline
+(Shadowsocks) servers or VLESS + REALITY (Xray) servers, your own subscriptions at providers like RedShield — choosing the upstream by the user's profile (geo, provider) and by
 live health. When an upstream dies, its users move to the next one without reconnecting.
 
 ```
@@ -14,7 +14,9 @@ Amnezia app ──AWG──▶ Lotsman ──AWG──▶ provider NL ──▶ 
                         │
                         ├────AWG──▶ provider DE ──▶ internet
                         │
-                        └──Outline (Shadowsocks)──▶ server ──▶ internet
+                        ├──Outline (Shadowsocks)──▶ server ──▶ internet
+                        │
+                        └──VLESS + REALITY──▶ server ──▶ internet
 ```
 
 *Lotsman* (лоцман) is the harbour pilot who knows which channel is passable today.
@@ -27,13 +29,15 @@ Amnezia app ──AWG──▶ Lotsman ──AWG──▶ provider NL ──▶ 
 - Fail-closed: if no upstream is healthy for a user, their traffic is dropped, never leaked through
   the server's own IP.
 - MTU and TCP MSS handled for the double encapsulation; DNS follows the chosen upstream.
-- Two upstream kinds, mixed freely in one profile so it can fail over between protocols:
+- Three upstream kinds, mixed freely in one profile so it can fail over between protocols:
   - `awg` (default): plain WireGuard or AmneziaWG 2.0/3.x provider configs (including header
     protection and random trailers); AmneziaWG 1.5 configs are not supported.
   - `outline`: an Outline (Shadowsocks) access key, static `ss://…` or dynamic `ssconf://…`
     (fetched over HTTPS and refreshed), including Outline's Shadowsocks-over-WebSocket keys
     (`transport:` configs). A userspace TCP/IP stack in an unprivileged helper process
     per upstream carries TCP and UDP through it; ICMP (ping) does not pass.
+  - `vless`: a VLESS server with REALITY and XTLS Vision (Xray), from its `vless://` share link,
+    TCP transport, UDP inside it (XUDP). It runs on the same stack, with Xray embedded.
 
   Clients use the Amnezia app whatever the upstream: 5.0.1.5 or later for the default `awg: 3`; set
   `awg: 2` for older apps and Android 7–8.
@@ -44,10 +48,12 @@ Amnezia app ──AWG──▶ Lotsman ──AWG──▶ provider NL ──▶ 
 
 - All users behind one upstream share its exit IP and its reputation.
 - IPv6 inside the tunnel, a web UI, more than one node.
-- Throughput of a kernel WireGuard: crypto runs in userspace twice per packet. Outline upstreams also
-  terminate every TCP connection in userspace.
+- Throughput of a kernel WireGuard: crypto runs in userspace twice per packet. Outline and VLESS
+  upstreams also terminate every TCP connection in userspace.
 - Outline keys beyond plain Shadowsocks and Shadowsocks over WebSocket (other `$type`s of Outline's
   config language, such as TLS fragmentation or chained proxies).
+- VLESS over transports other than TCP (xhttp, gRPC, WebSocket), VLESS without REALITY, and VLESS
+  subscription URLs.
 
 ## Quick start
 
