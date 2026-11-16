@@ -10,7 +10,8 @@ Two audits feed this plan:
 - Second audit (2026-11-07, baseline `2160572c65350db99ced77cd6a2dc905b8d9f8e8`):
   #43–#57, plus the test flake #42. Active; see the next section.
 - Features scheduled with it (2026-11-16): AmneziaWG 3.1 upstreams (#59), a configurable AWG
-  generation on the listener (#60), and Outline (Shadowsocks) upstreams (#61).
+  generation on the listener (#60), Outline (Shadowsocks) upstreams (#61), VLESS + Reality
+  upstreams (#86) and a health probe for throttled upstreams (#87).
 
 Start new implementation only within the user's authorized scope. Once a scope is
 approved, continue within it without repeatedly requesting approval.
@@ -94,20 +95,36 @@ change `go.mod`); #56 after #49; #53 after #46; #47 after #52 and #53; #51 after
 | Tooling | #54, #57 | light | #54 owns `go.mod`/`go.sum`, `.github/workflows/ci.yml`, `justfile`, README's development section and the files its findings touch; `writeStatus` moves to a Linux-only file instead of editing `status.go`. |
 | Manual | #48 | user | Client test by the user; code change only after the result. |
 
-### Wave 3: Outline upstreams (#61)
+### Wave 2 follow-ups (done 2026-11-16)
 
-After wave 2. Slices, each reviewed and committed separately: (1) a spike on the gVisor
-glue in a disposable container, with a go/no-go checkpoint; (2) the upstream kind, `ss://`,
-health with the UDP check, metrics and CLI output; (3) `ssconf://`; (4) WebSocket transports.
+#76 (PR #82), #77 (PR #83, test only), #84 (PR #85: the first packet of every AWG device
+went out without S4 padding, an amneziawg-go ordering race; also the root cause of #42,
+closed), #81 (PR #88: firewall repair on nftables change events). The upstream report for
+the amneziawg-go race is drafted in PR #85 and not filed; filing it is outward-facing and
+needs the owner's go-ahead.
+
+### Wave 3: proxy upstreams (#61, #86, #87)
+
+The user authorized everything that needs no manual check (2026-11-16): up to five
+subagents, merge on green CI.
+
+| Issue | Decision (2026-11-16) |
+|---|---|
+| #61 | Spike: go. One generic *proxy upstream* (`internal/proxy`: kernel TUN → gVisor channel endpoint → per-flow dial through a pluggable dialer); Shadowsocks is the first dialer. Own `ss://` parser instead of `x/configurl` (+2.5 MB, unstable API). Health for proxy upstreams is a DNS exchange over UDP and TCP. Per-upstream flow cap. |
+| #86 | VLESS + Reality + Vision through embedded xray-core (option A in the issue), as the second dialer, after #61 slice 2. First version: `vless://`, TCP transport, XUDP. Spike: go with conditions (gVisor raised to xray's version; pseudo-version pinning; replicate xray's config validation; the Vision data race to be reported upstream with the owner's go-ahead). |
+| #61, #86 | **Every proxy upstream runs in a child process** of the same binary (the daemon creates the TUN and passes its fd), so a panic in gVisor, the Outline SDK or xray takes down one upstream, not the gateway. Failover covers the restart. |
+| #87 | After #61 slice 2, because both change the probe code. |
+
+Order: #61 slice 2 (PR #89) → child-process proxy runtime → #86 slice 2 and #61 slice 3
+(`ssconf://`) → #61 slice 4 (WebSocket) and #87.
 
 ### Manual and deferred
 
+- #48 and #60: the user imports a client config (`::/0` without an IPv6 address; an AWG 3
+  listener config, client 5.0.1.5 or newer) into the official Amnezia client.
 - #55 throughput: a benchmark, so it needs an agreed workload and a real client.
   The user has a disposable test host for this; any remote command needs an
   explicit request in that message.
-- #42 `TestDaemonListenAddress` flake: first reproduce in a local
-  `--platform linux/amd64` container and look for state leaking between subtests.
-  Not scheduled; light tier when it is.
 
 ## First audit: approved follow-up slice (2026-10-16)
 
