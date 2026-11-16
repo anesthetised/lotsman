@@ -66,9 +66,11 @@ wildcard replies follow host routing.
 
 ## MTU
 
-Client tunnel MTU = `min(1500 − 60 − S4_down, min over upstreams (upstream MTU − S4_up))`.
-60 bytes = IPv4 (20) + UDP (8) + WireGuard transport header (16) + Poly1305 tag (16). The same value is
-set on `lm0` and written into client configs; nftables additionally clamps TCP MSS to the route MTU.
+Client tunnel MTU = `min(1500 − 80 − S4_down, min over upstreams (upstream MTU − S4_up))`.
+80 bytes = IPv6 (40) + UDP (8) + WireGuard transport header (16) + Poly1305 tag (16). This is the
+worst case and applies to every client, even with an IPv4 `listen`: the endpoint hostname may also
+resolve over IPv6. The same value is set on `lm0` and written into client configs; nftables
+additionally clamps TCP MSS to the route MTU.
 
 ## Forwarding authorization and shutdown
 

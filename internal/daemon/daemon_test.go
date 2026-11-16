@@ -387,7 +387,7 @@ func TestDaemon(t *testing.T) {
 	if h.dp.MTU != 1392 || h.dp.Down.Name != DownstreamInterface || len(h.dp.Ups) != 2 {
 		t.Errorf("dataplane setup = %+v", h.dp)
 	}
-	if got := h.d.ClientMTU(); got != 1392 { // min(1500-60-S4, 1400-8, 1420-8)
+	if got := h.d.ClientMTU(); got != 1392 { // min(1500-80-S4, 1400-8, 1420-8)
 		t.Errorf("ClientMTU = %d", got)
 	}
 	if peers, _ := h.d.down.Peers(); len(peers) != 2 {
@@ -582,8 +582,9 @@ health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 1, up_after: 1}
 	if len(st.Upstreams) != 2 || st.Upstreams[0].Name != "de" || st.Upstreams[1].Name != "fi" || st.Upstreams[1].Routed != 1 {
 		t.Errorf("status after reload = %+v", st.Upstreams)
 	}
-	if h.dp.MTU != 1412 { // de: 1420-8; fi: 1420-8; downstream 1500-60-S4 is larger
-		t.Errorf("mtu after reload = %d", h.dp.MTU)
+	// de: 1420-8; fi: 1420-8; downstream 1500-80-S4 with a random S4 of 8..16 can be smaller.
+	if want := min(1412, 1500-80-int(h.d.id.Params.S4)); h.dp.MTU != want {
+		t.Errorf("mtu after reload = %d, want %d", h.dp.MTU, want)
 	}
 
 	// Same upstream with a changed provider config is replaced, not kept.

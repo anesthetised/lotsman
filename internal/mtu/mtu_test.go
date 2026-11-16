@@ -9,12 +9,12 @@ func TestClient(t *testing.T) {
 		upstreams []Upstream
 		want      int
 	}{
-		{"no upstreams, plain wireguard", 0, nil, 1440},
-		{"no upstreams, S4 padding", 8, nil, 1432},
+		{"no upstreams, plain wireguard", 0, nil, 1420},
+		{"no upstreams, S4 padding", 8, nil, 1412},
 		{"one default upstream limits", 0, []Upstream{{MTU: 0}}, 1420},
 		{"upstream S4 is subtracted", 0, []Upstream{{MTU: 1420, S4: 8}}, 1412},
 		{"smallest upstream wins", 0, []Upstream{{MTU: 1420}, {MTU: 1380, S4: 16}, {MTU: 1400}}, 1364},
-		{"downstream bound wins over roomy upstream", 100, []Upstream{{MTU: 1420}}, 1340},
+		{"downstream bound wins over roomy upstream", 100, []Upstream{{MTU: 1420}}, 1320},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

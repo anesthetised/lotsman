@@ -2,9 +2,11 @@
 // two AmneziaWG encapsulations: client → Lotsman and Lotsman → upstream provider.
 package mtu
 
-// Overhead of one WireGuard encapsulation over IPv4:
-// IPv4 header (20) + UDP header (8) + transport message header (16) + Poly1305 tag (16).
-const Overhead = 60
+// Overhead of one WireGuard encapsulation over IPv6, the worst case:
+// IPv6 header (40) + UDP header (8) + transport message header (16) + Poly1305 tag (16).
+// It applies to every client, even when listen is IPv4: the endpoint hostname may
+// also have an AAAA record, and a client may then reach Lotsman over IPv6.
+const Overhead = 80
 
 // DefaultWireGuard is what wg-quick assumes when a config sets no MTU.
 const DefaultWireGuard = 1420
