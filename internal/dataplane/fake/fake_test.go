@@ -64,3 +64,31 @@ func TestFake(t *testing.T) {
 		t.Errorf("log = %v", f.Log)
 	}
 }
+
+// After a flush the fake, like the kernel, admits no one until Verify
+// reinstalls the firewall and the peer is routed again.
+func TestFakeVerify(t *testing.T) {
+	f := New()
+	f.Setup(dataplane.Interface{Name: "lm0"}, []dataplane.Interface{{Name: "a"}}, 1400, netip.AddrPort{})
+	peer := netip.MustParseAddr("10.77.0.2")
+	f.Route(peer, "a")
+	if repaired, err := f.Verify(); repaired || err != nil {
+		t.Fatalf("Verify on an intact firewall = %v, %v", repaired, err)
+	}
+	f.FlushFirewall()
+	f.Route(peer, "a")
+	if f.IsAllowed(peer) {
+		t.Error("peer admitted while the firewall is gone")
+	}
+	if repaired, err := f.Verify(); !repaired || err != nil {
+		t.Fatalf("Verify after a flush = %v, %v", repaired, err)
+	}
+	f.Route(peer, "a")
+	if !f.IsAllowed(peer) {
+		t.Error("peer not admitted after the repair")
+	}
+	f.Unroute(peer)
+	if f.IsAllowed(peer) {
+		t.Error("peer admitted after Unroute")
+	}
+}

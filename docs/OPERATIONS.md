@@ -234,6 +234,7 @@ the host can. Changing `metrics.listen` needs a restart.
 | `lotsman_peer_upstream` | `user`, `device`, `profile`, `upstream` | 1 for the current upstream |
 | `lotsman_reroutes_total` | `upstream` | routes to it, first assignment included |
 | `lotsman_reloads_total` | `result` | `ok` / `error` |
+| `lotsman_firewall_repairs_total` | | firewall reinstalls after another tool removed Lotsman's rules |
 | `lotsman_client_mtu`, `lotsman_build_info{version}` | | |
 
 Byte counters come from the WireGuard devices and reset when a peer is re-added; use `rate()`.
@@ -296,6 +297,16 @@ config's `MTU` if the provider's path is narrower than it claims.
 **Replies do not come back through an upstream.** `sysctl net.ipv4.conf.lm-up-*.rp_filter` must
 be `2` (loose). Lotsman sets it, but a hardening tool may reset it; in Docker set
 `net.ipv4.conf.default.rp_filter=2` at start.
+
+**All clients stopped working after a firewall reload.** Tools that flush nftables (`nft flush
+ruleset`, some ufw and firewalld reloads, `iptables -F`) remove Lotsman's `inet lotsman` table or
+the accept rules it adds to other forward chains (Docker, ufw). Lotsman checks for this every health
+round, reinstalls what is missing and admits every routed client again, so service returns within
+one `health.interval`. Until then the host forwards without Lotsman's drop and NAT. Each repair is
+logged at error level as "firewall rules were removed by another tool and have been reinstalled"
+and counted in `lotsman_firewall_repairs_total`; a counter that keeps rising means a tool on the
+host keeps removing them. Removing rules inside `inet lotsman` while leaving the table, or emptying
+its sets by hand, is not detected; restart Lotsman after doing that.
 
 **Another firewall on the host.** Lotsman owns `table inet lotsman`. Docker (`iptables -P FORWARD
 DROP`) and ufw add their own forward chains whose drop would win over Lotsman's accept, so on start

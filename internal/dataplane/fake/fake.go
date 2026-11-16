@@ -18,19 +18,23 @@ type Dataplane struct {
 	Routes    map[netip.Addr]string
 	Pins      map[netip.Addr]map[string]bool // peer → upstreams its old flows stay on
 	Alive     map[string]bool
+	Allowed   map[netip.Addr]bool // peers the firewall admits; Route admits no one while Flushed
+	Flushed   bool                // the firewall is gone until Verify reinstalls it
 	Log       []string
 	SetupDone bool
 	TornDown  bool
 }
 
 func New() *Dataplane {
-	return &Dataplane{Routes: map[netip.Addr]string{}, Pins: map[netip.Addr]map[string]bool{}, Alive: map[string]bool{}}
+	return &Dataplane{Routes: map[netip.Addr]string{}, Pins: map[netip.Addr]map[string]bool{}, Alive: map[string]bool{},
+		Allowed: map[netip.Addr]bool{}}
 }
 
 func (f *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, mtu int, metrics netip.AddrPort) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Down, f.Ups, f.MTU, f.Metrics, f.SetupDone = down, ups, mtu, metrics, true
+	f.Allowed, f.Flushed = map[netip.Addr]bool{}, false
 	f.Log = append(f.Log, fmt.Sprintf("setup %s mtu=%d ups=%d", down.Name, mtu, len(ups)))
 	return nil
 }
@@ -56,6 +60,9 @@ func (f *Dataplane) Route(peer netip.Addr, upstream string) error {
 			}
 			delete(f.Pins[peer], upstream)
 			f.Routes[peer] = upstream
+			if !f.Flushed {
+				f.Allowed[peer] = true
+			}
 			f.Log = append(f.Log, fmt.Sprintf("route %s via %s", peer, upstream))
 			return nil
 		}
@@ -88,8 +95,35 @@ func (f *Dataplane) Unroute(peer netip.Addr) error {
 	defer f.mu.Unlock()
 	delete(f.Routes, peer)
 	delete(f.Pins, peer)
+	delete(f.Allowed, peer)
 	f.Log = append(f.Log, fmt.Sprintf("unroute %s", peer))
 	return nil
+}
+
+// FlushFirewall removes the firewall as "nft flush ruleset" would.
+func (f *Dataplane) FlushFirewall() {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.Flushed = true
+	f.Allowed = map[netip.Addr]bool{}
+}
+
+func (f *Dataplane) Verify() (bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if !f.Flushed {
+		return false, nil
+	}
+	f.Flushed = false
+	f.Log = append(f.Log, "verify reinstalled")
+	return true, nil
+}
+
+// IsAllowed reports whether the firewall admits the peer.
+func (f *Dataplane) IsAllowed(peer netip.Addr) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.Allowed[peer]
 }
 
 func (f *Dataplane) Teardown() error {

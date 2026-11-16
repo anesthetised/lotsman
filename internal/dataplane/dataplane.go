@@ -34,6 +34,13 @@ type Dataplane interface {
 	// dead drops every pin to it, so those flows follow their peer's current
 	// route instead of a black hole.
 	SetAlive(upstreamInterface string, alive bool) error
+	// Verify checks that the firewall installed by Setup is still in place
+	// and, if another tool removed part of it (such as "nft flush ruleset"),
+	// reinstalls that as Setup did and reports repaired. A repaired firewall
+	// may admit no peer, so the caller must Route every routed peer again,
+	// also when err reports that a later step of the repair failed. It is
+	// cheap enough to call every health round between Setup and Teardown.
+	Verify() (repaired bool, err error)
 	// Teardown disables downstream ingress before removing resources created
 	// by Setup and Route, including after a failed Setup. If disabling ingress
 	// fails, it preserves routing/firewall protection and returns an error.
