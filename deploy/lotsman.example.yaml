@@ -31,6 +31,14 @@ upstreams:
     geo: DE
     provider: redshield
     tags: [eu]
+  # An Outline (Shadowsocks) server: `conf` is a file (mode 0600) holding the
+  # ss:// access key. TCP and UDP pass, ICMP does not. `max_flows` caps the
+  # connections it carries at once (default 4096).
+  # - name: ol-fi
+  #   kind: outline
+  #   conf: /etc/lotsman/upstreams/ol-fi.key
+  #   geo: FI
+  #   tags: [eu]
 
 # A user gets one client config per profile. `prefer` is an ordered list of
 # tiers; the first tier with a healthy upstream wins, lowest latency within a
@@ -46,10 +54,14 @@ profiles:
 
 health:
   interval: 15s
-  # A TCP port reachable through every upstream, or a list of them. An upstream
-  # is healthy when any target answers, so one blocked destination takes none down.
+  # A TCP port reachable through every AmneziaWG upstream, or a list of them. An
+  # upstream is healthy when any target answers, so one blocked destination takes
+  # none down.
   probe: 1.1.1.1:443
   # probe: [1.1.1.1:443, 8.8.8.8:443]
+  # Resolvers queried over UDP and TCP through every Outline upstream; it is
+  # healthy when both get an answer from any of them.
+  dns: 1.1.1.1:53
   down_after: 3
   up_after: 2
 

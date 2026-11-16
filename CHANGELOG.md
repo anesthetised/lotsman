@@ -6,6 +6,13 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Outline (Shadowsocks) upstreams: `kind: outline` with `conf` pointing at a file holding an
+  `ss://` access key (SIP002 or legacy, AEAD ciphers, Outline's `prefix`). A userspace TCP/IP stack
+  (gVisor) on the upstream's TUN carries TCP and UDP through the server, so profiles, failover, flow
+  pinning and fail-closed work as for AmneziaWG; ICMP does not pass. Health is a DNS query over UDP
+  and over TCP to `health.dns` (default `1.1.1.1:53`); `max_flows` (default 4096) caps flows per
+  upstream. `config check`, `upstream status` and the new `lotsman_upstream_info` metric show the
+  kind; `lotsman_upstream_flows` and `lotsman_upstream_flows_refused_total` cover the stack (#61).
 - `awg: 2 | 3` selects the AmneziaWG generation of the listener, default 3: the identity gains a
   header protection key, and client configs carry `HeaderProtectionKey` and `RandomTrailers = on`
   (Amnezia app 5.0.1.5 or later). Restart only (#60).

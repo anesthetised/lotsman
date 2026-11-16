@@ -35,13 +35,34 @@ type Metrics struct {
 	Listen string `yaml:"listen"`
 }
 
+// Upstream kinds. An AWG upstream is an AmneziaWG (or WireGuard) tunnel;
+// an Outline upstream is a Shadowsocks proxy behind a userspace stack.
+const (
+	KindAWG     = "awg"
+	KindOutline = "outline"
+)
+
+// ProxyAddress is the address of every proxy upstream's TUN: the source of
+// its health probes and, after masquerading, of its clients' flows. It is
+// the IPv4 dummy address (RFC 7600), reserved for hosts that need a source
+// address and have none. Sharing it is fine, as it is for AWG providers
+// that hand out the same address: probe routing selects by interface too.
+var ProxyAddress = netip.MustParsePrefix("192.0.0.8/32")
+
 type Upstream struct {
 	Name     string   `yaml:"name"`
-	Conf     string   `yaml:"conf"`
+	Kind     string   `yaml:"kind"` // KindAWG (the default) or KindOutline
+	Conf     string   `yaml:"conf"` // the provider's AmneziaWG config, or a file with the access key
 	Geo      string   `yaml:"geo"`
 	Provider string   `yaml:"provider"`
 	Tags     []string `yaml:"tags"` // free-form groups a profile can prefer as one tier
+	// MaxFlows caps the TCP and UDP flows a proxy upstream carries at once;
+	// 0 is the default.
+	MaxFlows int `yaml:"max_flows"`
 }
+
+// Proxy reports whether the upstream runs on the userspace proxy stack.
+func (u Upstream) Proxy() bool { return u.Kind == KindOutline }
 
 func (u Upstream) HasTag(tag string) bool {
 	return slices.Contains(u.Tags, tag)
@@ -79,38 +100,56 @@ func (m Match) String() string {
 type Health struct {
 	Interval  time.Duration `yaml:"interval"`
 	Probe     ProbeTargets  `yaml:"probe"`
+	DNS       DNSTargets    `yaml:"dns"`
 	DownAfter int           `yaml:"down_after"`
 	UpAfter   int           `yaml:"up_after"`
 }
 
-// ProbeTargets are the TCP destinations a health round tries through an
+// ProbeTargets are the TCP destinations a health round tries through an AWG
 // upstream; the round passes when any one answers. In YAML it is a single
 // "ip:port" or a list of them.
 type ProbeTargets []netip.AddrPort
 
+// DNSTargets are the resolvers a health round queries through a proxy
+// upstream, over UDP and over TCP; the round passes when both protocols
+// get an answer, from any target. The YAML form is that of ProbeTargets.
+type DNSTargets []netip.AddrPort
+
 func (p *ProbeTargets) UnmarshalYAML(n *yaml.Node) error {
+	targets, err := parseTargets(n, "health.probe")
+	*p = targets
+	return err
+}
+
+func (p *DNSTargets) UnmarshalYAML(n *yaml.Node) error {
+	targets, err := parseTargets(n, "health.dns")
+	*p = targets
+	return err
+}
+
+func parseTargets(n *yaml.Node, key string) ([]netip.AddrPort, error) {
 	switch n.Kind {
 	case yaml.ScalarNode:
 		ap, err := netip.ParseAddrPort(n.Value)
 		if err != nil {
-			return fmt.Errorf("health.probe: %w", err)
+			return nil, fmt.Errorf("%s: %w", key, err)
 		}
-		*p = ProbeTargets{ap}
+		return []netip.AddrPort{ap}, nil
 	case yaml.SequenceNode:
-		targets := make(ProbeTargets, 0, len(n.Content))
+		targets := make([]netip.AddrPort, 0, len(n.Content))
 		for i, item := range n.Content {
 			ap, err := netip.ParseAddrPort(item.Value)
 			if item.Kind != yaml.ScalarNode || err != nil {
-				return fmt.Errorf("health.probe[%d]: want an ip:port, got %q", i, item.Value)
+				return nil, fmt.Errorf("%s[%d]: want an ip:port, got %q", key, i, item.Value)
 			}
 			targets = append(targets, ap)
 		}
-		*p = targets
-	default:
-		return fmt.Errorf("health.probe: want an ip:port or a list of them")
+		return targets, nil
 	}
-	return nil
+	return nil, fmt.Errorf("%s: want an ip:port or a list of them", key)
 }
+
+func (p DNSTargets) String() string { return ProbeTargets(p).String() }
 
 func (p ProbeTargets) String() string {
 	s := make([]string, len(p))
@@ -127,7 +166,8 @@ func Default() Config {
 		Subnet:   netip.MustParsePrefix("10.77.0.0/16"),
 		DNS:      []netip.Addr{netip.MustParseAddr("1.1.1.1")},
 		StateDir: "/var/lib/lotsman",
-		Health:   Health{Interval: 15 * time.Second, Probe: ProbeTargets{netip.MustParseAddrPort("1.1.1.1:443")}, DownAfter: 3, UpAfter: 2},
+		Health: Health{Interval: 15 * time.Second, Probe: ProbeTargets{netip.MustParseAddrPort("1.1.1.1:443")},
+			DNS: DNSTargets{netip.MustParseAddrPort("1.1.1.1:53")}, DownAfter: 3, UpAfter: 2},
 	}
 }
 
@@ -145,6 +185,11 @@ func Parse(data []byte) (*Config, error) {
 	dec.KnownFields(true)
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("parse config: %w", err)
+	}
+	for i := range cfg.Upstreams {
+		if cfg.Upstreams[i].Kind == "" {
+			cfg.Upstreams[i].Kind = KindAWG
+		}
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -194,6 +239,7 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("upstreams: at least one is required")
 	}
 	seen := map[string]bool{}
+	proxies := false
 	for i, u := range c.Upstreams {
 		if !upstreamNameRe.MatchString(u.Name) {
 			return fmt.Errorf("upstreams[%d]: name %q must match %s (it becomes interface lm-up-<name>)", i, u.Name, upstreamNameRe)
@@ -202,6 +248,19 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("upstreams[%d]: duplicate name %q", i, u.Name)
 		}
 		seen[u.Name] = true
+		switch u.Kind {
+		case "", KindAWG:
+			if u.MaxFlows != 0 {
+				return fmt.Errorf("upstream %q: max_flows applies to kind %s only", u.Name, KindOutline)
+			}
+		case KindOutline:
+			proxies = true
+			if u.MaxFlows < 0 {
+				return fmt.Errorf("upstream %q: max_flows must not be negative", u.Name)
+			}
+		default:
+			return fmt.Errorf("upstream %q: kind must be %s or %s, got %q", u.Name, KindAWG, KindOutline, u.Kind)
+		}
 		if u.Conf == "" {
 			return fmt.Errorf("upstream %q: conf path is required", u.Name)
 		}
@@ -247,6 +306,20 @@ func (c *Config) Validate() error {
 	for i, t := range h.Probe {
 		if !t.IsValid() {
 			return fmt.Errorf("health.probe[%d]: invalid address", i)
+		}
+	}
+	if proxies {
+		if len(h.DNS) == 0 {
+			return fmt.Errorf("health.dns: at least one resolver is required for %s upstreams", KindOutline)
+		}
+		// Clients must never get the address every proxy TUN carries.
+		if c.Subnet.Contains(ProxyAddress.Addr()) {
+			return fmt.Errorf("subnet: %s holds %s, the address of %s upstreams; choose another subnet", c.Subnet, ProxyAddress.Addr(), KindOutline)
+		}
+	}
+	for i, t := range h.DNS {
+		if !t.IsValid() {
+			return fmt.Errorf("health.dns[%d]: invalid address", i)
 		}
 	}
 	if h.DownAfter < 1 || h.UpAfter < 1 {

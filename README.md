@@ -5,14 +5,16 @@ default, AWG 2.0 selectable) that
 routes each user to a working upstream VPN provider.
 
 Users connect with the official Amnezia app to a single server you run. Lotsman terminates their
-tunnel and forwards traffic into one of several upstream AmneziaWG tunnels — your own subscriptions
-at providers like RedShield — choosing the upstream by the user's profile (geo, provider) and by
+tunnel and forwards traffic into one of several upstreams — AmneziaWG tunnels or Outline
+(Shadowsocks) servers, your own subscriptions at providers like RedShield — choosing the upstream by the user's profile (geo, provider) and by
 live health. When an upstream dies, its users move to the next one without reconnecting.
 
 ```
-Amnezia app ──AWG2──▶ Lotsman ──AWG2──▶ provider NL ──▶ internet
-                         │
-                         └────AWG2──▶ provider DE ──▶ internet
+Amnezia app ──AWG──▶ Lotsman ──AWG──▶ provider NL ──▶ internet
+                        │
+                        ├────AWG──▶ provider DE ──▶ internet
+                        │
+                        └──Outline (Shadowsocks)──▶ server ──▶ internet
 ```
 
 *Lotsman* (лоцман) is the harbour pilot who knows which channel is passable today.
@@ -25,9 +27,14 @@ Amnezia app ──AWG2──▶ Lotsman ──AWG2──▶ provider NL ──�
 - Fail-closed: if no upstream is healthy for a user, their traffic is dropped, never leaked through
   the server's own IP.
 - MTU and TCP MSS handled for the double encapsulation; DNS follows the chosen upstream.
-- Upstreams may be plain WireGuard or AmneziaWG 2.0/3.x (including header protection and random
-  trailers); AmneziaWG 1.5 configs are not supported. Clients use the Amnezia app: 5.0.1.5 or later for
-  the default `awg: 3`; set `awg: 2` for older apps and Android 7–8.
+- Two upstream kinds, mixed freely in one profile so it can fail over between protocols:
+  - `awg` (default): plain WireGuard or AmneziaWG 2.0/3.x provider configs (including header
+    protection and random trailers); AmneziaWG 1.5 configs are not supported.
+  - `outline`: an Outline (Shadowsocks) access key, `ss://…`. A userspace TCP/IP stack in the
+    daemon carries TCP and UDP through it; ICMP (ping) does not pass.
+
+  Clients use the Amnezia app whatever the upstream: 5.0.1.5 or later for the default `awg: 3`; set
+  `awg: 2` for older apps and Android 7–8.
 - Optional Prometheus metrics: per-upstream health and per-client traffic.
 - A single static binary, a YAML file, and SQLite.
 
@@ -35,7 +42,9 @@ Amnezia app ──AWG2──▶ Lotsman ──AWG2──▶ provider NL ──�
 
 - All users behind one upstream share its exit IP and its reputation.
 - IPv6 inside the tunnel, a web UI, more than one node.
-- Throughput of a kernel WireGuard: crypto runs in userspace twice per packet.
+- Throughput of a kernel WireGuard: crypto runs in userspace twice per packet. Outline upstreams also
+  terminate every TCP connection in the daemon.
+- Dynamic Outline keys (`ssconf://`) and Shadowsocks-over-WebSocket; only static `ss://` keys so far.
 
 ## Quick start
 
