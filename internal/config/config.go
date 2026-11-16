@@ -35,10 +35,15 @@ type Metrics struct {
 }
 
 type Upstream struct {
-	Name     string `yaml:"name"`
-	Conf     string `yaml:"conf"`
-	Geo      string `yaml:"geo"`
-	Provider string `yaml:"provider"`
+	Name     string   `yaml:"name"`
+	Conf     string   `yaml:"conf"`
+	Geo      string   `yaml:"geo"`
+	Provider string   `yaml:"provider"`
+	Tags     []string `yaml:"tags"` // free-form groups a profile can prefer as one tier
+}
+
+func (u Upstream) HasTag(tag string) bool {
+	return slices.Contains(u.Tags, tag)
 }
 
 type Profile struct {
@@ -46,14 +51,28 @@ type Profile struct {
 	Prefer []Match `yaml:"prefer"`
 }
 
-// Match selects upstreams. Empty fields match anything, so an empty Match matches all.
+// Match selects upstreams. Empty fields match anything, so an empty Match matches all;
+// when several fields are given, all of them must match.
 type Match struct {
 	Geo      string `yaml:"geo"`
 	Provider string `yaml:"provider"`
+	Tag      string `yaml:"tag"`
 }
 
 func (m Match) Matches(u Upstream) bool {
-	return (m.Geo == "" || m.Geo == u.Geo) && (m.Provider == "" || m.Provider == u.Provider)
+	return (m.Geo == "" || m.Geo == u.Geo) && (m.Provider == "" || m.Provider == u.Provider) && (m.Tag == "" || u.HasTag(m.Tag))
+}
+
+// String lists the given fields the way the config spells them, e.g. {geo: NL, tag: eu},
+// so warnings and `config check` stay short however many fields Match grows.
+func (m Match) String() string {
+	var parts []string
+	for _, f := range [...]struct{ key, val string }{{"geo", m.Geo}, {"provider", m.Provider}, {"tag", m.Tag}} {
+		if f.val != "" {
+			parts = append(parts, f.key+": "+f.val)
+		}
+	}
+	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 type Health struct {
@@ -144,6 +163,18 @@ func (c *Config) Validate() error {
 		if u.Conf == "" {
 			return fmt.Errorf("upstream %q: conf path is required", u.Name)
 		}
+		// geo and provider are not validated: a typo there surfaces as a
+		// prefer entry matching nothing. Tags are checked the same way, but
+		// an empty one would read as "any" in a matcher, and a duplicate is
+		// a typo that cannot change what matches.
+		for j, tag := range u.Tags {
+			if !profileNameRe.MatchString(tag) {
+				return fmt.Errorf("upstream %q: tag %q must match %s", u.Name, tag, profileNameRe)
+			}
+			if slices.Contains(u.Tags[:j], tag) {
+				return fmt.Errorf("upstream %q: duplicate tag %q", u.Name, tag)
+			}
+		}
 	}
 	if len(c.Profiles) == 0 {
 		return fmt.Errorf("profiles: at least one is required")
@@ -229,13 +260,13 @@ func (c *Config) Warnings() []string {
 			m := p.Prefer[j]
 			switch {
 			case t.matched == 0:
-				out = append(out, fmt.Sprintf("profile %q: prefer[%d] %+v matches no upstream and is ignored", p.Name, j, m))
+				out = append(out, fmt.Sprintf("profile %q: prefer[%d] %v matches no upstream and is ignored", p.Name, j, m))
 			case t.own == 0:
 				var by []string
 				for _, k := range t.shadowers {
-					by = append(by, fmt.Sprintf("prefer[%d] %+v", k, p.Prefer[k]))
+					by = append(by, fmt.Sprintf("prefer[%d] %v", k, p.Prefer[k]))
 				}
-				out = append(out, fmt.Sprintf("profile %q: prefer[%d] %+v never applies: every upstream it matches is taken by %s", p.Name, j, m, strings.Join(by, ", ")))
+				out = append(out, fmt.Sprintf("profile %q: prefer[%d] %v never applies: every upstream it matches is taken by %s", p.Name, j, m, strings.Join(by, ", ")))
 			}
 		}
 	}
