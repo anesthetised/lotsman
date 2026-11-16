@@ -11,6 +11,7 @@ import (
 
 	awg2conn "github.com/amnezia-vpn/amneziawg-go/conn"
 	awg2device "github.com/amnezia-vpn/amneziawg-go/device"
+	awg2tun "github.com/amnezia-vpn/amneziawg-go/tun"
 	awg2netstack "github.com/amnezia-vpn/amneziawg-go/tun/netstack"
 	wgconn "golang.zx2c4.com/wireguard/conn"
 	wgdevice "golang.zx2c4.com/wireguard/device"
@@ -170,7 +171,10 @@ func TestAWG2RuntimeInterop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	provider := awg2device.NewDevice(ptun, awg2conn.NewDefaultBind(), awg2device.NewLogger(awg2device.LogLevelError, "awg2: "))
+	// netstack announces itself up at once, and v0.2.19 would then start its
+	// receive goroutines while IpcSet rewrites the headers they read (the
+	// race v3 fixes). Hide that event and bring the device up after IpcSet.
+	provider := awg2device.NewDevice(quietTUN{ptun, make(chan awg2tun.Event)}, awg2conn.NewDefaultBind(), awg2device.NewLogger(awg2device.LogLevelError, "awg2: "))
 	defer provider.Close()
 	providerCfg := awgconf.Config{
 		Interface: awgconf.Interface{PrivateKey: providerKey, Params: awg2},
@@ -332,3 +336,12 @@ func TestHeaderProtectionKeyMismatch(t *testing.T) {
 	}
 	checkEcho(t, c)
 }
+
+// quietTUN hides the TUN's own up/down events, so the device comes up only
+// when the test calls Up.
+type quietTUN struct {
+	awg2tun.Device
+	events chan awg2tun.Event
+}
+
+func (q quietTUN) Events() <-chan awg2tun.Event { return q.events }
