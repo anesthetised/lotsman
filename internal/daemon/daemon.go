@@ -64,6 +64,9 @@ type Daemon struct {
 	unroutePending map[netip.Addr]bool        // cleanup must finish before routing this address again
 	devicePeers    map[awgconf.Key]store.Peer // added peers, retained until device and route cleanup succeed
 	aliveFailed    map[string]string          // upstream → last SetAlive error; the kernel is stale until it succeeds
+	dpStale        bool                       // d.ups is not yet pushed to the dataplane; retried every round
+	notUp          map[*Upstream]bool         // opened upstreams whose device still has to come up
+	failures       map[failure]string         // retried failure → last logged error, so repeats stay quiet
 	wake           chan struct{}              // nudges Run to reprobe and reconcile now
 	ready          chan struct{}              // closed after the first reconcile
 
@@ -80,6 +83,8 @@ func New(d Deps) *Daemon {
 		unroutePending: map[netip.Addr]bool{},
 		devicePeers:    map[awgconf.Key]store.Peer{},
 		aliveFailed:    map[string]string{},
+		notUp:          map[*Upstream]bool{},
+		failures:       map[failure]string{},
 		wake:           make(chan struct{}, 1),
 		ready:          make(chan struct{}),
 		probes:         map[string]*[2]uint64{},
@@ -276,13 +281,8 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	for i, u := range cfg.Upstreams {
 		// Health settings are passed in because d.cfg switches to the
 		// incoming configuration only when this reload applies.
-		up, err := LoadUpstream(u, cfg.Health)
 		basis := running[u.Name]
-		if err == nil && (basis == nil || up.Source != basis.Source) {
-			rctx, cancel := context.WithTimeout(ctx, probeTimeout(cfg.Health))
-			err = up.Resolve(rctx)
-			cancel()
-		}
+		up, err := loadResolved(ctx, u, cfg.Health, basis)
 		loads[i] = loaded{up, basis, err}
 	}
 
@@ -318,6 +318,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 		}
 		if err != nil {
 			errs = append(errs, err)
+			d.openFailed(u.Name, err)
 			continue
 		}
 		if exists {
@@ -327,9 +328,12 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 		}
 		if err := d.openDevice(up); err != nil {
 			errs = append(errs, err)
+			d.openFailed(u.Name, err)
 			continue
 		}
 		next = append(next, up)
+		d.notUp[up] = true
+		delete(d.failures, failure{"open", u.Name})
 		if !exists {
 			d.log.Info("upstream added", "upstream", u.Name)
 		}
@@ -340,18 +344,8 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	}
 	d.ups = next
 	d.cfg = cfg
-	if err := d.dp.SetUpstreams(d.interfaces(), d.clientMTU()); err != nil {
-		return fmt.Errorf("dataplane: %w", err)
-	}
-	for _, u := range d.ups {
-		if err := u.Device.Up(); err != nil {
-			errs = append(errs, err)
-		}
-		// A replaced upstream starts unknown again; nothing may stay pinned to it.
-		if err := d.applyAlive(u); err != nil {
-			errs = append(errs, err)
-		}
-	}
+	d.dpStale = true
+	errs = append(errs, d.activate()...)
 	d.log.Info("configuration reloaded", "upstreams", len(d.ups), "profiles", len(cfg.Profiles), "client_mtu", d.clientMTU())
 	select {
 	case d.wake <- struct{}{}:
@@ -376,6 +370,8 @@ func (d *Daemon) dropUpstream(u *Upstream) {
 		}
 	}
 	delete(d.aliveFailed, u.Name)
+	delete(d.notUp, u)
+	delete(d.failures, failure{"up", u.Name})
 	u.Device.Close()
 }
 
@@ -384,6 +380,143 @@ func (d *Daemon) logWarnings(cfg *config.Config) {
 	for _, w := range cfg.Warnings() {
 		d.log.Warn("config warning", "detail", w)
 	}
+}
+
+// loadResolved loads a provider config and, unless it matches the running
+// upstream basis, resolves its endpoint within the probe timeout. It takes no
+// lock; the returned upstream is private until applied.
+func loadResolved(ctx context.Context, u config.Upstream, h config.Health, basis *Upstream) (*Upstream, error) {
+	up, err := LoadUpstream(u, h)
+	if err == nil && (basis == nil || up.Source != basis.Source) {
+		rctx, cancel := context.WithTimeout(ctx, probeTimeout(h))
+		err = up.Resolve(rctx)
+		cancel()
+	}
+	return up, err
+}
+
+// failure keys an error that is retried every health round.
+type failure struct{ kind, name string }
+
+// fail logs err unless the same error was already logged for key.
+func (d *Daemon) fail(key failure, msg string, err error, args ...any) {
+	if d.failures[key] != err.Error() {
+		d.log.Error(msg, append(args, "err", err)...)
+	}
+	d.failures[key] = err.Error()
+}
+
+// openFailed reports an upstream that is configured but could not be opened.
+func (d *Daemon) openFailed(name string, err error) {
+	d.fail(failure{"open", name}, "upstream is not running, will retry every health round", err, "upstream", name)
+}
+
+// activate pushes d.ups to the dataplane if that is pending, then brings up
+// the devices that are not up, as start does. Nothing comes up while the
+// dataplane is out of date. A failure leaves the work pending for the next
+// health round and is returned for Reload to report; it is logged once.
+// Callers hold d.mu.
+func (d *Daemon) activate() []error {
+	fresh := d.dpStale
+	if fresh {
+		key := failure{"dataplane", ""}
+		if err := d.dp.SetUpstreams(d.interfaces(), d.clientMTU()); err != nil {
+			d.fail(key, "dataplane upstreams not applied, new upstreams stay down and will be retried every health round", err)
+			return []error{fmt.Errorf("dataplane: %w", err)}
+		}
+		if _, failed := d.failures[key]; failed {
+			d.log.Info("dataplane upstreams applied")
+			delete(d.failures, key)
+		}
+		d.dpStale = false
+	}
+	var errs []error
+	for _, u := range d.ups {
+		if d.notUp[u] {
+			key := failure{"up", u.Name}
+			if err := u.Device.Up(); err != nil {
+				d.fail(key, "upstream device not up, will retry every health round", err, "upstream", u.Name)
+				errs = append(errs, err)
+				continue
+			}
+			delete(d.notUp, u)
+			delete(d.failures, key)
+		} else if !fresh {
+			continue
+		}
+		// A new or replaced upstream starts unknown; nothing may stay pinned to it.
+		if err := d.applyAlive(u); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errs
+}
+
+// reopenMissing opens upstreams the config lists but d.ups lacks, such as
+// ones whose open failed in a reload, and finishes any pending dataplane push
+// and device Up. Like Reload, files are read and endpoints resolved without
+// d.mu, and the result is applied under it only if nothing changed meanwhile.
+func (d *Daemon) reopenMissing(ctx context.Context) {
+	d.mu.Lock()
+	cfg := d.cfg
+	missing := map[string]bool{}
+	for _, u := range cfg.Upstreams {
+		missing[u.Name] = true
+	}
+	for _, u := range d.ups {
+		delete(missing, u.Name)
+	}
+	for key := range d.failures {
+		if key.kind == "open" && !slices.ContainsFunc(cfg.Upstreams, func(u config.Upstream) bool { return u.Name == key.name }) {
+			delete(d.failures, key) // dropped from the config
+		}
+	}
+	d.mu.Unlock()
+
+	// One lookup bound for all of them, so a slow provider does not hold up
+	// the probes for long.
+	loads := make([]*Upstream, len(cfg.Upstreams))
+	errs := make([]error, len(cfg.Upstreams))
+	var wg sync.WaitGroup
+	for i, u := range cfg.Upstreams {
+		if missing[u.Name] {
+			wg.Go(func() { loads[i], errs[i] = loadResolved(ctx, u, cfg.Health, nil) })
+		}
+	}
+	wg.Wait()
+	if ctx.Err() != nil {
+		return
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.cfg == cfg { // otherwise a reload took over; the next round retries
+		for i, u := range cfg.Upstreams {
+			if !missing[u.Name] || slices.ContainsFunc(d.ups, func(r *Upstream) bool { return r.Name == u.Name }) {
+				continue // running, or opened by a reload meanwhile
+			}
+			err := errs[i]
+			if err == nil {
+				err = d.openDevice(loads[i])
+			}
+			if err != nil {
+				d.openFailed(u.Name, err)
+				continue
+			}
+			d.ups = append(d.ups, loads[i])
+			d.notUp[loads[i]] = true
+			d.dpStale = true
+			delete(d.failures, failure{"open", u.Name})
+			d.log.Info("upstream added", "upstream", u.Name)
+		}
+		// Keep d.ups in configuration order, as Reload does.
+		order := map[string]int{}
+		for i, u := range cfg.Upstreams {
+			order[u.Name] = i
+		}
+		slices.SortStableFunc(d.ups, func(a, b *Upstream) int { return order[a.Name] - order[b.Name] })
+	}
+	d.activate() // failures are logged and retried next round
 }
 
 func restartRequired(old, cfg *config.Config) error {
@@ -412,6 +545,8 @@ func probeTimeout(h config.Health) time.Duration {
 }
 
 func (d *Daemon) probeAll(ctx context.Context) {
+	// Before the probes, so an upstream that opens now is probed this round.
+	d.reopenMissing(ctx)
 	var wg sync.WaitGroup
 	d.mu.Lock()
 	target, _ := netip.ParseAddrPort(d.cfg.Health.Probe)
@@ -608,7 +743,7 @@ func (d *Daemon) candidates() []policy.Upstream {
 	for i, u := range d.ups {
 		out[i] = policy.Upstream{
 			Upstream: u.Upstream,
-			Healthy:  u.Tracker.State() == health.Up,
+			Healthy:  u.Tracker.State() == health.Up && !d.notUp[u], // a device that is not up carries nothing
 			Latency:  u.Tracker.Latency(),
 		}
 	}
