@@ -173,7 +173,9 @@ func TestDialFailureResetsClient(t *testing.T) {
 }
 
 func TestUDPIdleTimeout(t *testing.T) {
-	f := newTestFlow(t, "secret", Options{DNSIdleTimeout: time.Second, UDPIdleTimeout: time.Hour})
+	// The timeout runs from the query, so it must outlast a slow exchange
+	// (a loaded runner under -race takes over a second).
+	f := newTestFlow(t, "secret", Options{DNSIdleTimeout: 3 * time.Second, UDPIdleTimeout: time.Hour})
 	c := f.dialDNS(t)
 	// Traffic within the timeout keeps the flow on one server socket.
 	for id := range uint16(4) {
@@ -185,7 +187,7 @@ func TestUDPIdleTimeout(t *testing.T) {
 	}
 	// After DNSIdleTimeout, not the general UDP one, the same client flow
 	// starts a new one.
-	time.Sleep(2 * time.Second)
+	time.Sleep(4 * time.Second)
 	f.dns(t, c, 9)
 	if n := f.server.UDPClients(); n != 2 {
 		t.Fatalf("server saw %d client sockets after idle, want 2", n)
