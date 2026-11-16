@@ -2,6 +2,7 @@
 package fake
 
 import (
+	"context"
 	"fmt"
 	"net/netip"
 	"sync"
@@ -23,6 +24,9 @@ type Dataplane struct {
 	Log       []string
 	SetupDone bool
 	TornDown  bool
+
+	watch    chan error // the channel of a running Watch, nil otherwise
+	verifies int        // Verify calls
 }
 
 func New() *Dataplane {
@@ -100,23 +104,73 @@ func (f *Dataplane) Unroute(peer netip.Addr) error {
 	return nil
 }
 
-// FlushFirewall removes the firewall as "nft flush ruleset" would.
+// FlushFirewall removes the firewall as "nft flush ruleset" would, and
+// reports it to a running Watch as the kernel would.
 func (f *Dataplane) FlushFirewall() {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.Flushed = true
 	f.Allowed = map[netip.Addr]bool{}
+	f.notify(nil)
 }
 
+// Verify reinstalls a flushed firewall. Like the real one, the reinstall is
+// itself a change a running Watch reports.
 func (f *Dataplane) Verify() (bool, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.verifies++
 	if !f.Flushed {
 		return false, nil
 	}
 	f.Flushed = false
 	f.Log = append(f.Log, "verify reinstalled")
+	f.notify(nil)
 	return true, nil
+}
+
+// Verifies counts Verify calls.
+func (f *Dataplane) Verifies() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.verifies
+}
+
+// Watch returns a channel that Notify, FlushFirewall and a repairing Verify
+// send to, closed once ctx is done.
+func (f *Dataplane) Watch(ctx context.Context) <-chan error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	ch := make(chan error, 1)
+	f.watch = ch
+	go func() {
+		<-ctx.Done()
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		close(ch)
+		if f.watch == ch {
+			f.watch = nil
+		}
+	}()
+	return ch
+}
+
+// Notify sends err to a running Watch: nil reports a change, an error a
+// failed watch. A value is dropped while the previous one is unread.
+func (f *Dataplane) Notify(err error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.notify(err)
+}
+
+func (f *Dataplane) notify(err error) {
+	if f.watch == nil {
+		return
+	}
+	select {
+	case f.watch <- err:
+	default:
+	}
 }
 
 // IsAllowed reports whether the firewall admits the peer.

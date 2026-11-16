@@ -1009,11 +1009,17 @@ func ourForeignRules(c *nftables.Conn, ch *nftables.Chain) ([]*nftables.Rule, er
 	}
 	var out []*nftables.Rule
 	for _, r := range rules {
-		if comment, ok := userdata.GetString(r.UserData, userdata.TypeComment); ok && comment == foreignRuleComment {
+		if isForeignAccept(r) {
 			out = append(out, r)
 		}
 	}
 	return out, nil
+}
+
+// isForeignAccept reports whether openForeignForwardChains inserted r.
+func isForeignAccept(r *nftables.Rule) bool {
+	comment, ok := userdata.GetString(r.UserData, userdata.TypeComment)
+	return ok && comment == foreignRuleComment
 }
 
 // foreignForwardChains lists IPv4-capable base chains on the forward hook that Lotsman does not own.
@@ -1024,14 +1030,20 @@ func foreignForwardChains(c *nftables.Conn) ([]*nftables.Chain, error) {
 	}
 	var out []*nftables.Chain
 	for _, ch := range all {
-		if ch.Table.Name == nftTable || ch.Hooknum == nil || *ch.Hooknum != *nftables.ChainHookForward {
-			continue
-		}
-		if ch.Table.Family == nftables.TableFamilyIPv4 || ch.Table.Family == nftables.TableFamilyINet {
+		if isForeignForwardChain(ch) {
 			out = append(out, ch)
 		}
 	}
 	return out, nil
+}
+
+// isForeignForwardChain reports whether ch is an IPv4-capable base chain on
+// the forward hook that Lotsman does not own.
+func isForeignForwardChain(ch *nftables.Chain) bool {
+	if ch == nil || ch.Table == nil || ch.Table.Name == nftTable || ch.Hooknum == nil || *ch.Hooknum != *nftables.ChainHookForward {
+		return false
+	}
+	return ch.Table.Family == nftables.TableFamilyIPv4 || ch.Table.Family == nftables.TableFamilyINet
 }
 
 func concat(parts ...[]expr.Any) []expr.Any {

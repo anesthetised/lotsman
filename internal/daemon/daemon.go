@@ -124,6 +124,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 	defer d.stop()
+	// Stopped before d.stop, so no repair races the teardown.
+	watchCtx, stopWatch := context.WithCancel(ctx)
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		d.watchFirewall(d.dp.Watch(watchCtx))
+	}()
+	defer func() {
+		stopWatch()
+		<-watched
+	}()
 
 	first := true
 	for {
@@ -656,6 +667,51 @@ func (d *Daemon) verifyFirewall() {
 		d.log.Info("firewall repair completed")
 		delete(d.failures, key)
 	}
+}
+
+// firewallSettle is how long the daemon waits after a reported firewall
+// change before it verifies, so a burst of changes (a firewall reload is
+// often several transactions) costs one check and at most one repair.
+const firewallSettle = 100 * time.Millisecond
+
+// watchFirewall verifies the firewall shortly after the dataplane reports a
+// change, so rules another tool removes are back within moments instead of
+// at the next health round, which stays the fallback for missed changes. A
+// repair is itself reported as a change; the check that follows finds the
+// firewall intact and changes nothing, so repairs do not feed each other.
+// It returns once changes is closed.
+func (d *Daemon) watchFirewall(changes <-chan error) {
+	for {
+		err, ok := <-changes
+		if !ok {
+			return
+		}
+		d.watchFailed(err)
+		settled := time.After(firewallSettle)
+	burst:
+		for {
+			select {
+			case err, ok := <-changes:
+				if !ok {
+					return
+				}
+				d.watchFailed(err)
+			case <-settled:
+				break burst
+			}
+		}
+		d.verifyFirewall()
+	}
+}
+
+// watchFailed logs a failed firewall watch once; the dataplane retries it.
+func (d *Daemon) watchFailed(err error) {
+	if err == nil {
+		return
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.fail(failure{"firewall watch", ""}, "watching the firewall for changes failed, removed rules are repaired at the next health round until it recovers", err)
 }
 
 // refreshEndpoint re-resolves an upstream's endpoint without holding d.mu, so

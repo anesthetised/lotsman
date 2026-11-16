@@ -315,12 +315,16 @@ be `2` (loose). Lotsman sets it, but a hardening tool may reset it; in Docker se
 
 **All clients stopped working after a firewall reload.** Tools that flush nftables (`nft flush
 ruleset`, some ufw and firewalld reloads, `iptables -F`) remove Lotsman's `inet lotsman` table or
-the accept rules it adds to other forward chains (Docker, ufw). Lotsman checks for this every health
-round, reinstalls what is missing and admits every routed client again, so service returns within
-one `health.interval`. Until then the host forwards without Lotsman's drop and NAT. Each repair is
-logged at error level as "firewall rules were removed by another tool and have been reinstalled"
-and counted in `lotsman_firewall_repairs_total`; a counter that keeps rising means a tool on the
-host keeps removing them. Removing rules inside `inet lotsman` while leaving the table, or emptying
+the accept rules it adds to other forward chains (Docker, ufw). Lotsman follows nftables change
+notifications; about 100 ms after such a change it reinstalls what is missing and admits every
+routed client again. Until then the host forwards without Lotsman's drop and NAT. Every health
+round checks too, which catches a change the notifications missed. If watching fails (logged once
+at error level as "watching the firewall for changes failed"), Lotsman restarts the watch with a
+backoff of up to a minute and relies on the health round meanwhile, so service returns within one
+`health.interval`. Each repair is logged at error level as "firewall rules were removed by another
+tool and have been reinstalled" and counted in `lotsman_firewall_repairs_total`; a counter that
+keeps rising means a tool on the host keeps removing them. A firewall reload made of several
+steps may count more than one repair. Removing rules inside `inet lotsman` while leaving the table, or emptying
 its sets by hand, is not detected; restart Lotsman after doing that.
 
 **Another firewall on the host.** Lotsman owns `table inet lotsman`. Docker (`iptables -P FORWARD
