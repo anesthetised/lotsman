@@ -24,7 +24,7 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 | State | YAML for upstreams/profiles, SQLite for users/peers | Operators edit and version the YAML; users are created at runtime. |
 | Fail-closed | Mandatory | User traffic must never leave via the host's own IP. nftables admits only authorized peers from `lm0` into an `lm-up-*`; all other forwarding from `lm0` is dropped. |
 | Host firewalls | Accept rules inserted into foreign forward chains | Docker's `FORWARD DROP` and ufw would otherwise silently drop forwarded traffic; same approach as Tailscale. |
-| Proxy upstreams | A userspace TCP/IP stack per upstream on its own TUN, flows re-originated through a pluggable dialer (Shadowsocks first) | Keeps kernel routing, pinning and fail-closed identical for every upstream kind; see [Proxy upstreams](#proxy-upstreams-outline). |
+| Proxy upstreams | A userspace TCP/IP stack per upstream on its own TUN, flows re-originated through a pluggable dialer (Shadowsocks first), each in its own unprivileged helper process | Keeps kernel routing, pinning and fail-closed identical for every upstream kind; a panic in the stack takes down one upstream, not the gateway; see [Proxy upstreams](#proxy-upstreams-outline). |
 
 ## AmneziaWG implementation notes (verified 2026-09-17)
 
@@ -226,6 +226,65 @@ its API is unstable; the `ss://` grammar is small enough to own).
   outline-ss-server keeps a wrong-key connection open silently), so a proxy upstream passes a round
   only when DNS queries to a `health.dns` resolver are answered over UDP and over TCP. Latency is
   the UDP query's, one round trip to the resolver like the AWG handshake probe.
+
+**Addendum: helper processes (2026-11-16, #91).** A panic in any goroutine ends a Go process, and
+the stack runs third-party code that parses what the network sends: gVisor, the Outline SDK and,
+with #86, xray-core (whose spike panicked on a non-REALITY certificate, i.e. under MITM, which is
+when blocking happens). In process, one such panic would take down the gateway: the listener, every
+AWG upstream and every client. So every proxy upstream's stack runs in a child process of the same
+binary (`lotsman proxy-helper`, hidden), one per upstream; Shadowsocks too, so there is one model.
+
+- Split: the daemon keeps everything that needs privileges or global state: it creates the TUN
+  (`d.newTUN`), owns policy, health probes, the dataplane and metrics. The helper gets the TUN
+  descriptor as fd 3 and runs only the stack and the dialer. The TUN stays open in the daemon, so
+  the interface, its routes and rules survive a helper's death; packets routed in meanwhile are
+  dropped by the kernel.
+- What crosses the boundary: fd 3 (TUN), fd 4 (one end of a Unix socket pair, the control
+  connection) and stderr. Over fd 4, request/response frames of a 4-byte big-endian length and a
+  JSON object (at most 64 KiB): `open` {access key text, resolved server, `max_flows`, log level},
+  then `server` {key text, resolved server} for a moved server or a rotated key, `max_flows` and
+  `stats` (the flow counters). Closing the connection tells the helper to stop. The key travels
+  only there, never in argv or the environment, which other processes can read through `/proc`.
+  The daemon sends key text, never a parsed key: a static key file's contents or a dynamic key's
+  response as fetched. The helper parses either with `proxy.ParseConfig`, which reads a plain
+  `ss://` key too (loading checks that it does), and on `server` only when the text changed.
+  The helper logs slog JSON records to stderr, and the daemon re-logs each with its level
+  and attributes plus the upstream's name; other lines (a panic and its trace) are logged as errors,
+  each cut at 4 KiB. Stderr rather than the control connection, because a panic or a fatal runtime
+  error writes there regardless, and one ordered stream keeps the protocol strictly
+  request/response.
+- Crash handling: the daemon reaps every helper. One that exits on its own after it was up marks the
+  upstream down at once (not after `down_after` rounds), drops its flow pins and reroutes its
+  clients in the same step, and counts `lotsman_proxy_restarts_total`; the exit status and the
+  panic's first line are logged. It is then "not up" like a device whose `Up` failed: the health
+  round brings it up again, the first attempt immediately, and after an exit within a minute of
+  starting the next start is held back 1 s, doubling to 1 min. Back up, it needs `up_after`
+  successful probes like any down upstream. A helper that does not answer a request within 2 s
+  (10 s for `open`) is killed, which counts as a crash. A helper whose stack stopped because
+  reading the TUN failed exits with status 1, which counts as a crash too, so a stack that can no
+  longer carry traffic is restarted instead of idling. On stop and reload the connection is closed
+  and the helper killed if it has not exited within 5 s.
+- Lifecycle: `Pdeathsig` (SIGKILL) kills helpers if the daemon dies; helpers are started from one
+  goroutine locked to a thread that never exits, because Linux sends that signal when the thread
+  that forked exits (go.dev/issue/27505). Helpers ignore SIGINT, SIGTERM and SIGHUP, so stopping the
+  service or Ctrl-C reaches them only through the daemon. `/proc/self/exe` is executed, so an
+  upgrade that replaced the binary on disk still starts the daemon's own version.
+- Privileges: a root daemon starts helpers as uid and gid 65534 with no supplementary groups, so
+  exec leaves them no capabilities (no file capabilities on the binary); they need only the
+  inherited descriptor and outbound sockets. The environment is empty and the working directory `/`.
+  A helper makes itself non-dumpable, so other processes of uid 65534 cannot read its memory, which
+  holds the key. They can still signal it, i.e. kill it, which the daemon handles as a crash; a
+  dedicated system user would close that (a follow-up; uid 65534 for now). The systemd unit's bounding set gains `CAP_SETUID` and
+  `CAP_SETGID` for the switch. A non-root daemon starts helpers as its own user, inheriting its
+  ambient capabilities.
+- Health is unchanged: probes still leave the daemon through the TUN, so they measure the helper end
+  to end. Tests keep the in-process runner (`proxy.InProcess`): netstack TUNs have no descriptor to
+  pass, and the daemon's logic is the same behind the `proxy.Runner` seam.
+
+Alternatives rejected: `recover` in every goroutine (third-party goroutines, and runtime fatal
+errors such as concurrent map writes, cannot be recovered); a separate binary (two artifacts to keep
+in step); `fdbased` I/O in the helper instead of amneziawg-go's TUN (see above); logs over the
+control connection (stderr is needed for panics anyway).
 
 **Cost.** Measured in the slice-1 spike (#61) in a privileged container on one host: a single bulk
 TCP flow through kernel TUN, gVisor and Shadowsocks moved about 2 Gbit/s, and the TUN plus stack

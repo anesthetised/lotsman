@@ -18,6 +18,7 @@ var Families = []metrics.Family{
 	{Name: "lotsman_upstream_up", Type: "gauge", Help: "1 while the upstream passes its health probes."},
 	{Name: "lotsman_upstream_flows", Type: "gauge", Help: "TCP and UDP flows a proxy upstream carries now."},
 	{Name: "lotsman_upstream_flows_refused_total", Type: "counter", Help: "Flows a proxy upstream refused at its max_flows limit."},
+	{Name: "lotsman_proxy_restarts_total", Type: "counter", Help: "Times a proxy upstream's helper process exited on its own, a crash included; each is restarted."},
 	{Name: "lotsman_upstream_probe_latency_seconds", Type: "gauge", Help: "Latency of the last successful probe."},
 	{Name: "lotsman_upstream_probes_total", Type: "counter", Help: "Probes by result."},
 	{Name: "lotsman_upstream_degraded", Type: "gauge", Help: "1 while the upstream is reachable but fails its transfer probes."},
@@ -99,6 +100,9 @@ func (d *Daemon) Metrics() []metrics.Sample {
 				sample("lotsman_upstream_receive_bytes_total", float64(p.RxBytes), up),
 				sample("lotsman_upstream_transmit_bytes_total", float64(p.TxBytes), up),
 			)
+		}
+		if u.Key != nil {
+			out = append(out, sample("lotsman_proxy_restarts_total", float64(d.restarts[u.Name]), up))
 		}
 		if f := st.Flows; f != nil {
 			out = append(out,

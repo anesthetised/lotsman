@@ -53,7 +53,11 @@ type Deps struct {
 	Probe     ProbeFunc    // AWG upstreams
 	ProbeDNS  DNSProbeFunc // proxy upstreams
 	Transfer  TransferFunc // every upstream, when health.transfer is set
-	Log       *slog.Logger
+	// Proxy runs proxy upstreams' stacks: proxy.InProcess when nil, as in
+	// tests on netstack TUNs, which have no descriptor to hand to a helper
+	// process; serve runs each in a helper (internal/proxy/helper).
+	Proxy proxy.Runner
+	Log   *slog.Logger
 }
 
 type Daemon struct {
@@ -65,6 +69,7 @@ type Daemon struct {
 	probe    ProbeFunc
 	probeDNS DNSProbeFunc
 	transfer TransferFunc
+	runProxy proxy.Runner
 	log      *slog.Logger
 
 	transferRuns sync.WaitGroup // transfer probes in flight; Run waits for them
@@ -80,6 +85,7 @@ type Daemon struct {
 	dpStale        bool                       // d.ups is not yet pushed to the dataplane; retried every round
 	notUp          map[*Upstream]bool         // opened upstreams whose device still has to come up
 	reauthorize    bool                       // the firewall was reinstalled; routed peers must be routed again
+	stopped        bool                       // stop has run; a late link exit changes nothing
 	failures       map[failure]string         // retried failure → last logged error, so repeats stay quiet
 	fetched        map[string]time.Time       // upstream → last dynamic key fetch, to space refetches on failed probes
 	wake           chan struct{}              // nudges Run to reprobe and reconcile now
@@ -92,14 +98,19 @@ type Daemon struct {
 	reroutes map[string]uint64     // destination upstream → moves
 	reloads  [2]uint64             // {ok, error}
 	repairs  uint64                // firewall reinstalls after another tool removed it
+	restarts map[string]uint64     // proxy upstream → links that stopped on their own
 
 	transferCounts map[string]*[2]uint64 // upstream → transfer probes {ok, fail}
 }
 
 func New(d Deps) *Daemon {
+	runProxy := d.Proxy
+	if runProxy == nil {
+		runProxy = proxy.InProcess
+	}
 	return &Daemon{
 		version: d.Version, cfg: d.Config, id: d.Identity, store: d.Store, dp: d.Dataplane, newTUN: d.NewTUN,
-		probe: d.Probe, probeDNS: d.ProbeDNS, transfer: d.Transfer, log: d.Log,
+		probe: d.Probe, probeDNS: d.ProbeDNS, transfer: d.Transfer, runProxy: runProxy, log: d.Log,
 		assignments:    map[netip.Addr]string{},
 		unroutePending: map[netip.Addr]bool{},
 		devicePeers:    map[awgconf.Key]store.Peer{},
@@ -113,6 +124,7 @@ func New(d Deps) *Daemon {
 		probes:         map[string]*[2]uint64{},
 		transferCounts: map[string]*[2]uint64{},
 		reroutes:       map[string]uint64{},
+		restarts:       map[string]uint64{},
 	}
 }
 
@@ -251,7 +263,35 @@ func (d *Daemon) openDevice(up *Upstream) error {
 	if err != nil {
 		return fmt.Errorf("create %s: %w", up.InterfaceName(), err)
 	}
-	return up.open(t, d.log)
+	return up.open(t, d.log, d.runProxy, func(err error) { d.linkExited(up, err) })
+}
+
+// linkExited takes an upstream whose link stopped on its own, such as a
+// proxy helper that crashed, out of service at once instead of after
+// down_after failed probes: it is marked down and its peers move now. It
+// stays not up until activate brings it up again, every health round (the
+// link may hold that back after repeated quick exits). The wake makes the
+// first attempt immediate. Once up, probes bring it back as usual.
+func (d *Daemon) linkExited(u *Upstream, err error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.stopped || !slices.Contains(d.ups, u) {
+		return // stopping, or replaced or removed by a reload
+	}
+	d.restarts[u.Name]++
+	d.notUp[u] = true
+	before := u.Tracker.State()
+	if u.Tracker.Fail() {
+		d.log.Info("upstream health changed", "upstream", u.Name, "from", before, "to", u.Tracker.State(), "err", err)
+	}
+	_ = d.applyAlive(u) // drops pins to it; a failure is logged and retried next round
+	if err := d.reconcile(); err != nil {
+		d.log.Error("reconcile after upstream exit", "err", err)
+	}
+	select {
+	case d.wake <- struct{}{}:
+	default:
+	}
 }
 
 func (d *Daemon) interfaces() []dataplane.Interface {
@@ -265,6 +305,7 @@ func (d *Daemon) interfaces() []dataplane.Interface {
 func (d *Daemon) stop() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	d.stopped = true
 	err := d.dp.Teardown() // disables ingress before removing forwarding protection
 	if err != nil {
 		d.log.Error("dataplane teardown", "err", err)
@@ -353,7 +394,10 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 			u.Kind = old.Kind
 			old.Upstream = u
 			if l, ok := old.link.(*proxyLink); ok {
-				l.stack.SetMaxFlows(u.MaxFlows)
+				if err := l.SetMaxFlows(u.MaxFlows); err != nil {
+					// A helper that failed is restarted with the new limit.
+					d.log.Warn("max_flows not applied to the running upstream", "upstream", u.Name, "err", err)
+				}
 			}
 			old.Tracker.SetThresholds(cfg.Health.DownAfter, cfg.Health.UpAfter)
 			if unchanged && up.Location != nil {
@@ -961,7 +1005,11 @@ func (d *Daemon) applyAlive(u *Upstream) error {
 func (d *Daemon) Reconcile() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	return d.reconcile()
+}
 
+// reconcile is Reconcile for callers that hold d.mu.
+func (d *Daemon) reconcile() error {
 	peers, err := d.store.ListPeers()
 	if err != nil {
 		return err

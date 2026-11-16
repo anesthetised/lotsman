@@ -19,8 +19,9 @@ Environment=LOTSMAN_CONFIG=/etc/lotsman/lotsman.yaml
 StateDirectory=lotsman
 StateDirectoryMode=0700
 # Root is needed to write /proc/sys, hence CAP_DAC_OVERRIDE. TUN, policy routing
-# and nftables need only CAP_NET_ADMIN.
-CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_DAC_OVERRIDE
+# and nftables need only CAP_NET_ADMIN. CAP_SETUID and CAP_SETGID let the daemon
+# start each Outline upstream's helper process as uid/gid 65534 without capabilities.
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW CAP_NET_BIND_SERVICE CAP_DAC_OVERRIDE CAP_SETUID CAP_SETGID
 ProtectSystem=strict
 ReadWritePaths=/var/lib/lotsman
 ProtectHome=true

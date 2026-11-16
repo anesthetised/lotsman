@@ -65,6 +65,7 @@ just build
 scp dist/lotsman-linux-amd64 server:/tmp/lotsman
 sudo /tmp/lotsman config check              # the new binary must accept the current config
 sudo install -m 0755 /tmp/lotsman /usr/local/bin/lotsman
+sudo cp deploy/lotsman.service /etc/systemd/system/ && sudo systemctl daemon-reload  # if the unit changed
 sudo systemctl restart lotsman              # clients reconnect on their own within seconds
 sudo lotsman upstream status
 ```
@@ -223,8 +224,9 @@ and is fetched again every health round until it comes up. `config check` fetche
 reports a failure as a warning, not an error, so `ExecStartPre` does not block the start.
 
 How it works: the kernel routes the client's packets into `lm-up-<name>` as usual, and a userspace
-TCP/IP stack in the daemon terminates each TCP connection and UDP flow there and opens a matching
-one through the Shadowsocks server. Consequences:
+TCP/IP stack terminates each TCP connection and UDP flow there and opens a matching one through the
+Shadowsocks server. The stack runs in a helper process per Outline upstream (see
+[Helper processes](#helper-processes)). Consequences:
 
 - No ICMP: ping and traceroute through an Outline upstream get no answer.
 - The client's TCP handshake completes only once the server accepted the connection; if the server
@@ -238,7 +240,7 @@ one through the Shadowsocks server. Consequences:
 - `max_flows` caps TCP and UDP flows the upstream carries at once (default 4096). Beyond it, new TCP
   connections are reset and UDP packets that would start a flow are dropped; both are counted in
   `lotsman_upstream_flows_refused_total`. A reload changes it without touching open flows.
-- CPU: TCP termination and Shadowsocks encryption run in the daemon. In a container one flow moved
+- CPU: TCP termination and Shadowsocks encryption run in the helper. In a container one flow moved
   about 2 Gbit/s; the stack adds roughly 1.5–4 ns of CPU per byte over Shadowsocks itself.
 
 Health: a TCP handshake proves nothing here (the stack completes it, and an Outline server keeps a
@@ -246,6 +248,40 @@ connection with a wrong key open without answering), so an Outline upstream is u
 query to a `health.dns` resolver gets an answer both over UDP and over TCP through it. Either
 failing counts as a failed round. The reported latency is the UDP query's. `health.probe` is not
 used for Outline upstreams.
+
+### Helper processes
+
+Each Outline upstream's stack runs in a child process of the daemon, so a crash in it (a bug in
+gVisor or the Outline SDK, or malicious input) takes down that upstream, not the gateway:
+
+```
+$ ps -o pid,ppid,user,args --ppid "$(pidof -s lotsman)"
+    PID    PPID USER     COMMAND
+   4242    4200 65534    lotsman proxy-helper
+```
+
+There is one per Outline upstream; the daemon logs `proxy helper started upstream=<name> pid=<pid>`
+for each. A root daemon runs them as uid/gid 65534 without capabilities: they hold only the
+upstream's TUN descriptor, open outbound connections to the server and are not dumpable, so other
+processes of that user cannot read the key from their memory. The unit's `CapabilityBoundingSet`
+must include `CAP_SETUID` and `CAP_SETGID` for this (as `deploy/lotsman.service` does); without
+them every Outline upstream fails to start with `operation not permitted`. In Docker, the default
+capabilities include both. Helpers ignore SIGTERM and SIGINT and die with the daemon. Their logs
+appear in the daemon's log with the `upstream` attribute, at the daemon's log level.
+
+uid 65534 (`nobody`) is shared with other services on most hosts: they cannot read a helper's
+memory, but they can kill it (handled as a crash, below). A dedicated system user for the helpers
+would close that and is planned as a follow-up.
+
+When a helper exits on its own, the log shows `proxy helper exited upstream=<name> status=…` (with
+`panic=…` and the stack trace lines as `proxy helper output` when it panicked), the upstream is down
+at once, its clients move to the next healthy upstream (or are blocked, fail-closed), and
+`lotsman_proxy_restarts_total{upstream}` increases. The daemon starts a new helper right away; if it
+exited within a minute of starting, the next start waits 1 s, doubling up to 1 minute
+(`restart held back` in the log). Once running, the upstream returns after `up_after` good probes.
+A helper that stops answering the daemon for 2 s is killed and handled the same way, and one whose
+stack stopped because reading its TUN failed exits with status 1 (`read tun, the upstream stops`
+just before) and is restarted too.
 
 ## Users
 
@@ -315,6 +351,7 @@ the host can. Changing `metrics.listen` needs a restart.
 | `lotsman_upstream_up` | `upstream` | 1 while probes pass |
 | `lotsman_upstream_flows` | `upstream` | Outline only: TCP and UDP flows open now |
 | `lotsman_upstream_flows_refused_total` | `upstream` | Outline only: flows refused at `max_flows` |
+| `lotsman_proxy_restarts_total` | `upstream` | Outline only: times its helper process exited on its own (crash, kill) and was restarted |
 | `lotsman_upstream_probe_latency_seconds` | `upstream` | last successful probe |
 | `lotsman_upstream_probes_total` | `upstream`, `result` | `ok` / `fail` |
 | `lotsman_upstream_degraded` | `upstream` | 1 while it is reachable but fails its transfer probes; always 0 with `health.transfer` off |
@@ -453,7 +490,17 @@ answers nothing); a server without UDP relay, or a network that blocks its UDP p
 half. The probe error in the `upstream health changed` log line says which protocol failed. Check
 the key with the Outline client on another machine. With a dynamic key, look for
 `dynamic key fetch failed` (it names the HTTP status, a certificate problem or the provider's
-error message) and run `lotsman config check`, which fetches the key once.
+error message) and run `lotsman config check`, which fetches the key once. If the log shows
+`proxy helper exited` or `upstream device not up` instead, the helper itself is failing: see the
+next item.
+
+**An Outline upstream keeps restarting.** `lotsman_proxy_restarts_total` rising and `proxy helper
+exited` in the log mean its helper process dies. With `panic=…` it crashed: keep the lines logged
+as `proxy helper output` around it, they are the stack trace a bug report needs; the other
+upstreams are unaffected. `signal: killed` without a panic means something killed it: the OOM
+killer (`journalctl -k | grep -i oom`), another process of uid 65534, or the daemon itself after
+the helper stopped answering for 2 s (logged just before). `operation not permitted` when starting
+means the unit lacks `CAP_SETUID`/`CAP_SETGID` (see [Helper processes](#helper-processes)).
 
 **An upstream shows `degraded`.** Its transfer probes fail while it stays reachable. The
 `upstream degraded` log line carries the last error: `16384 of 65536 bytes in 10s` is a path that

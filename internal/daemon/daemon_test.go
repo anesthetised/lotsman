@@ -22,6 +22,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/dataplane/fake"
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/metrics"
+	"github.com/anesthetised/lotsman/internal/proxy"
 	"github.com/anesthetised/lotsman/internal/store"
 )
 
@@ -150,7 +151,7 @@ func TestRefreshEndpoint(t *testing.T) {
 		t.Fatalf("loaded endpoint = %q resolved %q", u.Endpoint, u.Conf.Peers[0].Endpoint)
 	}
 	tn, _, _ := netstack.CreateNetTUN([]netip.Addr{u.Addr.Addr()}, nil, 1400)
-	if err := u.open(tn, quiet); err != nil {
+	if err := u.open(tn, quiet, proxy.InProcess, nil); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(u.link.Close)
