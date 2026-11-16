@@ -9,6 +9,8 @@ Two audits feed this plan:
   its history and evidence.
 - Second audit (2026-11-07, baseline `2160572c65350db99ced77cd6a2dc905b8d9f8e8`):
   #43–#57, plus the test flake #42. Active; see the next section.
+- Features scheduled with it (2026-11-16): AmneziaWG 3.1 upstreams (#59), a configurable AWG
+  generation on the listener (#60), and Outline (Shadowsocks) upstreams (#61).
 
 Start new implementation only within the user's authorized scope. Once a scope is
 approved, continue within it without repeatedly requesting approval.
@@ -36,9 +38,12 @@ upstreams whose first matching `prefer` entry (a matcher) is that one.
 |---|---|
 | #43 | `mtu.Overhead = 80` (IPv6 outer header) for every client. |
 | #46 | Add an `input` base chain to `table inet lotsman`: from `iifname lm0` accept ICMP to the gateway and `metrics.listen` when set, drop the rest. |
-| #48 | The user verifies `AllowedIPs = 0.0.0.0/0, ::/0` without an IPv6 `Address` on the official Amnezia client. The parent prepares the test config and checklist; the result decides between shipping `::/0` and a README statement. |
+| #48 | The user verifies `AllowedIPs = 0.0.0.0/0, ::/0` without an IPv6 `Address` on the official Amnezia client. The parent prepares the test config and checklist; the result decides between shipping `::/0` and a README statement. The client's own self-hosted template already renders exactly this, so rejection is unlikely. |
 | #50 | Option 3: a profile is an error only when none of its preference tiers matches an upstream; a partially empty `prefer` list is a warning in `config check` and the reload log. |
 | PR #27 | Upstream tags stay parked until wave 2, then rebase after #45 and #50, because both change the same loading and validation code. |
+| #59 | Move to the tag `amneziawg-go/v3 v3.1.20260828`; accept and validate all nine AWG 3.x keys on upstreams; keep rejecting AWG 1.5-only keys with a clearer error. |
+| #60 | One listener with a configurable AWG generation, default 3; several listeners are deferred. |
+| #61 | Outline upstreams on gVisor netstack + Outline SDK, in process. Keys: `ss://`, `ssconf://` and WebSocket transports, in separate slices after a spike. UDP is required and health-checked. New direct dependencies (Outline SDK, gVisor) are approved; versions are reviewed in the spike. |
 
 ### Wave 1: P1 (authorized 2026-11-16)
 
@@ -65,12 +70,19 @@ Lanes run concurrently; issues within a lane run in the order given.
 
 | Lane | Queue | Agent tier | Notes |
 |---|---|---|---|
+| AWG | #59, then #60 | strong | First in wave 2: provider configs with AWG 3.x keys do not load today. #59 owns `go.mod`, `internal/awgconf/*`, `internal/tunnel/*` imports and `internal/daemon/upstream.go`; the daemon lane waits for it to release `upstream.go`. #60 owns `internal/daemon/identity.go`, `internal/daemon/client.go` and the listener setting in `internal/config/*`, coordinated with the config lane. |
 | Daemon | #52, #47, #51 | light, strong, light | #52 reuses the #45 split. #47 adds a dataplane method and its Linux part takes the Linux lane's files for its duration. |
 | Linux | #46, #53 | strong, light | Sequential with the Linux part of #47 (`internal/dataplane/linux/linux.go`). |
 | Config | #50, then PR #27 rebase and review | light | `internal/config/*`, `cmd/lotsman/status.go` after wave 1 releases it. Open point for #50: a matcher can match upstreams that an earlier matcher already took, leaving its preference tier empty; current validation misses this. Confirm with the user whether that is also a warning. |
 | CLI | #49, #56 | light | `cmd/lotsman/*` after wave 1 releases it. |
 | Tooling | #54, #57 | light | #54: how the tools are pinned (`go run pkg@version` vs the `tool` directive in `go.mod`, a dependency change) is decided with the user first. |
 | Manual | #48 | user | Client test by the user; code change only after the result. |
+
+### Wave 3: Outline upstreams (#61)
+
+After wave 2. Slices, each reviewed and committed separately: (1) a spike on the gVisor
+glue in a disposable container, with a go/no-go checkpoint; (2) the upstream kind, `ss://`,
+health with the UDP check, metrics and CLI output; (3) `ssconf://`; (4) WebSocket transports.
 
 ### Manual and deferred
 
