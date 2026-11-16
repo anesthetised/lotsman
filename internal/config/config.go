@@ -3,9 +3,11 @@ package config
 
 import (
 	"bytes"
+	"cmp"
 	"fmt"
 	"net"
 	"net/netip"
+	"net/url"
 	"os"
 	"regexp"
 	"slices"
@@ -103,7 +105,50 @@ type Health struct {
 	DNS       DNSTargets    `yaml:"dns"`
 	DownAfter int           `yaml:"down_after"`
 	UpAfter   int           `yaml:"up_after"`
+	// Transfer, when set, also downloads through every upstream now and
+	// then; nil (the block is absent) turns it off.
+	Transfer *Transfer `yaml:"transfer"`
 }
+
+// Transfer is the throughput probe: an upstream that passes its
+// reachability probes but cannot move MinBytes of a download within Timeout
+// is degraded. It runs every Interval, give or take 20%, per upstream.
+type Transfer struct {
+	URL      TransferURLs  `yaml:"url"`
+	MinBytes int64         `yaml:"min_bytes"`
+	Timeout  time.Duration `yaml:"timeout"`
+	Interval time.Duration `yaml:"interval"`
+}
+
+// Transfer defaults, applied by Parse to fields left out or zero.
+const (
+	DefaultTransferMinBytes = 64 << 10
+	DefaultTransferTimeout  = 10 * time.Second
+	DefaultTransferInterval = 5 * time.Minute
+)
+
+// TransferURLs are the http:// or https:// URLs a transfer probe downloads;
+// a probe tries them in random order until one passes. In YAML it is a
+// single URL or a list of them.
+type TransferURLs []string
+
+func (u *TransferURLs) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		*u = TransferURLs{n.Value}
+		return nil
+	case yaml.SequenceNode:
+		var urls []string
+		if err := n.Decode(&urls); err != nil {
+			return fmt.Errorf("health.transfer.url: want a URL or a list of them")
+		}
+		*u = urls
+		return nil
+	}
+	return fmt.Errorf("health.transfer.url: want a URL or a list of them")
+}
+
+func (u TransferURLs) String() string { return strings.Join(u, ", ") }
 
 // ProbeTargets are the TCP destinations a health round tries through an AWG
 // upstream; the round passes when any one answers. In YAML it is a single
@@ -190,6 +235,11 @@ func Parse(data []byte) (*Config, error) {
 		if cfg.Upstreams[i].Kind == "" {
 			cfg.Upstreams[i].Kind = KindAWG
 		}
+	}
+	if t := cfg.Health.Transfer; t != nil {
+		t.MinBytes = cmp.Or(t.MinBytes, DefaultTransferMinBytes)
+		t.Timeout = cmp.Or(t.Timeout, DefaultTransferTimeout)
+		t.Interval = cmp.Or(t.Interval, DefaultTransferInterval)
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -325,6 +375,11 @@ func (c *Config) Validate() error {
 	if h.DownAfter < 1 || h.UpAfter < 1 {
 		return fmt.Errorf("health.down_after and health.up_after must be at least 1")
 	}
+	if t := h.Transfer; t != nil {
+		if err := t.validate(); err != nil {
+			return err
+		}
+	}
 	if c.Metrics.Listen != "" {
 		ap, err := netip.ParseAddrPort(c.Metrics.Listen)
 		if err != nil {
@@ -333,6 +388,25 @@ func (c *Config) Validate() error {
 		if ap.Addr().IsUnspecified() {
 			return fmt.Errorf("metrics.listen: %s would expose user names to everyone; bind the tunnel or loopback address", ap.Addr())
 		}
+	}
+	return nil
+}
+
+func (t *Transfer) validate() error {
+	if len(t.URL) == 0 {
+		return fmt.Errorf("health.transfer.url: at least one URL is required")
+	}
+	for i, raw := range t.URL {
+		u, err := url.Parse(raw)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+			return fmt.Errorf("health.transfer.url[%d]: want an http:// or https:// URL with a host, got %q", i, raw)
+		}
+	}
+	if t.MinBytes <= 0 {
+		return fmt.Errorf("health.transfer.min_bytes: must be positive")
+	}
+	if t.Timeout <= 0 || t.Interval <= 0 {
+		return fmt.Errorf("health.transfer.timeout and health.transfer.interval: must be positive")
 	}
 	return nil
 }

@@ -14,6 +14,16 @@ All notable changes to Lotsman are documented here. The format follows
   `state_dir/ssconf/<name>.json` (0600) for restarts while the URL is unreachable; without a fetch
   or a cached key the upstream stays down and is retried, and the daemon still starts. The URL is
   never logged (#61).
+- Transfer probe for throttled upstreams, off unless `health.transfer` is set: every `interval`
+  (default 5m, ±20% per upstream) each reachable upstream downloads `min_bytes` (default 64 KiB)
+  from `url` (one URL or a list; no built-in default) within `timeout` (default 10s), bound to the
+  upstream like the other probes; after a failure and while degraded, every fifth of `interval`
+  (at least `health.interval`). `down_after` failures mark it degraded and `up_after` passes
+  clear it. A degraded upstream is a last resort: clients use it only when their profile has no
+  other healthy upstream; once nobody is routed through it, its pinned flows are released as when
+  it is down. `upstream status` shows `degraded`, `config check` prints the settings, and
+  `lotsman_upstream_degraded`, `lotsman_upstream_transfer_seconds` and
+  `lotsman_upstream_transfer_probes_total` are new metrics (#87).
 - Outline (Shadowsocks) upstreams: `kind: outline` with `conf` pointing at a file holding an
   `ss://` access key (SIP002 or legacy, AEAD ciphers, Outline's `prefix`). A userspace TCP/IP stack
   (gVisor) on the upstream's TUN carries TCP and UDP through the server, so profiles, failover, flow

@@ -64,6 +64,17 @@ health:
   dns: 1.1.1.1:53
   down_after: 3
   up_after: 2
+  # Off unless set: catches upstreams that answer probes but freeze or crawl
+  # under real traffic. Every interval (±20%) each upstream downloads from url
+  # and must get min_bytes within timeout; down_after failures mark it
+  # degraded (used only when a profile has nothing better), up_after passes
+  # clear it; while failing it probes every interval/5. About 18 MiB a day per
+  # upstream at these values. The host's resolver looks up the URL's host.
+  # transfer:
+  #   url: https://speed.cloudflare.com/__down?bytes=65536   # or a list
+  #   min_bytes: 65536
+  #   timeout: 10s
+  #   interval: 5m
 
 # Prometheus endpoint, off unless set. It names users, so keep it on the tunnel
 # gateway (reachable by clients only) or on loopback; 0.0.0.0 is refused.

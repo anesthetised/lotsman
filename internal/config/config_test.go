@@ -327,3 +327,51 @@ func TestLoadMissingFile(t *testing.T) {
 		t.Errorf("expected file error, got %v", err)
 	}
 }
+
+func TestTransfer(t *testing.T) {
+	cfg, err := Parse([]byte(minimal))
+	if err != nil || cfg.Health.Transfer != nil {
+		t.Fatalf("transfer is off unless configured: %+v, %v", cfg.Health.Transfer, err)
+	}
+	for name, tc := range map[string]struct {
+		health string
+		want   Transfer
+	}{
+		"one url, defaults": {"health: {transfer: {url: 'https://speed.example/down?bytes=65536'}}\n",
+			Transfer{URL: TransferURLs{"https://speed.example/down?bytes=65536"}, MinBytes: 65536, Timeout: 10 * time.Second, Interval: 5 * time.Minute}},
+		"list and overrides": {"health:\n  transfer:\n    url: ['http://a.example/x', 'https://b.example:8443/y']\n    min_bytes: 1000\n    timeout: 3s\n    interval: 1m\n",
+			Transfer{URL: TransferURLs{"http://a.example/x", "https://b.example:8443/y"}, MinBytes: 1000, Timeout: 3 * time.Second, Interval: time.Minute}},
+		"null block is off": {"health: {transfer: null}\n", Transfer{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Parse([]byte(minimal + tc.health))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got Transfer
+			if cfg.Health.Transfer != nil {
+				got = *cfg.Health.Transfer
+			}
+			if !slices.Equal(got.URL, tc.want.URL) || got.MinBytes != tc.want.MinBytes || got.Timeout != tc.want.Timeout || got.Interval != tc.want.Interval {
+				t.Errorf("transfer = %+v, want %+v", got, tc.want)
+			}
+		})
+	}
+	for name, tc := range map[string]struct{ health, want string }{
+		"empty block":      {"health: {transfer: {}}\n", "health.transfer.url: at least one URL"},
+		"empty list":       {"health: {transfer: {url: []}}\n", "health.transfer.url: at least one URL"},
+		"no scheme":        {"health: {transfer: {url: speed.example/down}}\n", "health.transfer.url[0]:"},
+		"other scheme":     {"health: {transfer: {url: 'ftp://speed.example/down'}}\n", "health.transfer.url[0]:"},
+		"no host":          {"health: {transfer: {url: ['http://a.example/', 'https:///down']}}\n", "health.transfer.url[1]:"},
+		"mapping":          {"health: {transfer: {url: {u: 'http://a.example/'}}}\n", "health.transfer.url:"},
+		"negative bytes":   {"health: {transfer: {url: 'http://a.example/', min_bytes: -1}}\n", "health.transfer.min_bytes"},
+		"negative timeout": {"health: {transfer: {url: 'http://a.example/', timeout: -1s}}\n", "health.transfer.timeout"},
+		"unknown key":      {"health: {transfer: {url: 'http://a.example/', bytes: 1}}\n", "field bytes not found"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse([]byte(minimal + tc.health)); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}

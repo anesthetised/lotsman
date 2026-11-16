@@ -52,6 +52,7 @@ type Deps struct {
 	NewTUN    TUNFunc
 	Probe     ProbeFunc    // AWG upstreams
 	ProbeDNS  DNSProbeFunc // proxy upstreams
+	Transfer  TransferFunc // every upstream, when health.transfer is set
 	Log       *slog.Logger
 }
 
@@ -63,7 +64,10 @@ type Daemon struct {
 	newTUN   TUNFunc
 	probe    ProbeFunc
 	probeDNS DNSProbeFunc
+	transfer TransferFunc
 	log      *slog.Logger
+
+	transferRuns sync.WaitGroup // transfer probes in flight; Run waits for them
 
 	mu             sync.Mutex
 	cfg            *config.Config
@@ -81,17 +85,21 @@ type Daemon struct {
 	wake           chan struct{}              // nudges Run to reprobe and reconcile now
 	ready          chan struct{}              // closed after the first reconcile
 
+	transfers map[*Upstream]*transferState // throughput health while health.transfer is set
+
 	// Monotonic counters for metrics.
 	probes   map[string]*[2]uint64 // upstream → {ok, fail}
 	reroutes map[string]uint64     // destination upstream → moves
 	reloads  [2]uint64             // {ok, error}
 	repairs  uint64                // firewall reinstalls after another tool removed it
+
+	transferCounts map[string]*[2]uint64 // upstream → transfer probes {ok, fail}
 }
 
 func New(d Deps) *Daemon {
 	return &Daemon{
 		version: d.Version, cfg: d.Config, id: d.Identity, store: d.Store, dp: d.Dataplane, newTUN: d.NewTUN,
-		probe: d.Probe, probeDNS: d.ProbeDNS, log: d.Log,
+		probe: d.Probe, probeDNS: d.ProbeDNS, transfer: d.Transfer, log: d.Log,
 		assignments:    map[netip.Addr]string{},
 		unroutePending: map[netip.Addr]bool{},
 		devicePeers:    map[awgconf.Key]store.Peer{},
@@ -99,9 +107,11 @@ func New(d Deps) *Daemon {
 		notUp:          map[*Upstream]bool{},
 		failures:       map[failure]string{},
 		fetched:        map[string]time.Time{},
+		transfers:      map[*Upstream]*transferState{},
 		wake:           make(chan struct{}, 1),
 		ready:          make(chan struct{}),
 		probes:         map[string]*[2]uint64{},
+		transferCounts: map[string]*[2]uint64{},
 		reroutes:       map[string]uint64{},
 	}
 }
@@ -136,6 +146,8 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 	defer d.stop()
+	// Transfer probes end once ctx is done; none may outlive the devices.
+	defer d.transferRuns.Wait()
 	// Stopped before d.stop, so no repair races the teardown.
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	watched := make(chan struct{})
@@ -387,6 +399,9 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	}
 	d.ups = next
 	d.cfg = cfg
+	if cfg.Health.Transfer == nil {
+		d.stopTransfers()
+	}
 	d.dpStale = true
 	errs = append(errs, d.activate()...)
 	d.log.Info("configuration reloaded", "upstreams", len(d.ups), "profiles", len(cfg.Profiles), "client_mtu", d.clientMTU())
@@ -415,6 +430,7 @@ func (d *Daemon) dropUpstream(u *Upstream) {
 	delete(d.aliveFailed, u.Name)
 	delete(d.notUp, u)
 	delete(d.failures, failure{"up", u.Name})
+	delete(d.transfers, u)
 	u.link.Close()
 }
 
@@ -771,7 +787,7 @@ func (d *Daemon) probeAll(ctx context.Context) {
 		wg.Go(func() {
 			latency, err := d.probeUpstream(ctx, proxied, iface, source, h)
 			d.mu.Lock()
-			d.countProbe(u.Name, err == nil)
+			countResult(d.probes, u.Name, err == nil)
 			before := u.Tracker.State()
 			changed := u.Tracker.Observe(err == nil, latency)
 			if changed {
@@ -790,6 +806,8 @@ func (d *Daemon) probeAll(ctx context.Context) {
 	}
 	d.mu.Unlock()
 	wg.Wait()
+	// After the round, so an upstream that just came up is measured at once.
+	d.startTransfers(ctx)
 }
 
 // verifyFirewall repairs the firewall if another tool removed it, such as by
@@ -915,12 +933,16 @@ func (d *Daemon) refreshEndpoint(ctx context.Context, u *Upstream, endpoint, sta
 	}
 }
 
-// applyAlive pushes the observed health to the dataplane, which drops flow pins
-// to a dead upstream. A failure is remembered so the next probe round retries
+// applyAlive pushes alive(u) to the dataplane, which drops flow pins to an
+// upstream that is not alive. A failure is remembered so the next probe round retries
 // it, and logged only when the error changes; the observed health is untouched.
 func (d *Daemon) applyAlive(u *Upstream) error {
-	err := d.dp.SetAlive(u.InterfaceName(), u.Tracker.State() == health.Up)
+	alive := d.alive(u)
+	err := d.dp.SetAlive(u.InterfaceName(), alive)
 	if err == nil {
+		if st := d.transfers[u]; st != nil {
+			st.alive = alive
+		}
 		if _, stale := d.aliveFailed[u.Name]; stale {
 			d.log.Info("set alive recovered", "upstream", u.Name)
 			delete(d.aliveFailed, u.Name)
@@ -981,6 +1003,7 @@ func (d *Daemon) Reconcile() error {
 		}
 		errs = append(errs, d.route(p))
 	}
+	d.syncAlive()
 	return errors.Join(errs...)
 }
 
@@ -1032,11 +1055,12 @@ func (d *Daemon) unroute(ip netip.Addr) error {
 	return nil
 }
 
-func (d *Daemon) countProbe(upstream string, ok bool) {
-	c := d.probes[upstream]
+// countResult counts one probe result in m, upstream → {ok, fail}.
+func countResult(m map[string]*[2]uint64, upstream string, ok bool) {
+	c := m[upstream]
 	if c == nil {
 		c = new([2]uint64)
-		d.probes[upstream] = c
+		m[upstream] = c
 	}
 	if ok {
 		c[0]++
@@ -1060,6 +1084,7 @@ func (d *Daemon) candidates() []policy.Upstream {
 		out[i] = policy.Upstream{
 			Upstream: u.Upstream,
 			Healthy:  u.Tracker.State() == health.Up && !d.notUp[u], // a device that is not up carries nothing
+			Degraded: d.degraded(u),
 			Latency:  u.Tracker.Latency(),
 		}
 	}
@@ -1075,6 +1100,7 @@ type UpstreamStatus struct {
 	Kind          string
 	Interface     string
 	State         health.State
+	Degraded      bool // reachable, but failing its transfer probes
 	Latency       time.Duration
 	LastHandshake time.Time // with the provider; zero if never, and for proxy upstreams
 	Routed        int       // clients whose traffic is directed through this upstream
@@ -1114,8 +1140,8 @@ func (d *Daemon) Status() Status {
 		return cmp.Or(strings.Compare(a.User, b.User), strings.Compare(a.Device, b.Device), strings.Compare(a.Profile, b.Profile))
 	})
 	for _, u := range d.ups {
-		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Interface: u.InterfaceName(), State: u.Tracker.State(), Latency: u.Tracker.Latency(),
-			Routed: routed[u.Name], Active: active[u.Name]}
+		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Interface: u.InterfaceName(), State: u.Tracker.State(), Degraded: d.degraded(u),
+			Latency: u.Tracker.Latency(), Routed: routed[u.Name], Active: active[u.Name]}
 		if peer := u.link.Stats().Peer; peer != nil {
 			s.LastHandshake = peer.LastHandshake
 		}

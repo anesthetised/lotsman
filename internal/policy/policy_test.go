@@ -15,6 +15,11 @@ func up(name, geo string, healthy bool, latency time.Duration) Upstream {
 	}
 }
 
+func degraded(u Upstream) Upstream {
+	u.Degraded = true
+	return u
+}
+
 func TestSelect(t *testing.T) {
 	nl := config.Profile{Name: "nl", Prefer: []config.Match{{Geo: "NL"}}}
 	eu := config.Profile{Name: "eu", Prefer: []config.Match{{Geo: "NL"}, {Geo: "DE"}}}
@@ -52,6 +57,20 @@ func TestSelect(t *testing.T) {
 			[]Upstream{up("de1", "DE", true, 30), up("nl1", "NL", true, 10)}, "de1", "de1", true},
 		{"current outside profile is not kept", nl,
 			[]Upstream{up("de1", "DE", true, 0), up("nl1", "NL", true, 0)}, "de1", "nl1", true},
+		{"leaves current when it is degraded", nl,
+			[]Upstream{degraded(up("nl1", "NL", true, 10)), up("nl2", "NL", true, 50)}, "nl1", "nl2", true},
+		{"a worse tier beats a degraded better one", eu,
+			[]Upstream{degraded(up("nl1", "NL", true, 0)), up("de1", "DE", true, 0)}, "nl1", "de1", true},
+		{"degraded is the last resort", nl,
+			[]Upstream{degraded(up("nl1", "NL", true, 0)), up("de1", "DE", true, 0)}, "", "nl1", true},
+		{"last resort keeps tiers", eu,
+			[]Upstream{degraded(up("de1", "DE", true, 0)), degraded(up("nl1", "NL", true, 50))}, "", "nl1", true},
+		{"last resort is sticky", nl,
+			[]Upstream{degraded(up("nl1", "NL", true, 50)), degraded(up("nl2", "NL", true, 20))}, "nl1", "nl1", true},
+		{"last resort picks lowest latency", nl,
+			[]Upstream{degraded(up("nl1", "NL", true, 50)), degraded(up("nl2", "NL", true, 20))}, "", "nl2", true},
+		{"degraded and down fails closed", nl,
+			[]Upstream{degraded(up("nl1", "NL", false, 0))}, "", "", false},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

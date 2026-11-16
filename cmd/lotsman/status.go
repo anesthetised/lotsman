@@ -13,6 +13,7 @@ import (
 
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/daemon"
+	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/proxy"
 )
 
@@ -62,7 +63,11 @@ func upstreamStatus(configPath string) error {
 		if (config.Upstream{Kind: u.Kind}).Proxy() {
 			handshake = "-" // proxies have no handshake of their own
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\n", u.Name, u.Kind, u.Interface, u.State, u.Latency.Round(time.Millisecond), handshake, u.Routed, u.Active)
+		state := u.State.String()
+		if u.Degraded && u.State == health.Up {
+			state = "degraded" // reachable, but failing its transfer probes
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\n", u.Name, u.Kind, u.Interface, state, u.Latency.Round(time.Millisecond), handshake, u.Routed, u.Active)
 	}
 	return w.Flush()
 }
@@ -119,6 +124,9 @@ func checkConfig(configPath string) error {
 		health += "  dns " + cfg.Health.DNS.String()
 	}
 	fmt.Println(health)
+	if t := cfg.Health.Transfer; t != nil {
+		fmt.Printf("transfer url %s  min_bytes %d  timeout %s  interval %s ±20%%\n", t.URL, t.MinBytes, t.Timeout, t.Interval)
+	}
 	for _, w := range append(cfg.Warnings(), warnings...) {
 		fmt.Println("warning:", w)
 	}

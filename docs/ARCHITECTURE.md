@@ -130,6 +130,36 @@ so even stale pins or main-table connected routes cannot authorize it; when an u
 down its pins are deleted and the flows follow the peer's current route. Only flows through a dead
 upstream are lost, and those were dead anyway.
 
+### Throughput health (#87)
+
+Blocking often degrades a path instead of cutting it: TCP flows freeze after 15–20 KB or crawl,
+while a handshake and a DNS answer still pass. The optional transfer probe (`health.transfer`)
+therefore downloads `min_bytes` from an operator-chosen URL through each upstream, bound like the
+reachability probes, and requires it within `timeout`. Decided 2026-11-16:
+
+- An absolute threshold (bytes within a time) rather than one relative to the upstream's own
+  history: a freeze is absolute, and a history-based baseline would learn a slow path as normal.
+- A separate *degraded* state with the reachability hysteresis (`down_after`, `up_after`) on its
+  own results, so one slow sample does not flap. Reachability stays the separate signal
+  (`upstream_up`).
+- Selection: a degraded upstream is a last resort (`policy.Select` tries healthy, not degraded
+  upstreams in every tier first, then the degraded ones by the same rules): slow connectivity
+  beats a blocked client.
+- Pinning: `alive` (what `SetAlive` gets) is up and either not degraded or still some peer's
+  route. A frozen path holds old flows hostage as surely as a dead one, so once every peer has
+  moved away its pins are released to the peers' new routes; while it is a last resort it stays
+  alive, otherwise its own clients' flows would be cut every round. Peers moving changes this
+  answer without a probe result, so `Reconcile` re-evaluates it after routing.
+- Probes run beside the health round, not in it: at most one per upstream, never under the daemon
+  lock, only while the upstream is up, and every `interval` ±20% drawn per upstream and probe, so
+  the probes neither delay the 15 s round nor form a fixed period. After a failure and while
+  degraded, a fifth of `interval` (at least `health.interval`), so a freeze is confirmed and a
+  recovery seen in minutes, at extra cost only while the upstream fails. Run waits for them on
+  shutdown.
+- No built-in URL: any default would be a single third party every installation calls, and a
+  recognisable signature. The URL's host is resolved by the host resolver; only the connection
+  goes through the upstream, as for an AWG endpoint lookup.
+
 ## Proxy upstreams (Outline)
 
 Decided 2026-11-16 for #61; the stack is protocol-neutral so VLESS (#86) can reuse it.
