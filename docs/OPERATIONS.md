@@ -89,8 +89,8 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `subnet` | Canonical IPv4 network prefix, /24 or larger; the first host address is the gateway. |
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
 | `state_dir` | Server identity, SQLite database, pid and status files. |
-| `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `conf` path, free-form `geo` and `provider` labels. |
-| `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider}` matchers; empty = any upstream. A matcher that matches no upstream, or only upstreams an earlier matcher already took, is ignored with a warning in `config check` and the reload log, so an upstream can be removed without editing every profile. A profile where no matcher matches any upstream is an error. |
+| `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `conf` path, free-form `geo` and `provider` labels, and `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates). |
+| `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider, tag}` matchers (all given fields must match); empty = any upstream. Within a tier the lowest latency wins, so a tag such as `near` groups several countries into one tier. A matcher that matches no upstream, or only upstreams an earlier matcher already took, is ignored with a warning in `config check` and the reload log, so an upstream can be removed without editing every profile. A profile where no matcher matches any upstream is an error. |
 | `health` | `interval`, `probe` (`ip:port` reachable through every upstream), `down_after`, `up_after`. |
 
 `listen` binds exactly the configured numeric address; hostnames and an omitted

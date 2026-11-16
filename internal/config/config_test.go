@@ -2,6 +2,7 @@ package config
 
 import (
 	"net/netip"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -94,6 +95,10 @@ func TestValidationErrors(t *testing.T) {
 		"bad profile name":       {"profiles", "profiles: [{name: 'Bad Name'}]\n", "profiles[0]: name"},
 		"duplicate profile":      {"profiles", "profiles: [{name: p}, {name: p}]\n", "duplicate name"},
 		"prefer matches nothing": {"profiles", "profiles: [{name: p, prefer: [{geo: XX}]}]\n", "matches no upstream"},
+		"prefer tag nobody has":  {"profiles", "profiles: [{name: p, prefer: [{tag: asia}]}]\n", "matches no upstream"},
+		"bad tag":                {"upstreams", "upstreams: [{name: a, conf: /x, tags: ['Bad Tag']}]\n", `tag "Bad Tag" must match`},
+		"empty tag":              {"upstreams", "upstreams: [{name: a, conf: /x, tags: ['']}]\n", `tag "" must match`},
+		"duplicate tag":          {"upstreams", "upstreams: [{name: a, conf: /x, tags: [eu, near, eu]}]\n", `duplicate tag "eu"`},
 		"zero health interval":   {"health", "health: {interval: 0s}\n", "health.interval:"},
 		"probe without port":     {"health", "health: {probe: 1.1.1.1}\n", "health.probe:"},
 		"down_after zero":        {"health", "health: {down_after: 0}\n", "health.down_after"},
@@ -165,6 +170,54 @@ func replaceTopLevelField(yaml, field, replacement string) string {
 	return strings.Join(lines[:start], "\n") + "\n" + replacement + strings.Join(lines[end:], "\n")
 }
 
+func TestTags(t *testing.T) {
+	cfg, err := Parse([]byte(tagsConfig(`  - {name: near, prefer: [{tag: near}]}
+  - {name: eu, prefer: [{tag: near}, {tag: eu}]}
+`)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Upstreams[0].Tags; !slices.Equal(got, []string{"near", "eu"}) {
+		t.Errorf("tags = %q", got)
+	}
+	near, _ := cfg.Profile("near")
+	if !near.Prefer[0].Matches(cfg.Upstreams[0]) || near.Prefer[0].Matches(cfg.Upstreams[1]) || near.Prefer[0].Matches(cfg.Upstreams[2]) {
+		t.Error("tag tier matches the wrong upstreams")
+	}
+}
+
+func TestMatchString(t *testing.T) {
+	for m, want := range map[Match]string{
+		{}:                                     "{}",
+		{Geo: "NL"}:                            "{geo: NL}",
+		{Tag: "eu"}:                            "{tag: eu}",
+		{Geo: "NL", Provider: "rs", Tag: "eu"}: "{geo: NL, provider: rs, tag: eu}",
+	} {
+		if got := m.String(); got != want {
+			t.Errorf("%#v.String() = %q, want %q", m, got, want)
+		}
+	}
+}
+
+// The shipped example is the first thing an operator copies; it must load,
+// show tags, and raise no warnings.
+func TestExampleConfigIsValid(t *testing.T) {
+	cfg, err := Load("../../deploy/lotsman.example.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := cfg.Warnings(); len(got) != 0 {
+		t.Errorf("Warnings = %q, want none", got)
+	}
+	tagged := false
+	for _, u := range cfg.Upstreams {
+		tagged = tagged || len(u.Tags) > 0
+	}
+	if !tagged {
+		t.Error("example shows no upstream tags")
+	}
+}
+
 func TestMetricsListen(t *testing.T) {
 	cfg, err := Parse([]byte(minimal))
 	if err != nil || cfg.Metrics.Listen != "" {
@@ -183,12 +236,16 @@ func TestInterfaceName(t *testing.T) {
 }
 
 func TestMatch(t *testing.T) {
-	u := Upstream{Name: "x", Geo: "NL", Provider: "rs"}
+	u := Upstream{Name: "x", Geo: "NL", Provider: "rs", Tags: []string{"near", "eu"}}
 	for m, want := range map[Match]bool{
 		{}:                             true,
 		{Geo: "NL"}:                    true,
 		{Provider: "rs"}:               true,
 		{Geo: "NL", Provider: "rs"}:    true,
+		{Tag: "eu"}:                    true,
+		{Tag: "near", Geo: "NL"}:       true,
+		{Tag: "asia"}:                  false,
+		{Tag: "eu", Geo: "DE"}:         false,
 		{Geo: "DE"}:                    false,
 		{Geo: "NL", Provider: "other"}: false,
 	} {

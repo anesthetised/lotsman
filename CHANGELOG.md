@@ -6,6 +6,9 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `tags` on upstreams and `tag` in profile tiers, so several countries can form one tier picked by
+  latency. A matcher with several fields requires all of them; warnings and `config check` print
+  matchers in the config's own spelling, such as `{geo: NL, tag: eu}` (#27).
 - `-log-level` flag and `LOTSMAN_LOG_LEVEL` (`debug`, `info`, `warn`, `error`; default `info`)
   set the daemon's log level; at `debug` the AmneziaWG device logs become visible. An invalid
   value is rejected before any command runs (#56).

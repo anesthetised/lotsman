@@ -24,7 +24,7 @@ func TestConfigCheckPrintsWarnings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config check: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, `warning: profile "nl": prefer[1] {Geo:FI Provider:} matches no upstream`) || !strings.Contains(out, "config OK") {
+	if !strings.Contains(out, `warning: profile "nl": prefer[1] {geo: FI} matches no upstream`) || !strings.Contains(out, "config OK") {
 		t.Errorf("config check output lacks the warning:\n%s", out)
 	}
 }
