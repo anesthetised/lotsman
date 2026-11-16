@@ -115,8 +115,16 @@ subagents, merge on green CI.
 | #61, #86 | **Every proxy upstream runs in a child process** of the same binary (the daemon creates the TUN and passes its fd), so a panic in gVisor, the Outline SDK or xray takes down one upstream, not the gateway. Failover covers the restart. |
 | #87 | After #61 slice 2, because both change the probe code. |
 
-Order: #61 slice 2 (PR #89) → child-process proxy runtime → #86 slice 2 and #61 slice 3
-(`ssconf://`) → #61 slice 4 (WebSocket) and #87.
+Done 2026-11-16, in this order: #61 slice 2 (PR #89), #61 slice 3 `ssconf://` (PR #92),
+#87 transfer probe (PR #93; degraded upstreams are a last resort, retries at interval/5 while
+failing), #91 helper process for every proxy upstream (PR #94), #61 slice 4 WebSocket (PR #95,
+gorilla/websocket), #86 VLESS + REALITY via xray-core v26.11.9 (PR #96). #42 closed as a
+duplicate of #84.
+
+Follow-ups: #97 (dedicated system user for helpers instead of uid 65534), #98 (helper IPC under
+`d.mu`, against the #44 locking rule). Drafted, not filed (outward-facing, need the owner's
+go-ahead): the amneziawg-go S4 padding race (PR #85) and the Xray server-side Vision data race
+(PR #96).
 
 ### Manual and deferred
 
