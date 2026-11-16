@@ -125,52 +125,48 @@ func FetchKey(ctx context.Context, client *http.Client, loc *Location) (Key, str
 	return key, text, nil
 }
 
-// ParseConfig reads a dynamic key's response as Outline clients do
-// (outline-apps, client/go/outline/parse.go, doParseTunnelConfig): a YAML
-// document, JSON included, that is either
+// ParseConfig reads an access key as Outline clients do (outline-apps,
+// client/go/outline/parse.go, doParseTunnelConfig): a dynamic key's
+// response or a static key file. It is a YAML document, JSON included, that
+// is either
 //
 //   - a key as a string, ss://…;
+//   - an Outline config object, {transport: …} (see parseOutlineConfig),
+//     which may carry Shadowsocks over WebSocket;
 //   - the legacy Shadowsocks object {server, server_port, method, password,
 //     prefix}, prefix being raw characters, one byte each;
 //   - {error: {message, details}}, the provider refusing, such as for an
 //     expired subscription.
 //
-// The newer {transport: …} object is refused. Errors never quote the
-// response, except a provider's error message, which is meant for users.
+// Errors never quote the text, except a provider's error message, which is
+// meant for users.
 func ParseConfig(text string) (Key, error) {
 	text = strings.TrimSpace(text)
 	if text == "" {
-		return nil, errors.New("dynamic key: empty response")
+		return nil, errors.New("access key: empty")
 	}
 	var doc any
 	// Not wrapped: YAML errors can quote the document.
 	if err := yaml.Unmarshal([]byte(text), &doc); err != nil {
-		return nil, errors.New("dynamic key: response is neither an ss:// key nor a YAML or JSON object")
+		return nil, errors.New("access key: neither an ss:// key nor a YAML or JSON object")
 	}
 	switch v := doc.(type) {
 	case string:
 		if IsDynamic(v) {
-			return nil, errors.New("dynamic key: response is another dynamic key URL, want an ss:// key")
+			return nil, errors.New("access key: another dynamic key URL, want an ss:// key")
 		}
-		key, err := ParseKey(v)
-		if err != nil {
-			return nil, fmt.Errorf("dynamic key: %w", err)
-		}
-		return key, nil
+		return ParseKey(v)
 	case map[string]any:
 		if e, ok := v["error"]; ok {
 			return nil, providerError(e)
 		}
-		if _, ok := v["transport"]; ok {
-			return nil, errors.New("dynamic key: the transport format is not supported, want an ss:// key or a Shadowsocks object")
-		}
-		key, err := legacyShadowsocks(v)
+		key, err := parseOutlineConfig(v)
 		if err != nil {
-			return nil, fmt.Errorf("dynamic key: %w", err)
+			return nil, fmt.Errorf("access key: %w", err)
 		}
 		return key, nil
 	default:
-		return nil, errors.New("dynamic key: response is neither an ss:// key nor a YAML or JSON object")
+		return nil, errors.New("access key: neither an ss:// key nor a YAML or JSON object")
 	}
 }
 

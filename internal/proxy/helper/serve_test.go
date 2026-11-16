@@ -232,3 +232,84 @@ func TestServeTUNFailure(t *testing.T) {
 		t.Error("the control connection stayed open")
 	}
 }
+
+// A WebSocket key reaches the helper as text over the control connection,
+// at start or as a rotated key, and carries TCP and UDP. The front is plain
+// ws://: TLS is covered by the proxy package and the end-to-end test.
+func TestServeWebSocket(t *testing.T) {
+	echo, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxytest.Serve(t, echo, proxytest.Echo)
+	dnsTarget := netip.MustParseAddrPort("198.51.100.7:53")
+	redirect := map[string]string{echoTarget.String(): echo.Addr().String(), dnsTarget.String(): proxytest.DNS(t).String()}
+	plain := proxytest.NewServer(t, "plain-secret", redirect)
+	server := proxytest.NewServer(t, "ws-secret", redirect)
+	front := server.WebSocket(t, false)
+	dev, client, err := netstack.CreateNetTUN([]netip.Addr{netip.MustParseAddr("10.0.0.2")}, nil, 1420)
+	if err != nil {
+		t.Fatal(err)
+	}
+	daemon, helper := net.Pipe()
+	defer daemon.Close()
+	var logs syncBuffer
+	served := make(chan error, 1)
+	go func() { served <- Serve(helper, func() (tun.Device, error) { return dev, nil }, &logs) }()
+	flows := func() {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		c, err := client.DialContextTCPAddrPort(ctx, echoTarget)
+		if err != nil {
+			t.Fatalf("dial: %v", err)
+		}
+		defer c.Close()
+		c.SetDeadline(time.Now().Add(30 * time.Second))
+		io.WriteString(c, "ping")
+		c.CloseWrite()
+		if got, err := io.ReadAll(c); err != nil || string(got) != "ping" {
+			t.Fatalf("echo = %q, %v", got, err)
+		}
+		u, err := client.DialUDPAddrPort(netip.AddrPort{}, dnsTarget)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer u.Close()
+		u.SetDeadline(time.Now().Add(30 * time.Second))
+		if err := proxytest.ExchangeDNS(u, 1); err != nil {
+			t.Fatalf("dns: %v", err)
+		}
+	}
+
+	config := front.Config(proxytest.Hostname)
+	spec := proxy.Spec{Key: config, Server: front.Addr()}
+	if resp := call(t, daemon, request{Op: opOpen, Spec: &spec}); resp.Error != "" {
+		t.Fatalf("open: %s", resp.Error)
+	}
+	flows()
+	if n := len(front.Handshakes()); n != 2 {
+		t.Errorf("%d websockets opened, want 2 (tcp and udp)", n)
+	}
+
+	// Rotated to a plain key, and back.
+	if resp := call(t, daemon, request{Op: opServer, Key: plain.Key(), Server: plain.Addr()}); resp.Error != "" {
+		t.Fatalf("server: %s", resp.Error)
+	}
+	flows()
+	if resp := call(t, daemon, request{Op: opServer, Key: config, Server: front.Addr()}); resp.Error != "" {
+		t.Fatalf("server: %s", resp.Error)
+	}
+	flows()
+	if n, seen := len(front.Handshakes()), plain.Seen(); n != 4 || len(seen) != 2 {
+		t.Errorf("%d websockets opened, want 4; the plain server saw %q", n, seen)
+	}
+
+	daemon.Close()
+	if err := <-served; err != nil {
+		t.Errorf("Serve after close: %v", err)
+	}
+	if strings.Contains(logs.String(), "ws-secret") || strings.Contains(logs.String(), "s3cr3t") {
+		t.Error("the helper logged the key or its URL")
+	}
+}

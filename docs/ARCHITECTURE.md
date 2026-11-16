@@ -173,8 +173,10 @@ gVisor netstack (`internal/proxy`) on it. The stack accepts every destination (p
 plus spoofing, IPv4 only), terminates each TCP connection and UDP flow, and re-originates it
 through a `Dialers` value: a `transport.StreamDialer` and `transport.PacketListener` from the
 Outline SDK (`golang.getoutline.org/sdk`, `transport/shadowsocks`), plus an optional closer. A
-`proxy.Key` parses an access key and builds the dialers for a resolved server address; `ss://` is
-the only one so far, static or fetched from an `ssconf://` URL. The daemon sees either kind through
+`proxy.Key` parses an access key and builds the dialers for a resolved server address: `Server()`
+is the `host:port` the daemon resolves, `Dialers(addr)` connects only to that address. Keys so far
+are `ss://` and Outline's `transport:` configs (Shadowsocks, also over WebSocket), static or fetched
+from an `ssconf://` URL. The daemon sees either kind through
 one small `link` interface (`Up`, `Close`, `SetServer`, `Stats`), so loading, reload, health,
 routing and status stay one code path.
 
@@ -218,10 +220,33 @@ its API is unstable; the `ss://` grammar is small enough to own).
   provider. A changed key goes to the running link through `SetServer`, the same path as a moved
   endpoint, so no TUN or stack is reopened. Response formats follow the Outline client
   (outline-apps `client/go/outline/parse.go`, `doParseTunnelConfig`): an `ss://` string, the legacy
-  Shadowsocks object, or a provider `error`. The last good response is cached per upstream in the
+  Shadowsocks object, a `transport:` config (below), or a provider `error`. The last good response is cached per upstream in the
   state directory under a SHA-256 fingerprint of the URL, so a restart while the URL is blocked
   still has a key, and a key never serves a URL it did not come from. Redirects are followed only
   to `https://`; the Outline client follows any.
+- WebSocket transports (2026-11-16, #61 slice 4): Outline's `transport:` configs are parsed by our
+  own reader (`internal/proxy/transport.go`) of the subset of the Outline client's config language
+  that reaches a Shadowsocks server (outline-apps `client/go/outline/configregistry`: `registry.go`
+  `NewDefaultTransportProvider`, `config_tcpudp.go`, `config_shadowsocks.go`,
+  `config_dial_endpoint.go`, `config_websocket.go`): `tcpudp`, `shadowsocks`, `dial` and
+  `websocket` endpoints; every other `$type` is refused naming the type, never quoting values. A
+  missing or `direct` `udp` leaves the key without UDP (never UDP around the server), so health
+  fails over UDP and the upstream stays down. TCP and UDP must name the same host because
+  `Server()` is one address: the daemon resolves the WebSocket URL's host (or the endpoint's
+  `endpoint` override) up front as for plain Shadowsocks; `Dialers(addr)` connects to `addr` (UDP on
+  its own port), and TLS server name, certificate check and HTTP `Host` use the URL's host. The
+  wire format follows outline-ss-server (`cmd/outline-ss-server/main.go`, websocket-stream and
+  websocket-packet listeners) and the SDK it uses (`x/websocket`, `gorillaConn`): one WebSocket per
+  TCP connection, its bytes in binary messages; one per UDP flow, one datagram per message; a close
+  frame is a half-close (sent on `CloseWrite`, read as end of stream, not echoed). Library:
+  `github.com/gorilla/websocket` v1.5.3 (BSD-2, no dependencies), the one the Outline SDK and server
+  use. `github.com/coder/websocket` was preferred but cannot half-close: it answers a received close
+  frame and closes, and its `Close` waits for the peer's while discarding data. The SDK's own
+  `x/websocket` would add the `golang.getoutline.org/sdk/x` module (122 more module-graph edges,
+  Psiphon, quic-go, … in its `go.mod`), force the SDK from v0.0.23 to v0.1.0, and is a v0.x API, for
+  the same gorilla code underneath. Gorilla added 1 module-graph edge and about 230 KB to the
+  stripped amd64 binary (parser included). The helper passes `SSL_CERT_FILE`/`SSL_CERT_DIR` on from
+  the daemon's environment, so wss:// servers are verified against the same roots as `ssconf://`.
 - Health: a TCP handshake proves nothing through a proxy (the stack completes it itself, and
   outline-ss-server keeps a wrong-key connection open silently), so a proxy upstream passes a round
   only when DNS queries to a `health.dns` resolver are answered over UDP and over TCP. Latency is
@@ -246,8 +271,8 @@ binary (`lotsman proxy-helper`, hidden), one per upstream; Shadowsocks too, so t
   `stats` (the flow counters). Closing the connection tells the helper to stop. The key travels
   only there, never in argv or the environment, which other processes can read through `/proc`.
   The daemon sends key text, never a parsed key: a static key file's contents or a dynamic key's
-  response as fetched. The helper parses either with `proxy.ParseConfig`, which reads a plain
-  `ss://` key too (loading checks that it does), and on `server` only when the text changed.
+  response as fetched. The helper parses either with `proxy.ParseConfig`, which loading uses for a
+  static key file too, and on `server` only when the text changed.
   The helper logs slog JSON records to stderr, and the daemon re-logs each with its level
   and attributes plus the upstream's name; other lines (a panic and its trace) are logged as errors,
   each cut at 4 KiB. Stderr rather than the control connection, because a panic or a fatal runtime
@@ -271,7 +296,8 @@ binary (`lotsman proxy-helper`, hidden), one per upstream; Shadowsocks too, so t
   upgrade that replaced the binary on disk still starts the daemon's own version.
 - Privileges: a root daemon starts helpers as uid and gid 65534 with no supplementary groups, so
   exec leaves them no capabilities (no file capabilities on the binary); they need only the
-  inherited descriptor and outbound sockets. The environment is empty and the working directory `/`.
+  inherited descriptor and outbound sockets. The environment is empty but for `SSL_CERT_FILE` and
+  `SSL_CERT_DIR` when the daemon has them (TLS roots for wss:// keys), and the working directory `/`.
   A helper makes itself non-dumpable, so other processes of uid 65534 cannot read its memory, which
   holds the key. They can still signal it, i.e. kill it, which the daemon handles as a crash; a
   dedicated system user would close that (a follow-up; uid 65534 for now). The systemd unit's bounding set gains `CAP_SETUID` and

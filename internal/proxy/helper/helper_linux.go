@@ -20,11 +20,20 @@ const Nobody = 65534
 // uid and gid 65534 with no supplementary groups; with no file
 // capabilities on the binary, exec then leaves it no capabilities at all.
 // It keeps what it inherits: the TUN descriptor, and outbound sockets need
-// no privilege. The environment is empty and the working directory is /.
+// no privilege. The working directory is /, and the environment is empty
+// but for where TLS roots come from (SSL_CERT_FILE, SSL_CERT_DIR), if the
+// daemon's sets that: a helper verifies wss:// servers against the roots the
+// daemon verifies ssconf:// servers against. Such a file must be readable
+// by uid 65534.
 func Self() *exec.Cmd {
 	cmd := exec.Command("/proc/self/exe", Subcommand)
 	cmd.Args[0] = "lotsman"
 	cmd.Env = []string{}
+	for _, name := range []string{"SSL_CERT_FILE", "SSL_CERT_DIR"} {
+		if v, ok := os.LookupEnv(name); ok {
+			cmd.Env = append(cmd.Env, name+"="+v)
+		}
+	}
 	cmd.Dir = "/"
 	cmd.SysProcAttr = &syscall.SysProcAttr{Pdeathsig: syscall.SIGKILL}
 	if os.Geteuid() == 0 {

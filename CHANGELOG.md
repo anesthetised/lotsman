@@ -6,6 +6,15 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Outline Shadowsocks-over-WebSocket keys: an `outline` upstream's key file, or a dynamic key's
+  response, may be an Outline `transport:` config (YAML or JSON) as the Outline client reads it:
+  `tcpudp`, `shadowsocks`, `dial` and `websocket` (`wss://`, `ws://`) endpoints; other `$type`s are
+  refused when loading. Each TCP connection and UDP flow gets its own WebSocket, as
+  outline-ss-server expects. The URL's host is resolved once like a plain server and is the TLS
+  server name and HTTP `Host`; certificates are verified against the system roots (`SSL_CERT_FILE`
+  and `SSL_CERT_DIR` now reach the helper processes). TCP and UDP must use the same host; a config
+  without a `udp` transport loads but stays down, as UDP is never sent around the server. The URL
+  is never logged. New dependency: `github.com/gorilla/websocket` (#61).
 - Dynamic Outline keys: an `outline` upstream's key file may hold an `ssconf://` (or `https://`) URL.
   The key is fetched over verified HTTPS (redirects to `https://` only) at start, on every reload,
   and when the upstream fails its probes, at most every 5 minutes; a changed key applies to the

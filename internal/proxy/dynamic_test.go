@@ -88,15 +88,15 @@ func TestParseConfig(t *testing.T) {
 	}
 
 	for name, tc := range map[string]struct{ text, want string }{
-		"empty":           {" \n", "empty response"},
+		"empty":           {" \n", "access key: empty"},
 		"provider error":  {`{"error": {"message": "Subscription expired", "details": "` + dynPassword + `"}}`, `provider returned an error: "Subscription expired"`},
 		"bare error":      {`{"error": "` + dynPassword + `"}`, "without a message"},
-		"transport":       {`{"transport": {"$type": "tcpudp"}}`, "transport format is not supported"},
+		"transport":       {`{"transport": {"$type": "first-supported"}}`, `transport "first-supported" is not supported`},
 		"another url":     {"ssconf://keys.example.org" + dynSecretPath, "another dynamic key URL"},
 		"html":            {"<html>" + dynPassword + "</html>", "want a URL"},
 		"list":            {"[1, 2]", "neither an ss:// key"},
 		"broken yaml":     {"{server: [" + dynPassword, "neither an ss:// key"},
-		"no server":       {`{"method": "aes-256-gcm", "password": "` + dynPassword + `"}`, "server is missing"},
+		"no server":       {`{"method": "aes-256-gcm", "password": "` + dynPassword + `"}`, "endpoint (or server) is missing"},
 		"port as text":    {`{"server": "h", "server_port": "` + dynPassword + `", "method": "aes-256-gcm", "password": "x"}`, "server_port must be a number"},
 		"port range":      {`{"server": "h", "server_port": 70000, "method": "aes-256-gcm", "password": "x"}`, "from 1 to 65535"},
 		"password number": {`{"server": "h", "server_port": 1, "method": "aes-256-gcm", "password": 12345}`, "password must be a string"},
@@ -159,6 +159,7 @@ func TestFetchKey(t *testing.T) {
 		dynSecretPath + "/error":  `{"error": {"message": "Expired", "details": "` + dynPassword + `"}}`,
 		dynSecretPath + "/huge":   strings.Repeat(" ", maxConfigSize) + ssKey("192.0.2.1:8388"),
 		dynSecretPath + "/status": dynPassword,
+		dynSecretPath + "/ws":     tcpudp(`{"$type": "websocket", "url": "wss://ws.example.org`+wsPath+`"}`, `{"$type": "websocket", "url": "wss://ws.example.org/udp"}`),
 	}
 	var slow atomic.Bool
 	srv, client := keyServer(t, func(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +183,9 @@ func TestFetchKey(t *testing.T) {
 	}
 	if k, _, err := fetch(t, client, location(t, srv, dynSecretPath+"/json"), 5*time.Second); err != nil || k.Server() != "192.0.2.2:443" {
 		t.Errorf("json key: %v, %v", k, err)
+	}
+	if k, _, err := fetch(t, client, location(t, srv, dynSecretPath+"/ws"), 5*time.Second); err != nil || k.Server() != "ws.example.org:443" {
+		t.Errorf("websocket config: %v, %v", k, err)
 	}
 	for path, want := range map[string]string{
 		"/error":  `provider returned an error: "Expired"`,

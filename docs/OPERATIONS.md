@@ -6,7 +6,7 @@
 - Root: Lotsman creates TUN interfaces, sets sysctls, and programs policy routing and nftables.
 - UDP port reachable by your users (default 51820).
 - Per upstream, an AmneziaWG config from your provider routing `0.0.0.0/0`, or an Outline access
-  key (`ss://…` or `ssconf://…`).
+  key (`ss://…`, `ssconf://…`, or an Outline `transport:` config such as a WebSocket key).
 
 ## Install
 
@@ -196,19 +196,64 @@ legacy `ss://base64(method:password@host:port)`; the `#name` part is ignored. Ci
 `chacha20-ietf-poly1305` (what Outline uses), `aes-256-gcm`, `aes-192-gcm`, `aes-128-gcm`; older
 stream ciphers and SIP003 plugins are refused. Outline's `prefix` parameter (salt prefix disguise,
 percent-encoded bytes) is applied to TCP, as the Outline client does, and may take at most half of
-the salt (16 bytes with chacha20). WebSocket transports are not supported yet. A hostname server
+the salt (16 bytes with chacha20). A hostname server
 is resolved at start and on reload (IPv4), and again when the upstream fails its probes, as for
 AmneziaWG endpoints; the address change applies to new flows.
+
+**WebSocket keys.** Outline servers can also take Shadowsocks over WebSockets, usually behind a web
+server or CDN on port 443. Such a key is not an `ss://` line but an Outline config, in YAML or
+JSON, the same text a provider serves from an `ssconf://` URL; put it in the key file as it is:
+
+```yaml
+transport:
+  $type: tcpudp
+  tcp:
+    $type: shadowsocks
+    endpoint:
+      $type: websocket
+      url: wss://example.com/SECRET_PATH/tcp
+    cipher: chacha20-ietf-poly1305
+    secret: SS_SECRET
+  udp:
+    $type: shadowsocks
+    endpoint:
+      $type: websocket
+      url: wss://example.com/SECRET_PATH/udp
+    cipher: chacha20-ietf-poly1305
+    secret: SS_SECRET
+```
+
+Each TCP connection and each UDP flow gets its own WebSocket: TCP as a byte stream in binary
+messages, UDP as one datagram per message, as outline-ss-server expects. The URL's host is resolved
+like a plain server (once, not per flow); the connection goes to that address, with the URL's host
+as TLS server name and HTTP `Host`, and the certificate is checked against the system roots (the
+helper process sees `SSL_CERT_FILE` and `SSL_CERT_DIR` if the daemon's environment sets them; such a
+file must be readable by uid 65534). The URL, whose path is a secret, is never logged or quoted;
+`config check` and the log show `shadowsocks <cipher> over WebSocket` and the server as `host:port`.
+
+What is accepted is what the Outline client accepts for these keys: `transport` as an `ss://`
+string, a `$type: tcpudp` pair, or a Shadowsocks object without `$type` (used for TCP and UDP
+alike); for `tcp` and `udp`, an `ss://` string or `$type: shadowsocks` with `endpoint`, `cipher`,
+`secret` and optional `prefix` (applied to UDP salts too when given in `udp`, as Outline does) or the
+legacy `server`/`server_port`/`method`/`password` fields; an `endpoint` is `host:port`,
+`{$type: dial, address: host:port}`, or `{$type: websocket, url: wss://…}` (`ws://` works too;
+`https://`/`http://` are read as `wss://`/`ws://`) with an optional `endpoint: host:port` to
+connect to instead of the URL's host. Any other `$type` (such as `first-supported`, `iptable`,
+`tls`, a dialer chained behind another) is refused when loading, naming the type. TCP and UDP must
+reach the same host (ports may differ), since an upstream has one server address. A `tcpudp` key
+without `udp` (or with `udp: {$type: direct}`) is loaded, but Lotsman never sends UDP around the
+server as the Outline client would: that upstream has no UDP, so its DNS health check fails and it
+stays down. A `reporter` section is ignored.
 
 **Dynamic keys.** A provider that rotates keys hands out an `ssconf://host/path` URL instead (an
 `https://` URL works too; `ssconf://` means `https://`). Put the URL in the key file the same way.
 The URL is a credential: whoever has it gets the key, so it gets the same treatment as a key: it
 is never logged or quoted. Lotsman fetches the key over HTTPS from the host's own network (not
 through an upstream), with standard certificate checks against the system roots, following
-redirects only to `https://`, each fetch bounded like an endpoint lookup (half the health interval,
-at least 1 s). The response may be an `ss://` key or Outline's JSON (`server`, `server_port`,
-`method`, `password`, optional `prefix`); an `{"error": {"message": …}}` answer is a failed fetch
-whose message is logged. Outline's newer `transport:` format is refused for now. The key is fetched:
+redirects only to `https://`, each fetch bounded by half the health interval, at least 5 s. The response may be an `ss://` key, Outline's JSON (`server`, `server_port`,
+`method`, `password`, optional `prefix`) or an Outline `transport:` config as described under
+WebSocket keys; an `{"error": {"message": …}}` answer is a failed fetch whose message is logged.
+The key is fetched:
 
 - at start and on every reload, even if the file did not change, so `systemctl reload lotsman` picks
   up a rotated key;
@@ -234,6 +279,9 @@ Shadowsocks server. The stack runs in a helper process per Outline upstream (see
   reset towards the client too.
 - UDP needs the server's UDP relay. A UDP flow ends after 1 minute without packets, DNS (port 53)
   after 10 seconds.
+- With a WebSocket key, every TCP connection and UDP flow first opens its WebSocket (TCP, TLS and an
+  HTTP upgrade, at most 10 s), so it starts a few round trips later, and the reported health latency
+  includes that.
 - Every Outline upstream's interface has the address `192.0.0.8/32` (the IPv4 dummy address,
   RFC 7600); health probes and masqueraded client flows leave from it. The client `subnet` must not
   contain it. Its MTU is 1500 and adds nothing to the client MTU.
