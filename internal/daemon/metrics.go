@@ -28,6 +28,7 @@ var Families = []metrics.Family{
 	{Name: "lotsman_peer_upstream", Type: "gauge", Help: "1 for the upstream the client is routed through."},
 	{Name: "lotsman_reroutes_total", Type: "counter", Help: "Times a client was routed to the upstream, including the first time."},
 	{Name: "lotsman_reloads_total", Type: "counter", Help: "Configuration reloads by result."},
+	{Name: "lotsman_firewall_repairs_total", Type: "counter", Help: "Times firewall rules removed by another tool were reinstalled."},
 }
 
 // Metrics is the current snapshot for the Prometheus endpoint.
@@ -43,6 +44,7 @@ func (d *Daemon) Metrics() []metrics.Sample {
 		sample("lotsman_client_mtu", float64(d.clientMTU())),
 		sample("lotsman_reloads_total", float64(d.reloads[0]), metrics.Label{Name: "result", Value: "ok"}),
 		sample("lotsman_reloads_total", float64(d.reloads[1]), metrics.Label{Name: "result", Value: "error"}),
+		sample("lotsman_firewall_repairs_total", float64(d.repairs)),
 	}
 
 	now := time.Now()

@@ -27,6 +27,10 @@ All notable changes to Lotsman are documented here. The format follows
   raised to go1.27.4 for GO-2026-6859 (#54).
 
 ### Fixed
+- Firewall rules removed by another tool (`nft flush ruleset`, a ufw or firewalld reload, a Docker
+  or ufw forward chain added later) are reinstalled in the next health round and every routed
+  client is admitted again, instead of everyone staying blocked until a restart; each repair is
+  logged as an error and counted in `lotsman_firewall_repairs_total` (#47).
 - Drop everything VPN clients send to the host itself (SSH, Docker bridges, services bound to
   `0.0.0.0`) except a ping to the gateway, the `metrics.listen` endpoint and replies to
   connections the host opened; forwarded traffic is unchanged (#46).

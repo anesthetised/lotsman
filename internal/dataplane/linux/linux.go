@@ -55,6 +55,8 @@ const (
 
 type Dataplane struct {
 	down    string
+	gateway netip.Addr          // of the installed firewall, for Verify; invalid while none is installed
+	metrics netip.AddrPort      // of the installed firewall, for Verify
 	tables  map[string]int      // upstream interface → routing table
 	alive   map[string]bool     // upstream interface → flows may stay pinned to it
 	allowed map[netip.Addr]bool // peers admitted by the firewall, independent of routes
@@ -571,6 +573,65 @@ func interfaceOfTable(tables map[string]int, table int) string {
 	return ""
 }
 
+// Verify repairs what another tool can remove behind our back: the table
+// with its peer set ("nft flush ruleset", a deleted table) is reinstalled and
+// then admits no peer; our accepts in foreign forward chains (an iptables
+// flush, such as by a ufw reload) are inserted again. Rules inside our table
+// are not checked: only a hand-run nft command removes them and not the table.
+func (d *Dataplane) Verify() (bool, error) {
+	if !d.gateway.IsValid() {
+		return false, nil // not installed, or torn down
+	}
+	c := &nftables.Conn{}
+	_, err := c.GetSetByName(&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable}, peerSetName)
+	reinstalled := errors.Is(err, unix.ENOENT)
+	switch {
+	case reinstalled:
+		ups := make([]dataplane.Interface, 0, len(d.tables))
+		for name := range d.tables {
+			ups = append(ups, dataplane.Interface{Name: name}) // the sets need only the name
+		}
+		if err := d.installTable(c, d.down, d.gateway, ups, d.metrics); err != nil {
+			return false, fmt.Errorf("reinstall nftables table: %w", err)
+		}
+	case err != nil:
+		return false, fmt.Errorf("check nftables table: %w", err)
+	default:
+		if open, err := foreignChainsOpen(c); err != nil || open {
+			return false, err
+		}
+	}
+	// Both accepts are replaced, as Setup does, whichever went missing.
+	err = closeForeignForwardChains(c)
+	if err == nil {
+		err = openForeignForwardChains(c, d.down)
+	}
+	if err != nil {
+		// A reinstalled table is reported even so: its peers must be routed again.
+		return reinstalled, err
+	}
+	return true, nil
+}
+
+// foreignChainsOpen reports whether every foreign forward chain still holds
+// both accepts openForeignForwardChains inserted.
+func foreignChainsOpen(c *nftables.Conn) (bool, error) {
+	chains, err := foreignForwardChains(c)
+	if err != nil {
+		return false, err
+	}
+	for _, ch := range chains {
+		rules, err := ourForeignRules(c, ch)
+		if err != nil {
+			return false, err
+		}
+		if len(rules) < 2 {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
 func (d *Dataplane) Teardown() error {
 	return d.teardown(netlink.LinkSetDown)
 }
@@ -602,6 +663,7 @@ func (d *Dataplane) teardown(disable func(netlink.Link) error) error {
 	for _, table := range d.tables {
 		err = errors.Join(err, flushTable(table))
 	}
+	d.gateway = netip.Addr{} // Verify must not reinstall what is being removed
 	c := &nftables.Conn{}
 	err = errors.Join(err, closeForeignForwardChains(c))
 	c.DelTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable})
@@ -703,6 +765,14 @@ func (d *Dataplane) installFirewall(down string, gateway netip.Addr, ups []datap
 	if err := closeForeignForwardChains(c); err != nil {
 		return err
 	}
+	if err := d.installTable(c, down, gateway, ups, metrics); err != nil {
+		return err
+	}
+	return openForeignForwardChains(c, down)
+}
+
+// installTable replaces our table. The new one admits no peer.
+func (d *Dataplane) installTable(c *nftables.Conn, down string, gateway netip.Addr, ups []dataplane.Interface, metrics netip.AddrPort) error {
 	c.DelTable(&nftables.Table{Family: nftables.TableFamilyINet, Name: nftTable})
 	if err := c.Flush(); err != nil && !errors.Is(err, unix.ENOENT) {
 		return fmt.Errorf("remove old nftables table: %w", err)
@@ -820,7 +890,8 @@ func (d *Dataplane) installFirewall(down string, gateway netip.Addr, ups []datap
 		return fmt.Errorf("install nftables rules: %w", err)
 	}
 	d.allowed = map[netip.Addr]bool{}
-	return openForeignForwardChains(c, down)
+	d.gateway, d.metrics = gateway, metrics
+	return nil
 }
 
 // setUpstreamSets replaces the members of the "upstreams" set and the
@@ -917,19 +988,32 @@ func closeForeignForwardChains(c *nftables.Conn) error {
 		return err
 	}
 	for _, ch := range chains {
-		rules, err := c.GetRules(ch.Table, ch)
+		rules, err := ourForeignRules(c, ch)
 		if err != nil {
 			return err
 		}
 		for _, r := range rules {
-			if comment, ok := userdata.GetString(r.UserData, userdata.TypeComment); ok && comment == foreignRuleComment {
-				if err := c.DelRule(r); err != nil {
-					return err
-				}
+			if err := c.DelRule(r); err != nil {
+				return err
 			}
 		}
 	}
 	return c.Flush()
+}
+
+// ourForeignRules lists the rules openForeignForwardChains inserted into ch.
+func ourForeignRules(c *nftables.Conn, ch *nftables.Chain) ([]*nftables.Rule, error) {
+	rules, err := c.GetRules(ch.Table, ch)
+	if err != nil {
+		return nil, err
+	}
+	var out []*nftables.Rule
+	for _, r := range rules {
+		if comment, ok := userdata.GetString(r.UserData, userdata.TypeComment); ok && comment == foreignRuleComment {
+			out = append(out, r)
+		}
+	}
+	return out, nil
 }
 
 // foreignForwardChains lists IPv4-capable base chains on the forward hook that Lotsman does not own.

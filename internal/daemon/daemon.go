@@ -66,6 +66,7 @@ type Daemon struct {
 	aliveFailed    map[string]string          // upstream → last SetAlive error; the kernel is stale until it succeeds
 	dpStale        bool                       // d.ups is not yet pushed to the dataplane; retried every round
 	notUp          map[*Upstream]bool         // opened upstreams whose device still has to come up
+	reauthorize    bool                       // the firewall was reinstalled; routed peers must be routed again
 	failures       map[failure]string         // retried failure → last logged error, so repeats stay quiet
 	wake           chan struct{}              // nudges Run to reprobe and reconcile now
 	ready          chan struct{}              // closed after the first reconcile
@@ -74,6 +75,7 @@ type Daemon struct {
 	probes   map[string]*[2]uint64 // upstream → {ok, fail}
 	reroutes map[string]uint64     // destination upstream → moves
 	reloads  [2]uint64             // {ok, error}
+	repairs  uint64                // firewall reinstalls after another tool removed it
 }
 
 func New(d Deps) *Daemon {
@@ -584,6 +586,8 @@ func (d *Daemon) probeAny(ctx context.Context, iface string, source netip.Addr, 
 }
 
 func (d *Daemon) probeAll(ctx context.Context) {
+	// First, so a pending dataplane push finds the firewall in place.
+	d.verifyFirewall()
 	// Before the probes, so an upstream that opens now is probed this round.
 	d.reopenMissing(ctx)
 	var wg sync.WaitGroup
@@ -613,6 +617,42 @@ func (d *Daemon) probeAll(ctx context.Context) {
 	}
 	d.mu.Unlock()
 	wg.Wait()
+}
+
+// verifyFirewall repairs the firewall if another tool removed it, such as by
+// "nft flush ruleset", and then routes every routed peer again: the repaired
+// firewall admits a peer only once Route has run against it. A failure is
+// retried every health round and logged once.
+func (d *Daemon) verifyFirewall() {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	key := failure{"firewall", ""}
+	repaired, err := d.dp.Verify()
+	if repaired {
+		d.repairs++
+		d.reauthorize = true
+		d.log.Error("firewall rules were removed by another tool and have been reinstalled", "routed_peers", len(d.assignments))
+	}
+	if d.reauthorize {
+		var errs []error
+		for ip, name := range d.assignments {
+			// A peer with a pending unroute stays revoked; Reconcile finishes it.
+			if iface := d.interfaceOf(name); iface != "" && !d.unroutePending[ip] {
+				errs = append(errs, d.dp.Route(ip, iface))
+			}
+		}
+		routeErr := errors.Join(errs...)
+		d.reauthorize = routeErr != nil
+		err = errors.Join(err, routeErr)
+	}
+	if err != nil {
+		d.fail(key, "firewall repair failed, clients may stay blocked; will retry every health round", err)
+		return
+	}
+	if _, failed := d.failures[key]; failed {
+		d.log.Info("firewall repair completed")
+		delete(d.failures, key)
+	}
 }
 
 // refreshEndpoint re-resolves an upstream's endpoint without holding d.mu, so
