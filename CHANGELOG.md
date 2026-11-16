@@ -6,6 +6,9 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `awg: 2 | 3` selects the AmneziaWG generation of the listener, default 3: the identity gains a
+  header protection key, and client configs carry `HeaderProtectionKey` and `RandomTrailers = on`
+  (Amnezia app 5.0.1.5 or later). Restart only (#60).
 - Upstreams accept AmneziaWG 3.x provider configs: `HeaderProtectionKey`,
   `ContentPaddingAddition`, `RekeyAfterTime`, `RekeyTimeout`, `RejectAfterTime`,
   `KeepaliveTimeout`, `MaxHandshakeAttempts`, `RandomTrailers` and `DisableCookies`. The client
@@ -20,6 +23,8 @@ All notable changes to Lotsman are documented here. The format follows
   value is rejected before any command runs (#56).
 
 ### Changed
+- New identities draw S3 and S4 from 12 upward; existing identity files are upgraded on load
+  (derived header protection key, S1–S4 raised to 12), which invalidates configs issued before (#60).
 - amneziawg-go moves from a master pseudo-version to the tag `amneziawg-go/v3 v3.1.20260828`.
   AWG 1.5-only keys (`J1`–`J3`, `Itime`) are rejected with a message to request a 2.0+ config (#59).
 - CI and `just lint` run `go mod verify`, staticcheck and govulncheck for the host and the Linux

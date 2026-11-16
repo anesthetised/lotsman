@@ -18,6 +18,7 @@ import (
 
 type Config struct {
 	Listen    string       `yaml:"listen"`
+	AWG       int          `yaml:"awg"` // AmneziaWG generation the listener speaks: 2 or 3
 	Endpoint  string       `yaml:"endpoint"`
 	Subnet    netip.Prefix `yaml:"subnet"`
 	DNS       []netip.Addr `yaml:"dns"`
@@ -122,6 +123,7 @@ func (p ProbeTargets) String() string {
 func Default() Config {
 	return Config{
 		Listen:   "0.0.0.0:51820",
+		AWG:      3,
 		Subnet:   netip.MustParsePrefix("10.77.0.0/16"),
 		DNS:      []netip.Addr{netip.MustParseAddr("1.1.1.1")},
 		StateDir: "/var/lib/lotsman",
@@ -162,6 +164,9 @@ func (u Upstream) InterfaceName() string { return "lm-up-" + u.Name }
 func (c *Config) Validate() error {
 	if _, err := netip.ParseAddrPort(c.Listen); err != nil {
 		return fmt.Errorf("listen: %w", err)
+	}
+	if c.AWG != 2 && c.AWG != 3 {
+		return fmt.Errorf("awg: must be 2 or 3, got %d", c.AWG)
 	}
 	host, port, err := net.SplitHostPort(c.Endpoint)
 	if err != nil {

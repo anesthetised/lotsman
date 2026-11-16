@@ -1,6 +1,7 @@
 # Lotsman
 
-A self-hosted [AmneziaWG 2.0](https://docs.amnezia.org/documentation/amnezia-wg/) gateway that
+A self-hosted [AmneziaWG](https://docs.amnezia.org/documentation/amnezia-wg/) gateway (AWG 3.1 by
+default, AWG 2.0 selectable) that
 routes each user to a working upstream VPN provider.
 
 Users connect with the official Amnezia app to a single server you run. Lotsman terminates their
@@ -25,7 +26,8 @@ Amnezia app ──AWG2──▶ Lotsman ──AWG2──▶ provider NL ──�
   the server's own IP.
 - MTU and TCP MSS handled for the double encapsulation; DNS follows the chosen upstream.
 - Upstreams may be plain WireGuard or AmneziaWG 2.0/3.x (including header protection and random
-  trailers); AmneziaWG 1.5 configs are not supported. Clients use the Amnezia app.
+  trailers); AmneziaWG 1.5 configs are not supported. Clients use the Amnezia app: 5.0.1.5 or later for
+  the default `awg: 3`; set `awg: 2` for older apps and Android 7–8.
 - Optional Prometheus metrics: per-upstream health and per-client traffic.
 - A single static binary, a YAML file, and SQLite.
 

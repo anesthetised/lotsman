@@ -34,6 +34,9 @@ func TestParseAppliesDefaults(t *testing.T) {
 	if cfg.Listen != "0.0.0.0:51820" {
 		t.Errorf("listen default = %q", cfg.Listen)
 	}
+	if cfg.AWG != 3 {
+		t.Errorf("awg default = %d, want 3", cfg.AWG)
+	}
 	if cfg.Subnet != netip.MustParsePrefix("10.77.0.0/16") {
 		t.Errorf("subnet default = %s", cfg.Subnet)
 	}
@@ -48,6 +51,7 @@ func TestParseAppliesDefaults(t *testing.T) {
 func TestParseOverrides(t *testing.T) {
 	cfg, err := Parse([]byte(minimal + `
 listen: 127.0.0.1:1234
+awg: 2
 subnet: 10.9.0.0/24
 dns: [9.9.9.9, 149.112.112.112]
 state_dir: /tmp/lotsman
@@ -60,7 +64,7 @@ health:
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Listen != "127.0.0.1:1234" || cfg.Subnet.String() != "10.9.0.0/24" || len(cfg.DNS) != 2 {
+	if cfg.Listen != "127.0.0.1:1234" || cfg.AWG != 2 || cfg.Subnet.String() != "10.9.0.0/24" || len(cfg.DNS) != 2 {
 		t.Errorf("overrides not applied: %+v", cfg)
 	}
 	h := cfg.Health
@@ -134,6 +138,10 @@ func TestValidationErrors(t *testing.T) {
 		want  string
 	}{
 		"unknown field":          {"bogus", "bogus: 1\n", "field bogus not found"},
+		"awg zero":               {"awg", "awg: 0\n", "awg: must be 2 or 3, got 0"},
+		"awg one":                {"awg", "awg: 1\n", "awg: must be 2 or 3, got 1"},
+		"awg four":               {"awg", "awg: 4\n", "awg: must be 2 or 3, got 4"},
+		"awg not a number":       {"awg", "awg: three\n", "cannot unmarshal"},
 		"missing endpoint":       {"endpoint", "endpoint: ''\n", "endpoint:"},
 		"endpoint without port":  {"endpoint", "endpoint: vpn.example.org\n", "endpoint:"},
 		"endpoint empty host":    {"endpoint", "endpoint: ':51820'\n", "endpoint: host is required"},

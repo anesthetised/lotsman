@@ -182,7 +182,7 @@ func (d *Daemon) start(ctx context.Context) error {
 	}
 	d.down = tunnel.NewBound(DownstreamInterface, downTUN, listen.Addr(), d.log)
 	downCfg := awgconf.Config{Interface: awgconf.Interface{
-		PrivateKey: d.id.PrivateKey, ListenPort: listen.Port(), Params: d.id.Params,
+		PrivateKey: d.id.PrivateKey, ListenPort: listen.Port(), Params: d.id.Shared(d.cfg.AWG),
 	}}
 	if err := d.down.Configure(downCfg.UAPI()); err != nil {
 		return err
@@ -526,6 +526,9 @@ func restartRequired(old, cfg *config.Config) error {
 	var changed []string
 	if old.Listen != cfg.Listen {
 		changed = append(changed, "listen")
+	}
+	if old.AWG != cfg.AWG {
+		changed = append(changed, "awg")
 	}
 	if old.Subnet != cfg.Subnet {
 		changed = append(changed, "subnet")
