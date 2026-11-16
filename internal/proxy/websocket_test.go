@@ -15,7 +15,9 @@ import (
 	"github.com/anesthetised/lotsman/internal/proxy/proxytest"
 )
 
-// useRoots makes wss:// dials trust roots for the test.
+// useRoots makes wss:// dials trust roots for the test. Call it before the
+// stack starts, so the stack's cleanup, which waits for its flows, runs
+// before the roots are restored.
 func useRoots(t *testing.T, roots *x509.CertPool) {
 	t.Helper()
 	old := wsRoots
@@ -25,11 +27,15 @@ func useRoots(t *testing.T, roots *x509.CertPool) {
 
 // newWSFlow runs a stack through a WebSocket front of a test server, with
 // the key the front's config gives for host. As in the daemon, the stack
-// dials the front's address: host is never looked up.
-func newWSFlow(t *testing.T, secure bool, host string) (*testFlow, *proxytest.WebSocket) {
+// dials the front's address: host is never looked up. With trust set, the
+// front's CA is trusted.
+func newWSFlow(t *testing.T, secure bool, host string, trust bool) (*testFlow, *proxytest.WebSocket) {
 	t.Helper()
 	server := newTestServer(t, "ws-secret")
 	front := server.WebSocket(t, secure)
+	if trust {
+		useRoots(t, front.Roots())
+	}
 	key, err := ParseConfig(front.Config(host))
 	if err != nil {
 		t.Fatal(err)
@@ -47,8 +53,7 @@ func newWSFlow(t *testing.T, secure bool, host string) (*testFlow, *proxytest.We
 func TestWebSocketCarriesTCPAndUDP(t *testing.T) {
 	for _, secure := range []bool{true, false} {
 		t.Run(fmt.Sprintf("tls=%v", secure), func(t *testing.T) {
-			f, front := newWSFlow(t, secure, proxytest.Hostname)
-			useRoots(t, front.Roots())
+			f, front := newWSFlow(t, secure, proxytest.Hostname, true)
 			f.echo(t, "hello over a websocket")
 			f.echo(t, strings.Repeat("bulk ", 20_000)) // many messages, half-closed both ways
 			c := f.dialDNS(t)
@@ -85,10 +90,7 @@ func TestWebSocketVerifiesCertificate(t *testing.T) {
 		"wrong name": {host: "other.lotsman.test", trust: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			f, front := newWSFlow(t, true, tc.host)
-			if tc.trust {
-				useRoots(t, front.Roots())
-			}
+			f, _ := newWSFlow(t, true, tc.host, tc.trust)
 			if _, err := f.dial(t); err == nil {
 				t.Error("a TCP flow went through an unverified server")
 			}
