@@ -6,6 +6,10 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Removing the last upstream a `prefer` matcher matches no longer fails config load or reload.
+  A matcher that matches nothing, or only upstreams an earlier matcher took (the warning names
+  it), is a warning in `config check` and the reload log; a profile whose tiers are all empty
+  is still an error (#50).
 - Resolve provider endpoints outside the daemon lock at startup, on reload and when a failing
   upstream re-resolves, so slow or dead DNS no longer stalls status, metrics, reconciliation or
   reloads. Every endpoint lookup times out after the probe timeout (half the health interval, at
