@@ -228,6 +228,17 @@ func eventually(t *testing.T, what string, timeout time.Duration, cond func() bo
 	t.Fatalf("timed out waiting for %s", what)
 }
 
+// tableRow returns the fields of the first line of a CLI table whose first
+// column is key, or nil.
+func tableRow(table, key string) []string {
+	for line := range strings.Lines(table) {
+		if f := strings.Fields(line); len(f) > 0 && f[0] == key {
+			return f
+		}
+	}
+	return nil
+}
+
 // Block only this provider's outer UDP endpoint inside the disposable container.
 func blockProviderEndpoint(t *testing.T, port uint16) func() {
 	t.Helper()
@@ -309,14 +320,21 @@ metrics: {listen: 127.0.0.1:19100}
 		return err == nil && got == "nl"
 	})
 
-	// With the client connected, status shows it as active and user list shows its handshake.
-	eventually(t, "active client in status", 10*time.Second, func() bool {
+	// With the client connected, status shows it as active on nl and user list
+	// shows its handshake. Both read the status file, a snapshot published once
+	// per health interval: if nl's first probe failed, the client started on de,
+	// and the file can still show that for up to an interval after it moved.
+	eventually(t, "active client on nl in status", 10*time.Second, func() bool {
 		status, _ := capture(t, "-config", cfgPath, "upstream", "status")
-		return strings.Contains(status, "ROUTED  ACTIVE") && strings.Contains(status, "  1       1")
+		f := tableRow(status, "nl")
+		return strings.Contains(status, "ROUTED  ACTIVE") && len(f) > 2 && f[len(f)-2] == "1" && f[len(f)-1] == "1"
 	})
-	if list, _ := capture(t, "-config", cfgPath, "user", "list"); !strings.Contains(list, "s ago") || !strings.Contains(list, "  nl  ") {
-		t.Errorf("user list lacks live upstream/handshake:\n%s", list)
-	}
+	eventually(t, "live upstream nl and handshake in user list", 5*time.Second, func() bool {
+		list, _ := capture(t, "-config", cfgPath, "user", "list")
+		// alice default eu 10.77.0.2 nl 0s ago 2026-11-16
+		f := tableRow(list, "alice")
+		return len(f) > 6 && f[4] == "nl" && f[6] == "ago"
+	})
 
 	// The metrics endpoint reflects the routing above.
 	eventually(t, "metrics endpoint", 10*time.Second, func() bool {
