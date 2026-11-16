@@ -93,6 +93,9 @@ func checkConfig(configPath string) error {
 	for _, p := range cfg.Profiles {
 		fmt.Printf("profile  %-10s prefer %v\n", p.Name, p.Prefer)
 	}
+	for _, w := range cfg.Warnings() {
+		fmt.Println("warning:", w)
+	}
 	fmt.Println("config OK")
 	return nil
 }

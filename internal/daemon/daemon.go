@@ -144,6 +144,7 @@ func (d *Daemon) start(ctx context.Context) error {
 	d.mu.Lock()
 	cfg := d.cfg
 	d.mu.Unlock()
+	d.logWarnings(cfg)
 	// Provider configs are loaded and resolved before d.mu is taken, so slow
 	// DNS never blocks Status or Metrics. The serve loop delivers SIGHUP only
 	// after Ready, so no reload or reconcile races a half-started daemon.
@@ -261,6 +262,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
+	d.logWarnings(cfg)
 
 	// Provider configs are read, and changed ones resolved, without d.mu, so
 	// slow DNS never blocks Status or Reconcile. A loaded upstream is private
@@ -375,6 +377,13 @@ func (d *Daemon) dropUpstream(u *Upstream) {
 	}
 	delete(d.aliveFailed, u.Name)
 	u.Device.Close()
+}
+
+// logWarnings reports configuration problems that do not stop it from loading.
+func (d *Daemon) logWarnings(cfg *config.Config) {
+	for _, w := range cfg.Warnings() {
+		d.log.Warn("config warning", "detail", w)
+	}
 }
 
 func restartRequired(old, cfg *config.Config) error {

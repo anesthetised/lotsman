@@ -8,7 +8,9 @@ import (
 	"net/netip"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -155,10 +157,11 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("profiles[%d]: duplicate name %q", i, p.Name)
 		}
 		seen[p.Name] = true
-		for j, m := range p.Prefer {
-			if !c.anyUpstreamMatches(m) {
-				return fmt.Errorf("profile %q: prefer[%d] %+v matches no upstream", p.Name, j, m)
-			}
+		// Typos in geo or provider must not pass silently, but an entry may
+		// go empty when an upstream is removed; only a profile with no
+		// usable tier at all is an error. Warnings reports the rest.
+		if len(p.Prefer) > 0 && !slices.ContainsFunc(c.preferTiers(p), func(t preferTier) bool { return t.own > 0 }) {
+			return fmt.Errorf("profile %q: prefer matches no upstream", p.Name)
 		}
 	}
 	h := c.Health
@@ -183,13 +186,60 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-func (c *Config) anyUpstreamMatches(m Match) bool {
+// preferTier describes one prefer entry of a profile. Upstreams belong to the
+// first entry that matches them, as in policy.Select.
+type preferTier struct {
+	matched   int   // upstreams the entry matches, including ones an earlier entry took
+	own       int   // upstreams for which it is the first match; the tier's size
+	shadowers []int // earlier entries that took upstreams this entry also matches
+}
+
+func (c *Config) preferTiers(p Profile) []preferTier {
+	tiers := make([]preferTier, len(p.Prefer))
 	for _, u := range c.Upstreams {
-		if m.Matches(u) {
-			return true
+		first := -1
+		for j, m := range p.Prefer {
+			if !m.Matches(u) {
+				continue
+			}
+			tiers[j].matched++
+			switch {
+			case first < 0:
+				first = j
+				tiers[j].own++
+			case !slices.Contains(tiers[j].shadowers, first):
+				tiers[j].shadowers = append(tiers[j].shadowers, first)
+			}
 		}
 	}
-	return false
+	for j := range tiers {
+		slices.Sort(tiers[j].shadowers)
+	}
+	return tiers
+}
+
+// Warnings lists problems that do not stop the configuration from loading: a
+// prefer entry that matches no upstream, or whose upstreams all belong to
+// earlier entries, is a tier that never applies. It expects a validated
+// Config; the order is stable.
+func (c *Config) Warnings() []string {
+	var out []string
+	for _, p := range c.Profiles {
+		for j, t := range c.preferTiers(p) {
+			m := p.Prefer[j]
+			switch {
+			case t.matched == 0:
+				out = append(out, fmt.Sprintf("profile %q: prefer[%d] %+v matches no upstream and is ignored", p.Name, j, m))
+			case t.own == 0:
+				var by []string
+				for _, k := range t.shadowers {
+					by = append(by, fmt.Sprintf("prefer[%d] %+v", k, p.Prefer[k]))
+				}
+				out = append(out, fmt.Sprintf("profile %q: prefer[%d] %+v never applies: every upstream it matches is taken by %s", p.Name, j, m, strings.Join(by, ", ")))
+			}
+		}
+	}
+	return out
 }
 
 func (c *Config) Profile(name string) (Profile, bool) {
