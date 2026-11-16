@@ -55,6 +55,14 @@ func (t *Tracker) Observe(ok bool, latency time.Duration) bool {
 	return t.state != before
 }
 
+// Fail marks the upstream down at once, as downAfter failed probes in a row
+// would, and reports whether the state changed. The latency is kept.
+func (t *Tracker) Fail() bool {
+	before := t.state
+	t.state, t.oks, t.fails = Down, 0, t.downAfter
+	return t.state != before
+}
+
 // SetThresholds changes the hysteresis without losing the current state.
 func (t *Tracker) SetThresholds(downAfter, upAfter int) {
 	t.downAfter, t.upAfter = downAfter, upAfter

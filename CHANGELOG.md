@@ -52,6 +52,13 @@ All notable changes to Lotsman are documented here. The format follows
   timer (three times that) overflows and wipes every session's keys at once (#76).
 
 ### Changed
+- Each Outline upstream's stack runs in its own helper process (`lotsman proxy-helper`, started by
+  the daemon with the TUN descriptor; the key goes over a socket pair, never argv or environment),
+  as uid/gid 65534 without capabilities. A crash, a kill, a helper that stops answering or a stack
+  whose TUN read failed takes that upstream down at once, moves its clients, restarts the helper
+  with backoff and counts `lotsman_proxy_restarts_total`; the gateway and other upstreams keep
+  running. A dynamic key's rotation reaches the running helper as key text. The systemd unit's `CapabilityBoundingSet` adds `CAP_SETUID`
+  and `CAP_SETGID`: reinstall `deploy/lotsman.service` when upgrading (#91).
 - New identities draw S3 and S4 from 12 upward; existing identity files are upgraded on load
   (derived header protection key, S1–S4 raised to 12), which invalidates configs issued before (#60).
 - amneziawg-go moves from a master pseudo-version to the tag `amneziawg-go/v3 v3.1.20260828`.

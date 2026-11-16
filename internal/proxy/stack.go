@@ -108,6 +108,7 @@ type Stack struct {
 	refused  uint64
 	conns    map[io.Closer]struct{} // open on either side of a flow, closed by Close
 	wg       sync.WaitGroup         // the TUN loops and every flow
+	failed   chan error             // see Failed
 }
 
 // New starts a stack on t and carries its flows through d. It owns both from
@@ -145,6 +146,7 @@ func New(t tun.Device, d Dialers, opts Options, log *slog.Logger) (s *Stack, err
 		cancel:   cancel,
 		maxFlows: opts.MaxFlows,
 		conns:    map[io.Closer]struct{}{},
+		failed:   make(chan error, 1),
 	}
 	s.dialers.Store(&d)
 	s.net = stack.New(stack.Options{
@@ -202,6 +204,11 @@ func (s *Stack) SetDialers(d Dialers) {
 	}
 	s.dialers.Swap(&d).close()
 }
+
+// Failed delivers the error that stopped the stack carrying traffic: reading
+// the TUN failed. It is closed without a value once the stack stops for
+// another reason, such as Close.
+func (s *Stack) Failed() <-chan error { return s.failed }
 
 // SetMaxFlows changes Options.MaxFlows, 0 meaning the default. Flows
 // already open stay, even beyond a lower limit.
@@ -312,6 +319,7 @@ func (s *Stack) release(c io.Closer) {
 // readTUN feeds packets from the TUN into the stack.
 func (s *Stack) readTUN() {
 	defer s.wg.Done()
+	defer close(s.failed)
 	mtu := int(s.link.MTU())
 	bufs := make([][]byte, s.tun.BatchSize())
 	sizes := make([]int, len(bufs))
@@ -329,6 +337,7 @@ func (s *Stack) readTUN() {
 			return
 		default:
 			s.log.Error("read tun, the upstream stops", "err", err)
+			s.failed <- err
 			return
 		}
 	}

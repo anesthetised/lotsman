@@ -14,6 +14,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/mtu"
+	"github.com/anesthetised/lotsman/internal/proxy/helper"
 	"github.com/anesthetised/lotsman/internal/store"
 )
 
@@ -40,6 +41,11 @@ Log level (serve): -log-level, or $LOTSMAN_LOG_LEVEL, or info; one of debug, inf
 `
 
 func main() {
+	// The daemon starts this binary as a proxy upstream's helper process;
+	// the command is not for operators, so usage does not list it.
+	if len(os.Args) == 2 && os.Args[1] == helper.Subcommand {
+		os.Exit(helper.Main())
+	}
 	if err := run(os.Args[1:]); err != nil {
 		fmt.Fprintln(os.Stderr, "lotsman:", err)
 		os.Exit(1)

@@ -17,6 +17,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/dataplane/linux"
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/metrics"
+	"github.com/anesthetised/lotsman/internal/proxy/helper"
 	"github.com/anesthetised/lotsman/internal/tunnel"
 )
 
@@ -30,10 +31,13 @@ func serve(ctx context.Context, configPath string, level slog.Level) error {
 	}
 	defer e.store.Close()
 
+	// Every proxy upstream runs in its own helper process, so a panic in a
+	// proxy stack takes down that upstream only.
+	helpers := &helper.Runner{Command: helper.Self}
 	d := daemon.New(daemon.Deps{
 		Version: version, Config: e.cfg, Identity: e.id, Store: e.store,
 		Dataplane: linux.New(), NewTUN: tunnel.CreateTUN, Probe: health.ProbeOnInterface, ProbeDNS: health.DNSOnInterface,
-		Transfer: health.TransferOnInterface, Log: log,
+		Transfer: health.TransferOnInterface, Proxy: helpers.Start, Log: log,
 	})
 	// Subscribe before the pid file appears: SIGUSR1 kills a process that has
 	// not subscribed yet, and `user add` signals as soon as it finds the file.

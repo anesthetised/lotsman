@@ -3,12 +3,14 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/netip"
 	"os"
 	"strconv"
+	"strings"
 
 	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
 
@@ -33,8 +35,11 @@ type Upstream struct {
 	Addr     netip.Prefix    // the TUN's IPv4 address, also the probe source
 	MTU      int
 	Tracker  *health.Tracker
-	keyText  string // a dynamic key's response as fetched, to detect a changed key
-	link     link   // set by open
+	// keyText is what the link parses the key from (proxy.ParseConfig): a
+	// static key file's contents, or a dynamic key's response as fetched,
+	// which also detects a changed key.
+	keyText string
+	link    link // set by open
 }
 
 // link carries an upstream's traffic on its TUN: an AmneziaWG device or a
@@ -43,8 +48,9 @@ type link interface {
 	Up() error
 	Close()
 	// SetServer points the link at its server's current address and, for a
-	// proxy link, at its current key; an AWG link gets a nil key.
-	SetServer(key proxy.Key, resolved string) error
+	// proxy link, at its current key, as text (Upstream.keyText); an AWG
+	// link ignores the key.
+	SetServer(keyText, resolved string) error
 	Stats() linkStats
 }
 
@@ -94,7 +100,13 @@ func loadProxy(source []byte) (*Upstream, error) {
 	if err != nil {
 		return nil, err
 	}
-	up.Key, up.Endpoint = key, key.Server()
+	// The link parses the key again as a dynamic key's response, which a
+	// plain key is too; check that now rather than when it starts.
+	text := strings.TrimSpace(string(source))
+	if _, err := proxy.ParseConfig(text); err != nil {
+		return nil, errors.New("access key: not readable as a plain ss:// key")
+	}
+	up.Key, up.keyText, up.Endpoint = key, text, key.Server()
 	return up, nil
 }
 
@@ -250,8 +262,9 @@ func (u *Upstream) setResolved(resolved string) {
 }
 
 // open starts the upstream's link on t, which it owns from then on. The
-// link stays down until Up. The endpoint must be resolved.
-func (u *Upstream) open(t tun.Device, log *slog.Logger) error {
+// link stays down until Up. The endpoint must be resolved. A proxy link runs
+// through run; exited is called if it stops on its own.
+func (u *Upstream) open(t tun.Device, log *slog.Logger, run proxy.Runner, exited func(error)) error {
 	if u.Key == nil {
 		dev := tunnel.New(u.InterfaceName(), t, log)
 		if err := dev.Configure(u.Conf.UAPI()); err != nil {
@@ -261,18 +274,17 @@ func (u *Upstream) open(t tun.Device, log *slog.Logger) error {
 		u.link = &awgLink{dev: dev, peer: u.Conf.Peers[0].PublicKey}
 		return nil
 	}
-	l := &proxyLink{key: u.Key}
-	d, err := l.dialers(u.Resolved)
+	server, err := netip.ParseAddrPort(u.Resolved)
 	if err != nil {
 		t.Close()
-		return fmt.Errorf("upstream %s: %w", u.Name, err)
+		return fmt.Errorf("upstream %s: server address %q: %w", u.Name, u.Resolved, err)
 	}
-	// New owns t and d from here on, also when it fails.
-	l.stack, err = proxy.New(t, d, proxy.Options{MaxFlows: u.MaxFlows}, log.With("upstream", u.Name))
+	spec := proxy.Spec{Key: u.keyText, Server: server, MaxFlows: u.MaxFlows}
+	l, err := run(t, spec, log.With("upstream", u.Name), exited)
 	if err != nil {
 		return fmt.Errorf("upstream %s: %w", u.Name, err)
 	}
-	u.link = l
+	u.link = &proxyLink{l, u.keyText}
 	return nil
 }
 
@@ -292,11 +304,11 @@ func (u *Upstream) setServer(k *dynamicKey, resolved string) (bool, error) {
 	if !newKey && resolved == u.Resolved {
 		return false, nil
 	}
-	key := u.Key
+	text := u.keyText
 	if newKey {
-		key = k.key
+		text = k.text
 	}
-	if err := u.link.SetServer(key, resolved); err != nil {
+	if err := u.link.SetServer(text, resolved); err != nil {
 		return false, err
 	}
 	if newKey {
@@ -315,7 +327,7 @@ type awgLink struct {
 func (l *awgLink) Up() error { return l.dev.Up() }
 func (l *awgLink) Close()    { l.dev.Close() }
 
-func (l *awgLink) SetServer(_ proxy.Key, resolved string) error {
+func (l *awgLink) SetServer(_, resolved string) error {
 	return l.dev.Configure("public_key=" + l.peer.Hex() + "\nupdate_only=true\nendpoint=" + resolved + "\n")
 }
 
@@ -326,42 +338,34 @@ func (l *awgLink) Stats() linkStats {
 	return linkStats{}
 }
 
-// proxyLink is a proxy stack. It carries traffic from the start: the TUN
-// passes nothing before the dataplane sets it up and routes to it.
+// proxyLink is a proxy stack, in this process or in a helper. In process it
+// carries traffic from the start: the TUN passes nothing before the
+// dataplane sets it up and routes to it. A helper starts at Up.
 type proxyLink struct {
-	key   proxy.Key
-	stack *proxy.Stack
+	proxy.Link
+	key string // the key text it runs with
 }
 
-func (l *proxyLink) Up() error { return nil }
-func (l *proxyLink) Close()    { l.stack.Close() }
-
-func (l *proxyLink) dialers(resolved string) (proxy.Dialers, error) {
-	return keyDialers(l.key, resolved)
-}
-
-func keyDialers(key proxy.Key, resolved string) (proxy.Dialers, error) {
+// SetServer makes new flows reach the new address with the given key; open
+// ones stay where they are.
+func (l *proxyLink) SetServer(keyText, resolved string) error {
 	addr, err := netip.ParseAddrPort(resolved)
 	if err != nil {
-		return proxy.Dialers{}, fmt.Errorf("server address %q: %w", resolved, err)
+		return fmt.Errorf("server address %q: %w", resolved, err)
 	}
-	return key.Dialers(addr)
-}
-
-// SetServer swaps the dialers at once: new flows reach the new address with
-// the new key, open ones stay where they are.
-func (l *proxyLink) SetServer(key proxy.Key, resolved string) error {
-	d, err := keyDialers(key, resolved)
-	if err != nil {
+	if err := l.Link.SetServer(keyText, addr); err != nil {
 		return err
 	}
-	l.stack.SetDialers(d)
-	l.key = key
+	l.key = keyText
 	return nil
 }
 
+// Stats has no flow counters while no helper runs.
 func (l *proxyLink) Stats() linkStats {
-	st := l.stack.Stats()
+	st, err := l.Link.Stats()
+	if err != nil {
+		return linkStats{}
+	}
 	return linkStats{Flows: &st}
 }
 
