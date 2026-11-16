@@ -172,7 +172,7 @@ func (e *env) clientMTU() (int, error) {
 		if err != nil {
 			return 0, err
 		}
-		ups = append(ups, mtu.Upstream{MTU: up.MTU, S4: up.Conf.Interface.S4})
+		ups = append(ups, up.MTULimit())
 	}
 	return mtu.Client(e.id.Params.S4, ups), nil
 }

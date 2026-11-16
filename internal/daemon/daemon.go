@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/amnezia-vpn/amneziawg-go/tun"
+	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
 	"github.com/anesthetised/lotsman/internal/config"
@@ -102,7 +102,7 @@ func (d *Daemon) ClientMTU() int {
 func (d *Daemon) clientMTU() int {
 	var ups []mtu.Upstream
 	for _, u := range d.ups {
-		ups = append(ups, mtu.Upstream{MTU: u.MTU, S4: u.Conf.Interface.S4})
+		ups = append(ups, u.MTULimit())
 	}
 	return mtu.Client(d.id.Params.S4, ups)
 }

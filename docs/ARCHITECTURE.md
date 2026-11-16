@@ -26,14 +26,17 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 
 ## AmneziaWG implementation notes (verified 2026-09-17)
 
-- `github.com/amnezia-vpn/amneziawg-go` is pinned to the **master pseudo-version
-  `v0.2.20-0.20260724121833-457d920a1a7d`**, not a tag. The `v1.0.x` tags are *older* (July 2025,
-  AWG 1.5 only: `i1..i5`, `j1..j3`, `itime`, no `s3`/`s4`, no header ranges); the live line is
-  `v0.2.x`. The latest tag, v0.2.19, has a data race: every `IpcSet` on a running device — including
-  a plain peer add/remove — rewrites `device.headers.*` while the receive goroutine reads them.
-  `master` stores them atomically. It also carries "AWG 3+" knobs (`header_protection_key`,
-  `content_padding_addition`, timing ranges) that Lotsman does not use yet. Move back to a tag once
-  one includes the fix.
+- `github.com/amnezia-vpn/amneziawg-go/v3` is pinned to the tag **v3.1.20260828** (AWG 3.1,
+  updated 2026-11-16). It stores `device.headers.*` atomically and applies `IpcSet` header and
+  padding changes under a lock, so the v0.2.19 data race (headers rewritten by any `IpcSet` while
+  the receive goroutine reads them) is gone. `ipackets` (I1–I5) is still written without
+  synchronisation, so Lotsman sets them only before `Up`. With no 3.x keys the runtime is AWG 2.0
+  on the wire; `TestAWG2RuntimeInterop` checks this against v0.2.19, a test-only dependency.
+- AWG 3.x keys, accepted on upstreams: `HeaderProtectionKey` and `RandomTrailers` must match the
+  server; `ContentPaddingAddition`, `RekeyAfterTime`, `RekeyTimeout`, `RejectAfterTime`,
+  `KeepaliveTimeout`, `MaxHandshakeAttempts` and `DisableCookies` are local. Header protection
+  encrypts in place and trailers stay within the peer's UDP window, so neither changes the
+  handshake-size checks; the client MTU subtracts the `ContentPaddingAddition` upper bound.
 - The public `amneziawg-linux-kernel-module` implements 1.5 parameters only; the 2.0 module is
   distributed as a binary PPA without sources. Not a dependency Lotsman can take.
 - UAPI device keys for 2.0: `jc`, `jmin`, `jmax`, `s1`..`s4` (uint16), `h1`..`h4` (single value or

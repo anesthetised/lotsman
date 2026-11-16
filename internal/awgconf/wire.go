@@ -15,10 +15,17 @@ const (
 	cookieReplySize = 64
 )
 
+// Header protection takes its nonce from the first bytes of the S1-S4
+// padding (device/noise-types.go).
+const headerNonceSize = 12
+
 // CheckWireSizes rejects S1-S3 padding and I1-I5 chains that would exceed
 // payloadMax, the UDP payload limit of the peer's address family, or make the
 // pinned sender allocate a negative or oversized buffer. It never allocates
-// by the configured sizes.
+// by the configured sizes. Header protection encrypts in place. Random
+// trailers keep a handshake message below the peer's UDP window, which never
+// exceeds 500 bytes or the largest transport datagram already exchanged with
+// that peer (device/send.go randomTrailer). Neither adds to these bounds.
 func (p Params) CheckWireSizes(payloadMax int) error {
 	for _, s := range []struct {
 		name    string

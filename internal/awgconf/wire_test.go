@@ -5,13 +5,16 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/amnezia-vpn/amneziawg-go/device"
+	"github.com/amnezia-vpn/amneziawg-go/v3/device"
 )
 
 func TestHandshakeSizesMatchRuntime(t *testing.T) {
 	if initiationSize != device.MessageInitiationSize || responseSize != device.MessageResponseSize || cookieReplySize != device.MessageCookieReplySize {
 		t.Fatalf("sizes %d/%d/%d, runtime %d/%d/%d", initiationSize, responseSize, cookieReplySize,
 			device.MessageInitiationSize, device.MessageResponseSize, device.MessageCookieReplySize)
+	}
+	if headerNonceSize != device.HeaderCipherNonceSize {
+		t.Fatalf("header nonce size %d, runtime %d", headerNonceSize, device.HeaderCipherNonceSize)
 	}
 }
 

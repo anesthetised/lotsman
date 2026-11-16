@@ -120,7 +120,7 @@ AllowedIPs = 0.0.0.0/0
 
 func TestParseErrors(t *testing.T) {
 	cases := map[string]string{
-		"unknown interface key": "[Interface]\nPrivateKey = " + privB64 + "\nHeaderProtectionKey = abc\n",
+		"unknown interface key": "[Interface]\nPrivateKey = " + privB64 + "\nFoo = 1\n",
 		"unknown peer key":      "[Interface]\nPrivateKey = " + privB64 + "\n[Peer]\nPublicKey = " + pubB64 + "\nFoo = 1\n",
 		"missing private key":   "[Interface]\nAddress = 10.0.0.2/32\n",
 		"bad key length":        "[Interface]\nPrivateKey = AAAA\n",
@@ -295,5 +295,152 @@ func TestKeys(t *testing.T) {
 	}
 	if _, err := ParseHexKey("abcd"); err == nil {
 		t.Error("short hex key accepted")
+	}
+}
+
+// hpkB64 is a header protection key: bytes 0x01..0x20.
+const hpkB64 = "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA="
+
+// awg3Conf is an AWG 3.1 provider export with the keys the official client
+// template writes; the client writes flags as on/off.
+const awg3Conf = `[Interface]
+PrivateKey = ` + privB64 + `
+Address = 10.8.1.7/32
+S1 = 15
+S2 = 18
+S3 = 20
+S4 = 12
+H1 = 100-200
+H2 = 300-400
+H3 = 500-600
+H4 = 700-800
+HeaderProtectionKey = ` + hpkB64 + `
+ContentPaddingAddition = 0-64
+RekeyAfterTime = 110-130
+RekeyTimeout = 5
+RejectAfterTime = 170-190
+KeepaliveTimeout = 8-12
+MaxHandshakeAttempts = 18-22
+RandomTrailers = on
+DisableCookies = On
+
+[Peer]
+PublicKey = ` + pubB64 + `
+Endpoint = 203.0.113.5:443
+AllowedIPs = 0.0.0.0/0
+`
+
+func TestParseAWG3Config(t *testing.T) {
+	cfg, err := Parse(strings.NewReader(awg3Conf))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hpk, _ := ParseKey(hpkB64)
+	want := Params{
+		S1: 15, S2: 18, S3: 20, S4: 12,
+		H1: Range{100, 200}, H2: Range{300, 400}, H3: Range{500, 600}, H4: Range{700, 800},
+		HeaderProtectionKey:    hpk,
+		ContentPaddingAddition: Range{0, 64},
+		RekeyAfterTime:         Range{110, 130},
+		RekeyTimeout:           Range{5, 5},
+		RejectAfterTime:        Range{170, 190},
+		KeepaliveTimeout:       Range{8, 12},
+		MaxHandshakeAttempts:   Range{18, 22},
+		RandomTrailers:         true,
+		DisableCookies:         true,
+	}
+	if diff := cmp.Diff(want, cfg.Interface.Params); diff != "" {
+		t.Errorf("Params mismatch (-want +got):\n%s", diff)
+	}
+
+	again, err := Parse(strings.NewReader(cfg.String()))
+	if err != nil {
+		t.Fatalf("re-parse of rendered config: %v\n%s", err, cfg.String())
+	}
+	if diff := cmp.Diff(cfg, again, cmpopts.EquateComparable(netip.Prefix{}, netip.Addr{})); diff != "" {
+		t.Errorf("round trip mismatch (-first +second):\n%s", diff)
+	}
+
+	// device/uapi.go parses hex keys, "a" or "a-b" ranges and
+	// strconv.ParseBool flags.
+	wantUAPI := "s1=15\ns2=18\ns3=20\ns4=12\n" +
+		"h1=100-200\nh2=300-400\nh3=500-600\nh4=700-800\n" +
+		"header_protection_key=0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n" +
+		"content_padding_addition=0-64\n" +
+		"rekey_after_time=110-130\nrekey_timeout=5\nreject_after_time=170-190\n" +
+		"keepalive_timeout=8-12\nmax_handshake_attempts=18-22\n" +
+		"random_trailers=true\ndisable_cookies=true\n"
+	if diff := cmp.Diff(wantUAPI, cfg.Interface.Params.UAPI()); diff != "" {
+		t.Errorf("UAPI mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestParseAWG3Keys(t *testing.T) {
+	iface := "[Interface]\nPrivateKey = " + privB64 + "\n"
+	padded := "S1 = 12\nS2 = 12\nS3 = 12\nS4 = 12\n"
+	zeroKey := (Key{}).String()
+	for _, tc := range []struct {
+		name, lines, wantError string
+	}{
+		{"key with S1-S4 at 12", padded + "HeaderProtectionKey = " + hpkB64 + "\n", ""},
+		{"zero key needs no padding", "HeaderProtectionKey = " + zeroKey + "\n", ""},
+		{"key without padding", "HeaderProtectionKey = " + hpkB64 + "\n", "HeaderProtectionKey requires S1-S4 of at least 12, got S1 = 0"},
+		{"key with short S2", "S1 = 12\nS2 = 11\nS3 = 12\nS4 = 12\nHeaderProtectionKey = " + hpkB64 + "\n", "got S2 = 11"},
+		{"key with short S3", "S1 = 12\nS2 = 12\nS3 = 0\nS4 = 12\nHeaderProtectionKey = " + hpkB64 + "\n", "got S3 = 0"},
+		{"key with short S4", "S1 = 12\nS2 = 12\nS3 = 12\nS4 = 11\nHeaderProtectionKey = " + hpkB64 + "\n", "got S4 = 11"},
+		{"key of 16 bytes", padded + "HeaderProtectionKey = AQIDBAUGBwgJCgsMDQ4PEA==\n", "key is 16 bytes, want 32"},
+		{"key not base64", padded + "HeaderProtectionKey = abc\n", "key is not base64"},
+		{"key in hex", padded + "HeaderProtectionKey = 0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20\n", "headerprotectionkey: key is 48 bytes"},
+
+		{"single value", "ContentPaddingAddition = 16\n", ""},
+		{"full range", "RekeyAfterTime = 0-4294967295\n", ""},
+		{"inverted range", "ContentPaddingAddition = 64-0\n", "lower bound above upper"},
+		{"range above uint32", "RekeyTimeout = 4294967296\n", "rekeytimeout: range"},
+		{"negative range", "RejectAfterTime = -1\n", "rejectaftertime: range"},
+		{"three-part range", "KeepaliveTimeout = 1-2-3\n", "keepalivetimeout: range"},
+		{"empty range", "MaxHandshakeAttempts =\n", "maxhandshakeattempts: range"},
+
+		{"flag on", "RandomTrailers = on\n", ""},
+		{"flag OFF", "RandomTrailers = OFF\n", ""},
+		{"flag true", "DisableCookies = true\n", ""},
+		{"flag 0", "DisableCookies = 0\n", ""},
+		{"flag yes", "RandomTrailers = yes\n", "want on, off, true, false, 1 or 0"},
+		{"flag 2", "DisableCookies = 2\n", "want on, off, true, false, 1 or 0"},
+		{"flag empty", "RandomTrailers =\n", "randomtrailers: flag"},
+
+		{"AWG 1.5 J1", "J1 = <b 0xabcd>\n", "J1 is an AmneziaWG 1.5 key, which Lotsman does not support; ask the provider for an AmneziaWG 2.0 or newer config"},
+		{"AWG 1.5 J2", "j2 = <r 10>\n", "J2 is an AmneziaWG 1.5 key"},
+		{"AWG 1.5 J3", "J3 = <r 10>\n", "J3 is an AmneziaWG 1.5 key"},
+		{"AWG 1.5 Itime", "Itime = 120\n", "Itime is an AmneziaWG 1.5 key"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse(strings.NewReader(iface + tc.lines))
+			if tc.wantError == "" {
+				if err != nil {
+					t.Fatal(err)
+				}
+			} else if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("Parse error = %v, want %q", err, tc.wantError)
+			}
+		})
+	}
+}
+
+func TestParseFlag(t *testing.T) {
+	for in, want := range map[string]bool{
+		"on": true, "On": true, "ON": true, "off": false, "Off": false,
+		"1": true, "0": false, "t": true, "f": false,
+		"true": true, "TRUE": true, "True": true, "false": false, "FALSE": false, "False": false,
+	} {
+		if got, err := parseFlag(in); err != nil || got != want {
+			t.Errorf("parseFlag(%q) = %v, %v; want %v", in, got, err, want)
+		}
+	}
+}
+
+// Unset AWG 3.x keys render nothing, so a 2.0 config's UAPI stays as before.
+func TestAWG3UnsetRendersNothing(t *testing.T) {
+	if got, want := (Params{}).UAPI(), "s1=0\ns2=0\ns3=0\ns4=0\n"; got != want {
+		t.Errorf("UAPI = %q, want %q", got, want)
 	}
 }

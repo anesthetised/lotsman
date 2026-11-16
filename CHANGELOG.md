@@ -6,6 +6,10 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Upstreams accept AmneziaWG 3.x provider configs: `HeaderProtectionKey`,
+  `ContentPaddingAddition`, `RekeyAfterTime`, `RekeyTimeout`, `RejectAfterTime`,
+  `KeepaliveTimeout`, `MaxHandshakeAttempts`, `RandomTrailers` and `DisableCookies`. The client
+  MTU subtracts each upstream's `ContentPaddingAddition` upper bound (#59).
 - `health.probe` accepts a list of `ip:port` targets; a probe round succeeds if any target
   answers, and latency is the fastest answer (#51).
 - `tags` on upstreams and `tag` in profile tiers, so several countries can form one tier picked by
@@ -16,6 +20,8 @@ All notable changes to Lotsman are documented here. The format follows
   value is rejected before any command runs (#56).
 
 ### Changed
+- amneziawg-go moves from a master pseudo-version to the tag `amneziawg-go/v3 v3.1.20260828`.
+  AWG 1.5-only keys (`J1`–`J3`, `Itime`) are rejected with a message to request a 2.0+ config (#59).
 - CI and `just lint` run `go mod verify`, staticcheck and govulncheck for the host and the Linux
   integration build; the tools are pinned with `tool` directives in `go.mod`. The toolchain is
   raised to go1.27.4 for GO-2026-6859 (#54).
