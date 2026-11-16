@@ -13,7 +13,6 @@ import (
 // A replacement provider config that cannot be read, parsed, validated or
 // resolved is reported, and the running upstream keeps its device and peers.
 func TestReloadKeepsUpstreamWhenReplacementFails(t *testing.T) {
-	useResolver(t, &fakeResolver{hosts: map[string]string{"localhost": "127.0.0.1"}})
 	h := newHarness(t)
 	h.st.CreateUser("alice")
 	peer, _ := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)

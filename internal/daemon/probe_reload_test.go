@@ -138,7 +138,6 @@ func assertResponsive(t *testing.T, h *harness) {
 func TestEndpointLookupDoesNotBlockDaemon(t *testing.T) {
 	limit := time.Second // the harness probe timeout: max(30ms/2, 1s)
 	start := func(t *testing.T) *harness {
-		useResolver(t, &fakeResolver{hosts: map[string]string{"localhost": "127.0.0.1"}})
 		h := newHarness(t)
 		if err := h.d.start(context.Background()); err != nil {
 			t.Fatal(err)

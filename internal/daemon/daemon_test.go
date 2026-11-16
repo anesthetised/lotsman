@@ -290,6 +290,9 @@ health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 2, up_after: 1}
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	// Provider endpoints are localhost; keep lookups off the system resolver,
+	// which can exceed the lookup timeout on a loaded CI runner.
+	useResolver(t, &fakeResolver{hosts: map[string]string{"localhost": "127.0.0.1"}})
 	dir := t.TempDir()
 	providerConf(t, dir, "nl", "10.8.0.2/32", 1400)
 	providerConf(t, dir, "de", "10.9.0.2/32", 0)
@@ -493,9 +496,9 @@ func TestDaemon(t *testing.T) {
 }
 
 func TestProbeFailureReresolvesEndpoint(t *testing.T) {
+	h := newHarness(t)
 	dns := &fakeResolver{hosts: map[string]string{"localhost": "127.0.0.1"}}
 	useResolver(t, dns)
-	h := newHarness(t)
 	// Providers may assign identical tunnel addresses. Only DE will fail.
 	providerConf(t, h.dir, "de", "10.8.0.2/32", 0)
 	h.run(t)
