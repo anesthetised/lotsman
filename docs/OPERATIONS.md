@@ -173,7 +173,11 @@ WireGuard binds one key to one endpoint, so a config must never be active on two
 same time — give each device its own with `-device`. A device has one config per profile; which
 config is active decides where the traffic exits. The config goes to stdout (redirect it to a
 file), the QR code to stderr. Adding or removing takes effect immediately when the daemon is
-running (the CLI nudges it), otherwise on the next start.
+running: the CLI sends it SIGUSR1, which reconciles the user database but does not re-read
+`lotsman.yaml` (use `systemctl reload lotsman` for that). Before signalling, the CLI checks that the
+pid in `lotsman.pid` belongs to this same `lotsman` executable; otherwise it signals nothing, says
+why on stderr, and the change applies on the next reconcile or start. After replacing the binary,
+restart the daemon. Run these commands as the daemon's user (normally root).
 
 ## Watching it
 
