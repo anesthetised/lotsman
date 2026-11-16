@@ -544,17 +544,55 @@ func probeTimeout(h config.Health) time.Duration {
 	return max(h.Interval/2, time.Second)
 }
 
+// probeAny tries every target at once and passes when any answers, reporting
+// the fastest latency. The first answer cancels the others, and probeAny
+// returns only after every attempt has, so none outlives the round. d.mu is
+// not held.
+func (d *Daemon) probeAny(ctx context.Context, iface string, source netip.Addr, targets config.ProbeTargets, timeout time.Duration) (time.Duration, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	type result struct {
+		latency time.Duration
+		err     error
+	}
+	results := make(chan result, len(targets))
+	for _, target := range targets {
+		go func() {
+			latency, err := d.probe(ctx, iface, source, target, timeout)
+			results <- result{latency, err}
+		}()
+	}
+	var best time.Duration
+	var failures []string
+	passed := false
+	for range targets {
+		r := <-results
+		if r.err != nil {
+			failures = append(failures, r.err.Error())
+			continue
+		}
+		if !passed || r.latency < best {
+			best, passed = r.latency, true
+		}
+		cancel()
+	}
+	if passed {
+		return best, nil
+	}
+	return 0, errors.New(strings.Join(failures, "; "))
+}
+
 func (d *Daemon) probeAll(ctx context.Context) {
 	// Before the probes, so an upstream that opens now is probed this round.
 	d.reopenMissing(ctx)
 	var wg sync.WaitGroup
 	d.mu.Lock()
-	target, _ := netip.ParseAddrPort(d.cfg.Health.Probe)
+	targets := d.cfg.Health.Probe
 	timeout := probeTimeout(d.cfg.Health)
 	for _, u := range d.ups {
 		iface, source, endpoint := u.InterfaceName(), u.Addr.Addr(), u.Endpoint
 		wg.Go(func() {
-			latency, err := d.probe(ctx, iface, source, target, timeout)
+			latency, err := d.probeAny(ctx, iface, source, targets, timeout)
 			d.mu.Lock()
 			d.countProbe(u.Name, err == nil)
 			before := u.Tracker.State()

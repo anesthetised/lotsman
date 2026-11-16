@@ -63,8 +63,67 @@ health:
 	if cfg.Listen != "127.0.0.1:1234" || cfg.Subnet.String() != "10.9.0.0/24" || len(cfg.DNS) != 2 {
 		t.Errorf("overrides not applied: %+v", cfg)
 	}
-	if cfg.Health != (Health{Interval: time.Minute, Probe: "8.8.8.8:53", DownAfter: 5, UpAfter: 1}) {
-		t.Errorf("health = %+v", cfg.Health)
+	h := cfg.Health
+	if h.Interval != time.Minute || h.DownAfter != 5 || h.UpAfter != 1 || !slices.Equal(h.Probe, ProbeTargets{netip.MustParseAddrPort("8.8.8.8:53")}) {
+		t.Errorf("health = %+v", h)
+	}
+}
+
+func TestProbeAcceptsOneTargetOrAList(t *testing.T) {
+	a, b := netip.MustParseAddrPort("1.1.1.1:443"), netip.MustParseAddrPort("[2606:4700::1111]:443")
+	for name, tc := range map[string]struct {
+		health string
+		want   ProbeTargets
+	}{
+		"default":           {"", ProbeTargets{a}},
+		"single string":     {"health: {probe: 1.1.1.1:443}\n", ProbeTargets{a}},
+		"flow list":         {"health: {probe: ['1.1.1.1:443', '[2606:4700::1111]:443']}\n", ProbeTargets{a, b}},
+		"block list":        {"health:\n  probe:\n    - 1.1.1.1:443\n    - '[2606:4700::1111]:443'\n", ProbeTargets{a, b}},
+		"one-item list":     {"health: {probe: [1.1.1.1:443]}\n", ProbeTargets{a}},
+		"other fields kept": {"health: {interval: 1m}\n", ProbeTargets{a}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Parse([]byte(minimal + tc.health))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.Equal(cfg.Health.Probe, tc.want) {
+				t.Errorf("probe = %v, want %v", cfg.Health.Probe, tc.want)
+			}
+		})
+	}
+}
+
+func TestProbeRejectsBadTargets(t *testing.T) {
+	for name, tc := range map[string]struct{ health, want string }{
+		"empty list":     {"health: {probe: []}\n", "health.probe: at least one target"},
+		"null":           {"health: {probe: null}\n", "health.probe: at least one target"},
+		"empty string":   {"health: {probe: ''}\n", "health.probe:"},
+		"bad list entry": {"health: {probe: [1.1.1.1:443, 8.8.8.8]}\n", "health.probe[1]:"},
+		"hostname entry": {"health: {probe: [one.one.one.one:443]}\n", "health.probe[0]:"},
+		"nested entry":   {"health: {probe: [[1.1.1.1:443]]}\n", "health.probe[0]:"},
+		"mapping":        {"health: {probe: {addr: 1.1.1.1:443}}\n", "health.probe:"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse([]byte(minimal + tc.health)); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Parse error = %v, want error containing %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsEmptyProbeTargets(t *testing.T) {
+	cfg, err := Parse([]byte(minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Health.Probe = nil
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "health.probe: at least one target") {
+		t.Errorf("Validate error = %v", err)
+	}
+	cfg.Health.Probe = ProbeTargets{{}}
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "health.probe[0]:") {
+		t.Errorf("Validate error = %v", err)
 	}
 }
 

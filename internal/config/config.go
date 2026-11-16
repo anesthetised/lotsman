@@ -77,9 +77,46 @@ func (m Match) String() string {
 
 type Health struct {
 	Interval  time.Duration `yaml:"interval"`
-	Probe     string        `yaml:"probe"`
+	Probe     ProbeTargets  `yaml:"probe"`
 	DownAfter int           `yaml:"down_after"`
 	UpAfter   int           `yaml:"up_after"`
+}
+
+// ProbeTargets are the TCP destinations a health round tries through an
+// upstream; the round passes when any one answers. In YAML it is a single
+// "ip:port" or a list of them.
+type ProbeTargets []netip.AddrPort
+
+func (p *ProbeTargets) UnmarshalYAML(n *yaml.Node) error {
+	switch n.Kind {
+	case yaml.ScalarNode:
+		ap, err := netip.ParseAddrPort(n.Value)
+		if err != nil {
+			return fmt.Errorf("health.probe: %w", err)
+		}
+		*p = ProbeTargets{ap}
+	case yaml.SequenceNode:
+		targets := make(ProbeTargets, 0, len(n.Content))
+		for i, item := range n.Content {
+			ap, err := netip.ParseAddrPort(item.Value)
+			if item.Kind != yaml.ScalarNode || err != nil {
+				return fmt.Errorf("health.probe[%d]: want an ip:port, got %q", i, item.Value)
+			}
+			targets = append(targets, ap)
+		}
+		*p = targets
+	default:
+		return fmt.Errorf("health.probe: want an ip:port or a list of them")
+	}
+	return nil
+}
+
+func (p ProbeTargets) String() string {
+	s := make([]string, len(p))
+	for i, t := range p {
+		s[i] = t.String()
+	}
+	return strings.Join(s, ", ")
 }
 
 func Default() Config {
@@ -88,7 +125,7 @@ func Default() Config {
 		Subnet:   netip.MustParsePrefix("10.77.0.0/16"),
 		DNS:      []netip.Addr{netip.MustParseAddr("1.1.1.1")},
 		StateDir: "/var/lib/lotsman",
-		Health:   Health{Interval: 15 * time.Second, Probe: "1.1.1.1:443", DownAfter: 3, UpAfter: 2},
+		Health:   Health{Interval: 15 * time.Second, Probe: ProbeTargets{netip.MustParseAddrPort("1.1.1.1:443")}, DownAfter: 3, UpAfter: 2},
 	}
 }
 
@@ -199,8 +236,13 @@ func (c *Config) Validate() error {
 	if h.Interval <= 0 {
 		return fmt.Errorf("health.interval: must be positive")
 	}
-	if _, err := netip.ParseAddrPort(h.Probe); err != nil {
-		return fmt.Errorf("health.probe: %w", err)
+	if len(h.Probe) == 0 {
+		return fmt.Errorf("health.probe: at least one target is required")
+	}
+	for i, t := range h.Probe {
+		if !t.IsValid() {
+			return fmt.Errorf("health.probe[%d]: invalid address", i)
+		}
 	}
 	if h.DownAfter < 1 || h.UpAfter < 1 {
 		return fmt.Errorf("health.down_after and health.up_after must be at least 1")

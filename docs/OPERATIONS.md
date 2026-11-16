@@ -91,7 +91,7 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `state_dir` | Server identity, SQLite database, pid and status files. |
 | `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `conf` path, free-form `geo` and `provider` labels, and `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates). |
 | `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider, tag}` matchers (all given fields must match); empty = any upstream. Within a tier the lowest latency wins, so a tag such as `near` groups several countries into one tier. A matcher that matches no upstream, or only upstreams an earlier matcher already took, is ignored with a warning in `config check` and the reload log, so an upstream can be removed without editing every profile. A profile where no matcher matches any upstream is an error. |
-| `health` | `interval`, `probe` (`ip:port` reachable through every upstream), `down_after`, `up_after`. |
+| `health` | `interval`, `probe` (an `ip:port` reachable through every upstream, or a list of them), `down_after`, `up_after`. |
 
 `listen` binds exactly the configured numeric address; hostnames and an omitted
 host are unsupported. An occupied port, unavailable family, or unassigned address
@@ -248,7 +248,9 @@ scrape_configs:
 ## How failover behaves
 
 - An upstream is *down* after `down_after` consecutive failed probes and *up* again after `up_after`
-  successes. Defaults: 45 s to declare dead, 30 s to trust it again.
+  successes. Defaults: 45 s to declare dead, 30 s to trust it again. With several `health.probe`
+  targets a round tries all of them at once and passes if any answers, reporting the fastest, so
+  one blocked or rate-limited destination does not take an upstream down. `probe` applies on reload.
 - A client stays on its upstream while it is healthy, even if a sibling in the same tier becomes
   faster. It moves when its upstream goes down, or when an upstream in a *better* tier recovers.
 - Moving changes the exit IP for *new* connections only. Connections a client already has open
