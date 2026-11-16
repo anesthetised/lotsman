@@ -36,7 +36,7 @@ func ClientConfig(cfg *config.Config, id Identity, peer store.Peer, mtu int) *aw
 			PublicKey:           id.PrivateKey.Public(),
 			Endpoint:            cfg.Endpoint,
 			AllowedIPs:          []netip.Prefix{everything},
-			PersistentKeepalive: 25,
+			PersistentKeepalive: awgconf.Range{Lo: 25, Hi: 25},
 		}},
 	}
 }

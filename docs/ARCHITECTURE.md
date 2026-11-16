@@ -37,6 +37,8 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
   `KeepaliveTimeout`, `MaxHandshakeAttempts` and `DisableCookies` are local. Header protection
   encrypts in place and trailers stay within the peer's UDP window, so neither changes the
   handshake-size checks; the client MTU subtracts the `ContentPaddingAddition` upper bound.
+  `[Peer] PersistentKeepalive` is a `Range` too (UAPI `persistent_keepalive_interval`, parsed by the
+  same `UintRange.FromString`).
 - The public `amneziawg-linux-kernel-module` implements 1.5 parameters only; the 2.0 module is
   distributed as a binary PPA without sources. Not a dependency Lotsman can take.
 - UAPI device keys for 2.0: `jc`, `jmin`, `jmax`, `s1`..`s4` (uint16), `h1`..`h4` (single value or

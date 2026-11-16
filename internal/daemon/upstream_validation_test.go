@@ -163,7 +163,7 @@ func TestLoadUpstreamWireSizes(t *testing.T) {
 	}
 }
 
-// An AWG 3.x provider config loads, and its content padding reaches the client MTU.
+// An AWG 3.x provider config (with a PersistentKeepalive range) loads, and its content padding reaches the client MTU.
 func TestLoadUpstreamAWG3(t *testing.T) {
 	key, err := awgconf.GeneratePrivateKey()
 	if err != nil {
@@ -186,6 +186,7 @@ DisableCookies = off
 PublicKey = ` + key.Public().String() + `
 Endpoint = 192.0.2.1:51820
 AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 20-30
 `
 	path := filepath.Join(t.TempDir(), "provider.conf")
 	if err := os.WriteFile(path, []byte(conf), 0o600); err != nil {

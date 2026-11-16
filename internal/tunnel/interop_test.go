@@ -65,7 +65,7 @@ Address = 10.200.0.2/32
 PublicKey = ` + providerKey.Public().String() + `
 Endpoint = 127.0.0.1:51998
 AllowedIPs = 0.0.0.0/0
-PersistentKeepalive = 5
+PersistentKeepalive = 5-6
 `
 	cfg, err := awgconf.Parse(strings.NewReader(conf))
 	if err != nil {

@@ -111,7 +111,7 @@ func newProvider(t *testing.T, name string, tunnelNet netip.Prefix, port uint16)
 	customer := awgconf.Config{
 		Interface: awgconf.Interface{PrivateKey: clientKey, Addresses: []netip.Prefix{netip.PrefixFrom(clientAddr, 32)}, MTU: 1400, Params: params},
 		Peers: []awgconf.Peer{{PublicKey: serverKey.Public(), Endpoint: "localhost:" + strconv.Itoa(int(port)),
-			AllowedIPs: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}, PersistentKeepalive: 5}},
+			AllowedIPs: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}, PersistentKeepalive: awgconf.Range{Lo: 5, Hi: 5}}},
 	}
 	return &provider{name: name, dev: dev, conf: customer.String(), params: params}
 }

@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"math"
 	"net/netip"
 	"strconv"
 	"strings"
@@ -25,13 +26,17 @@ type Peer struct {
 	PresharedKey        Key
 	Endpoint            string
 	AllowedIPs          []netip.Prefix
-	PersistentKeepalive uint32
+	PersistentKeepalive Range // seconds; a range is picked from per timer arm
 }
 
 type Config struct {
 	Interface Interface
 	Peers     []Peer
 }
+
+// maxRejectAfterTime is the largest RejectAfterTime upper bound, in seconds,
+// for which three times it still fits a time.Duration.
+const maxRejectAfterTime = math.MaxInt64 / (3 * 1_000_000_000)
 
 // wg-quick keys that describe how to bring the interface up on the client
 // machine. They carry nothing Lotsman needs, so they are skipped rather than rejected.
@@ -133,6 +138,12 @@ func Parse(r io.Reader) (*Config, error) {
 			}
 		}
 	}
+	// The runtime sets the key-wipe timer to 3 x RejectAfterTime's upper bound
+	// as a time.Duration; past this the product overflows to a negative value
+	// and every session's keys are wiped as soon as they are derived.
+	if p.RejectAfterTime.Hi > maxRejectAfterTime {
+		return nil, fmt.Errorf("[Interface] RejectAfterTime must not exceed %d seconds: three times that overflows the runtime's key timer and the handshake never yields usable keys", maxRejectAfterTime)
+	}
 	// Smaller IPv4 limits are applied once the endpoint is known.
 	if err := p.CheckWireSizes(65527); err != nil {
 		return nil, err
@@ -219,7 +230,7 @@ func (p *Peer) set(key, value string) (err error) {
 	case "allowedips":
 		p.AllowedIPs, err = parseList(value, parsePrefix)
 	case "persistentkeepalive":
-		p.PersistentKeepalive, err = parseUint32(value)
+		p.PersistentKeepalive, err = ParseRange(value)
 	default:
 		return fmt.Errorf("unsupported [Peer] key %q", key)
 	}
@@ -293,7 +304,7 @@ func (c *Config) String() string {
 		if len(p.AllowedIPs) > 0 {
 			line("AllowedIPs", joinList(p.AllowedIPs))
 		}
-		if p.PersistentKeepalive != 0 {
+		if !p.PersistentKeepalive.IsZero() {
 			line("PersistentKeepalive", p.PersistentKeepalive)
 		}
 	}
@@ -328,8 +339,8 @@ func (p Peer) UAPI() string {
 	for _, ip := range p.AllowedIPs {
 		fmt.Fprintf(&b, "allowed_ip=%s\n", ip)
 	}
-	if p.PersistentKeepalive != 0 {
-		fmt.Fprintf(&b, "persistent_keepalive_interval=%d\n", p.PersistentKeepalive)
+	if !p.PersistentKeepalive.IsZero() {
+		fmt.Fprintf(&b, "persistent_keepalive_interval=%s\n", p.PersistentKeepalive)
 	}
 	return b.String()
 }

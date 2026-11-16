@@ -259,7 +259,7 @@ func TestClientConfig(t *testing.T) {
 		t.Errorf("client junk missing: %+v", i.Params)
 	}
 	p := parsed.Peers[0]
-	if p.PublicKey != id.PrivateKey.Public() || p.Endpoint != "vpn.example.org:51820" || p.AllowedIPs[0].String() != "0.0.0.0/0" || p.PersistentKeepalive != 25 {
+	if p.PublicKey != id.PrivateKey.Public() || p.Endpoint != "vpn.example.org:51820" || p.AllowedIPs[0].String() != "0.0.0.0/0" || p.PersistentKeepalive != (awgconf.Range{Lo: 25, Hi: 25}) {
 		t.Errorf("peer = %+v", p)
 	}
 }
