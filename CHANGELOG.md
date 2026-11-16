@@ -6,6 +6,9 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Assume an IPv6 outer header (80 bytes of encapsulation overhead) for every client MTU,
+  so clients that reach Lotsman over IPv6 no longer get a 20-byte-too-large MTU; the
+  client MTU without a tighter upstream drops from 1440 to 1420 (#43).
 - Honor the downstream `listen` address and address family. The default
   `0.0.0.0:51820` now opens only IPv4; `[::]:51820` opens only IPv6 (#13).
 - Bind health probes and their policy routes to the intended upstream interface,
