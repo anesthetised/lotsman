@@ -4,10 +4,13 @@ package linux
 
 import (
 	"errors"
+	"fmt"
+	"net"
 	"net/netip"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/vishvananda/netlink"
 
@@ -48,6 +51,9 @@ func packetLinks(t *testing.T) {
 	}
 }
 
+// packetMetrics is the metrics endpoint every packet test gateway is set up with.
+var packetMetrics = netip.MustParseAddrPort("10.77.0.1:9100")
+
 func packetNetwork(t *testing.T) *Dataplane {
 	t.Helper()
 	packetLinks(t)
@@ -59,7 +65,7 @@ func packetNetwork(t *testing.T) *Dataplane {
 	})
 	if err := d.Setup(
 		dataplane.Interface{Name: "lm0", Addr: netip.MustParsePrefix("10.77.0.1/24")},
-		[]dataplane.Interface{{Name: "lm-up-a", Addr: netip.MustParsePrefix("10.8.0.2/24")}}, 1380,
+		[]dataplane.Interface{{Name: "lm-up-a", Addr: netip.MustParsePrefix("10.8.0.2/24")}}, 1380, packetMetrics,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -144,4 +150,102 @@ func TestUnroutedPeerPackets(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Run("existing rule retry", func(t *testing.T) { checkPeerPackets(t, true) })
+}
+
+// TestClientReachesOnlyGatewayServices checks host input from lm0: a client
+// may ping the gateway and use the metrics endpoint, but no other service on
+// any host address, while its forwarded traffic is unaffected (issue #46).
+func TestClientReachesOnlyGatewayServices(t *testing.T) {
+	d := packetNetwork(t)
+	// Another address of the host, like its public IP or docker0.
+	dummy(t, "host0")
+	packetCommand(t, "ip", "addr", "add", "192.0.2.1/32", "dev", "host0")
+	packetCommand(t, "ip", "link", "set", "host0", "up")
+	if err := d.Route(netip.MustParseAddr("10.77.0.2"), "lm-up-a"); err != nil {
+		t.Fatal(err)
+	}
+	// Services bound to every address, the metrics port included.
+	reached := make(chan struct{}, 16)
+	for _, port := range []string{"9100", "2222"} {
+		ln, err := net.Listen("tcp4", "0.0.0.0:"+port)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { ln.Close() })
+		go func() {
+			for {
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				conn.Close()
+				reached <- struct{}{}
+			}
+		}()
+	}
+	udp, err := net.ListenPacket("udp4", "0.0.0.0:9100")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { udp.Close() })
+	go func() {
+		buf := make([]byte, 64)
+		for {
+			if _, _, err := udp.ReadFrom(buf); err != nil {
+				return
+			}
+			reached <- struct{}{}
+		}
+	}()
+
+	connect := func(proto, addr, port string, want bool) {
+		t.Helper()
+		for len(reached) > 0 {
+			<-reached
+		}
+		script := fmt.Sprintf("echo x >/dev/%s/%s/%s", proto, addr, port)
+		exec.Command("ip", "netns", "exec", "lm-client", "timeout", "1", "bash", "-c", script).Run()
+		got := false
+		select {
+		case <-reached:
+			got = true
+		case <-time.After(300 * time.Millisecond):
+		}
+		if got != want {
+			t.Errorf("%s %s:%s from a client: reached=%v, want %v", proto, addr, port, got, want)
+		}
+	}
+	connect("tcp", "10.77.0.1", "9100", true) // the metrics endpoint
+	connect("tcp", "10.77.0.1", "2222", false)
+	connect("tcp", "192.0.2.1", "9100", false) // the metrics port on another address
+	connect("tcp", "192.0.2.1", "2222", false)
+	connect("udp", "10.77.0.1", "9100", false)
+	connect("udp", "192.0.2.1", "9100", false)
+
+	ping := func(args ...string) bool {
+		return exec.Command("ping", append([]string{"-n", "-c", "1", "-W", "1"}, args...)...).Run() == nil
+	}
+	clientPing := func(args ...string) bool {
+		return exec.Command("ip", append([]string{"netns", "exec", "lm-client", "ping", "-n", "-c", "1", "-W", "1"}, args...)...).Run() == nil
+	}
+	if !clientPing("10.77.0.1") {
+		t.Error("client cannot ping the gateway")
+	}
+	if clientPing("192.0.2.1") {
+		t.Error("client can ping another host address")
+	}
+	// Replies to what the host opens toward a client pass, whatever its source address.
+	if !ping("-I", "192.0.2.1", "10.77.0.2") {
+		t.Error("host cannot ping a client from another address")
+	}
+
+	checkPeerPackets(t, true) // forwarded traffic
+
+	// Path MTU discovery: the frag-needed the host sends back is output, not input.
+	packetCommand(t, "ip", "link", "set", "lm-up-a", "mtu", "1280")
+	out, _ := exec.Command("ip", "netns", "exec", "lm-client",
+		"ping", "-n", "-c", "1", "-W", "1", "-M", "do", "-s", "1300", "10.8.0.1").CombinedOutput()
+	if !strings.Contains(string(out), "mtu = 1280") {
+		t.Errorf("client did not learn the path MTU: %s", out)
+	}
 }

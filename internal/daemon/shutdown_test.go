@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/netip"
 	"sync/atomic"
 	"testing"
 
@@ -31,8 +32,8 @@ type shutdownDataplane struct {
 	onRetry  func()
 }
 
-func (d *shutdownDataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, mtu int) error {
-	if err := d.Dataplane.Setup(down, ups, mtu); err != nil {
+func (d *shutdownDataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, mtu int, metrics netip.AddrPort) error {
+	if err := d.Dataplane.Setup(down, ups, mtu, metrics); err != nil {
 		return err
 	}
 	return d.setupErr

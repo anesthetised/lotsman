@@ -191,7 +191,8 @@ func (d *Daemon) start(ctx context.Context) error {
 		}
 		d.ups = append(d.ups, up)
 	}
-	if err := d.dp.Setup(dataplane.Interface{Name: d.down.Name(), Addr: Gateway(d.cfg)}, d.interfaces(), d.clientMTU()); err != nil {
+	metricsAddr, _ := netip.ParseAddrPort(d.cfg.Metrics.Listen) // validated by config; zero when unset
+	if err := d.dp.Setup(dataplane.Interface{Name: d.down.Name(), Addr: Gateway(d.cfg)}, d.interfaces(), d.clientMTU(), metricsAddr); err != nil {
 		return fmt.Errorf("dataplane setup: %w", err)
 	}
 	for _, u := range d.ups {

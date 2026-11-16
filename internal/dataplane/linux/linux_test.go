@@ -96,7 +96,7 @@ func TestDataplane(t *testing.T) {
 	t.Cleanup(func() { d.Teardown() })
 
 	for round := 1; round <= 2; round++ { // twice: Setup must be idempotent
-		if err := d.Setup(down, ups, 1380); err != nil {
+		if err := d.Setup(down, ups, 1380, netip.AddrPort{}); err != nil {
 			t.Fatalf("round %d: %v", round, err)
 		}
 		link, _ := netlink.LinkByName("lm0")
@@ -128,7 +128,7 @@ func TestDataplane(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int{"forward": 5, "postrouting": 1, "restore_mark": 1, "stamp_mark": 1}
+	want := map[string]int{"forward": 5, "input": 3, "postrouting": 1, "restore_mark": 1, "stamp_mark": 1}
 	for _, ch := range chains {
 		if ch.Table.Name != nftTable {
 			continue
@@ -454,7 +454,7 @@ func TestPreservesForeignState(t *testing.T) {
 	peer := netip.MustParseAddr("10.77.0.5")
 
 	for round := 1; round <= 2; round++ { // twice: Setup must be idempotent
-		if err := d.Setup(down, ups, 1380); err != nil {
+		if err := d.Setup(down, ups, 1380, netip.AddrPort{}); err != nil {
 			t.Fatalf("round %d: %v", round, err)
 		}
 		// Occupied: 1000, 1001 (routes), 1002 (rule), 1030 (route); the leftovers' tables were cleaned.
@@ -525,7 +525,7 @@ func TestSetupRefusesWhenNoTableIsFree(t *testing.T) {
 	t.Cleanup(func() { d.Teardown() })
 	down := dataplane.Interface{Name: "lm0", Addr: netip.MustParsePrefix("10.77.0.1/16")}
 	ups := []dataplane.Interface{{Name: "lm-up-a", Addr: netip.MustParsePrefix("10.8.0.2/32")}}
-	if err := d.Setup(down, ups, 1380); err == nil {
+	if err := d.Setup(down, ups, 1380, netip.AddrPort{}); err == nil {
 		t.Fatal("setup succeeded with every table occupied")
 	}
 	if err := d.Teardown(); err != nil {
