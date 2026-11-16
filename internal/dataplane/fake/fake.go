@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
+	"slices"
 	"sync"
 
 	"github.com/anesthetised/lotsman/internal/dataplane"
@@ -194,6 +195,13 @@ func (f *Dataplane) Ready() bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.SetupDone
+}
+
+// HasUpstream reports whether the upstream interface is set up as given.
+func (f *Dataplane) HasUpstream(up dataplane.Interface) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return slices.Contains(f.Ups, up)
 }
 
 // RouteOf returns the upstream a peer is currently routed through.

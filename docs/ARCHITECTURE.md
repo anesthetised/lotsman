@@ -1,8 +1,9 @@
 # Architecture
 
 Lotsman is a self-hosted AmneziaWG 2.0 gateway. Users connect with the official Amnezia client;
-Lotsman terminates their tunnel and forwards traffic into one of several upstream AmneziaWG tunnels
-(the operator's own provider subscriptions), chosen by the user's profile preference and live health.
+Lotsman terminates their tunnel and forwards traffic into one of several upstreams, AmneziaWG tunnels
+or Outline (Shadowsocks) servers (the operator's own provider subscriptions), chosen by the user's
+profile preference and live health.
 
 ```
 user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing──▶ [lm-up-N TUN] ──AWG2──▶ provider ──▶ internet
@@ -23,6 +24,7 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 | State | YAML for upstreams/profiles, SQLite for users/peers | Operators edit and version the YAML; users are created at runtime. |
 | Fail-closed | Mandatory | User traffic must never leave via the host's own IP. nftables admits only authorized peers from `lm0` into an `lm-up-*`; all other forwarding from `lm0` is dropped. |
 | Host firewalls | Accept rules inserted into foreign forward chains | Docker's `FORWARD DROP` and ufw would otherwise silently drop forwarded traffic; same approach as Tailscale. |
+| Proxy upstreams | A userspace TCP/IP stack per upstream on its own TUN, flows re-originated through a pluggable dialer (Shadowsocks first) | Keeps kernel routing, pinning and fail-closed identical for every upstream kind; see [Proxy upstreams](#proxy-upstreams-outline). |
 
 ## AmneziaWG implementation notes (verified 2026-09-17)
 
@@ -127,6 +129,67 @@ ahead of the plain `from <peer>` rule) keeps those flows on it. The pin rules ar
 so even stale pins or main-table connected routes cannot authorize it; when an upstream goes
 down its pins are deleted and the flows follow the peer's current route. Only flows through a dead
 upstream are lost, and those were dead anyway.
+
+## Proxy upstreams (Outline)
+
+Decided 2026-11-16 for #61; the stack is protocol-neutral so VLESS (#86) can reuse it.
+
+**Context.** Shadowsocks (what Outline servers speak) is a TCP/UDP proxy, not an L3 tunnel. Lotsman's
+guarantees (per-upstream TUN `lm-up-<name>`, policy routing, conntrack flow pinning, nftables
+fail-closed) all hang on the kernel routing client packets into an interface.
+
+**Decision.** Every proxy upstream gets an ordinary kernel TUN, created like an AWG one, and a
+gVisor netstack (`internal/proxy`) on it. The stack accepts every destination (promiscuous mode
+plus spoofing, IPv4 only), terminates each TCP connection and UDP flow, and re-originates it
+through a `Dialers` value: a `transport.StreamDialer` and `transport.PacketListener` from the
+Outline SDK (`golang.getoutline.org/sdk`, `transport/shadowsocks`), plus an optional closer. A
+`proxy.Key` parses an access key and builds the dialers for a resolved server address; `ss://` is
+the only one so far. The daemon sees either kind through one small `link` interface (`Up`, `Close`,
+`SetEndpoint`, `Stats`), so loading, reload, health, routing and status stay one code path.
+
+Alternatives rejected: the SDK's `network/lwip2transport` (cgo, one process-wide instance, so at
+most one Outline upstream); external processes such as outline-cli or sing-box (not embedded, and
+sing-box is GPL); the SDK's `x/configurl` for key parsing (pulls quic-go, websocket and HTTP/2, and
+its API is unstable; the `ss://` grammar is small enough to own).
+
+**Details.**
+
+- Channel link endpoint, not `fdbased`: amneziawg-go's `tun.Device` already handles the Linux TUN's
+  virtio-net header and GRO/GSO batching, and is what the AWG devices use. Feeding the stack from
+  it through `link/channel` keeps one TUN implementation, and lets the daemon tests run the stack on
+  netstack TUNs without privileges, as they do for AWG.
+- Dial before handshake: the TCP forwarder dials the server first and completes the client's
+  handshake only on success (a reset after at most 10 s otherwise), so an unreachable server looks
+  refused, not hung. A flow ends with a half-close when either side ends cleanly, and with a reset
+  to the client when the server side fails. Each flow has its own context, alive as long as the
+  flow, because a dialer may keep using it after returning (VLESS returns before reaching the
+  server); the dial timeout cancels it only while the dial is pending.
+- No ICMP: the stack does not answer pings for the addresses it impersonates, so reachability is
+  never faked. ICMP errors about its own flows are processed.
+- UDP: one proxy session per client 4-tuple, closed after 1 minute idle (10 s for port 53); replies
+  are accepted only from the flow's destination, the only source the stack can answer from.
+- Limits: at most `max_flows` flows (TCP still dialing included, default 4096) per upstream; a
+  refused TCP flow is reset, a refused UDP packet dropped, both counted. Closing the stack aborts
+  every endpoint, including handshakes whose client went away (they would otherwise wait minutes
+  for SYN-ACK retransmissions).
+- Address: every proxy TUN has `192.0.0.8/32`, the IPv4 dummy address of RFC 7600, meant for a host
+  that needs a source address and has none. It is the source of probes and, after masquerading, of
+  client flows inside the stack. Sharing one address is safe because probe rules select by
+  interface too (see [Failover semantics](#failover-semantics)), the same property that lets AWG
+  providers hand out overlapping addresses; the client subnet may not contain it.
+- MTU: the TUN is 1500 and enters the client MTU computation without overhead, so it never lowers it; the
+  outer path is the kernel's TCP and UDP to the server.
+- Endpoint: a hostname server is resolved up front like an AWG endpoint, never per flow, and
+  re-resolved when probes fail; new dialers are swapped in atomically and apply to new flows.
+- Health: a TCP handshake proves nothing through a proxy (the stack completes it itself, and
+  outline-ss-server keeps a wrong-key connection open silently), so a proxy upstream passes a round
+  only when DNS queries to a `health.dns` resolver are answered over UDP and over TCP. Latency is
+  the UDP query's, one round trip to the resolver like the AWG handshake probe.
+
+**Cost.** Measured in the slice-1 spike (#61) in a privileged container on one host: a single bulk
+TCP flow through kernel TUN, gVisor and Shadowsocks moved about 2 Gbit/s, and the TUN plus stack
+added roughly 1.5–4 ns of CPU per byte over the Shadowsocks client alone. The provider leg is
+expected to remain the bottleneck, as for AWG (see [Throughput](#throughput-2026-09-17)).
 
 ## Open items
 

@@ -23,7 +23,6 @@ import (
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/metrics"
 	"github.com/anesthetised/lotsman/internal/store"
-	"github.com/anesthetised/lotsman/internal/tunnel"
 )
 
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -151,11 +150,10 @@ func TestRefreshEndpoint(t *testing.T) {
 		t.Fatalf("loaded endpoint = %q resolved %q", u.Endpoint, u.Conf.Peers[0].Endpoint)
 	}
 	tn, _, _ := netstack.CreateNetTUN([]netip.Addr{u.Addr.Addr()}, nil, 1400)
-	u.Device = tunnel.New("p", tn, quiet)
-	t.Cleanup(u.Device.Close)
-	if err := u.Device.Configure(u.Conf.UAPI()); err != nil {
+	if err := u.open(tn, quiet); err != nil {
 		t.Fatal(err)
 	}
+	t.Cleanup(u.link.Close)
 
 	// As the daemon does: resolve without the lock, then apply.
 	refresh := func() (bool, error) {
@@ -172,9 +170,8 @@ func TestRefreshEndpoint(t *testing.T) {
 	if changed, err := refresh(); err != nil || !changed {
 		t.Fatalf("changed DNS: changed=%v err=%v", changed, err)
 	}
-	peers, _ := u.Device.Peers()
-	if len(peers) != 1 || peers[0].Endpoint != "192.0.2.2:51820" {
-		t.Errorf("device endpoint not updated: %+v", peers)
+	if peer := u.link.Stats().Peer; peer == nil || peer.Endpoint != "192.0.2.2:51820" {
+		t.Errorf("device endpoint not updated: %+v", peer)
 	}
 	if u.Conf.Peers[0].Endpoint != "192.0.2.2:51820" {
 		t.Errorf("Conf endpoint not updated: %q", u.Conf.Peers[0].Endpoint)
@@ -273,7 +270,9 @@ type harness struct {
 	cfg     *config.Config
 	dir     string
 	mu      sync.Mutex
-	healthy map[string]bool
+	healthy map[string]bool // interface → its probes pass
+	dnsDown map[string]bool // "interface network" → DNS probes fail although healthy
+	probed  map[string]int  // "interface tcp-connect" or "interface dns-udp <source> <target>" → calls
 }
 
 const harnessConfig = `
@@ -310,16 +309,26 @@ func newHarness(t *testing.T) *harness {
 	}
 	t.Cleanup(func() { st.Close() })
 
-	h := &harness{st: st, dp: fake.New(), cfg: cfg, dir: dir, healthy: map[string]bool{}}
+	h := &harness{st: st, dp: fake.New(), cfg: cfg, dir: dir, healthy: map[string]bool{}, dnsDown: map[string]bool{}, probed: map[string]int{}}
 	h.setHealthy("lm-up-nl", true)
 	h.setHealthy("lm-up-de", true)
 	probe := func(_ context.Context, iface string, _ netip.Addr, _ netip.AddrPort, _ time.Duration) (time.Duration, error) {
 		h.mu.Lock()
 		defer h.mu.Unlock()
+		h.probed[iface+" tcp-connect"]++
 		if h.healthy[iface] {
 			return time.Millisecond, nil
 		}
 		return 0, errors.New("probe failed")
+	}
+	probeDNS := func(_ context.Context, network, iface string, source netip.Addr, target netip.AddrPort, _ time.Duration) (time.Duration, error) {
+		h.mu.Lock()
+		defer h.mu.Unlock()
+		h.probed[fmt.Sprintf("%s dns-%s %s %s", iface, network, source, target)]++
+		if h.healthy[iface] && !h.dnsDown[iface+" "+network] {
+			return 2 * time.Millisecond, nil
+		}
+		return 0, errors.New("dns probe failed")
 	}
 	// Devices run on netstack; the address only matters for the downstream gateway.
 	newTUN := func(name string, mtu int) (tun.Device, error) {
@@ -330,7 +339,7 @@ func newHarness(t *testing.T) *harness {
 		tn, _, err := netstack.CreateNetTUN([]netip.Addr{addr}, nil, mtu)
 		return tn, err
 	}
-	h.d = New(Deps{Version: "test", Config: cfg, Identity: id, Store: st, Dataplane: h.dp, NewTUN: newTUN, Probe: probe, Log: quiet})
+	h.d = New(Deps{Version: "test", Config: cfg, Identity: id, Store: st, Dataplane: h.dp, NewTUN: newTUN, Probe: probe, ProbeDNS: probeDNS, Log: quiet})
 	return h
 }
 
@@ -552,13 +561,13 @@ func TestReload(t *testing.T) {
 	same, _ := config.Parse([]byte(fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir)))
 	before := h.d.Status().Upstreams
 	h.d.mu.Lock()
-	nlDevice := h.d.ups[0].Device
+	nlDevice := h.d.ups[0].link
 	h.d.mu.Unlock()
 	if err := h.d.Reload(ctx, same); err != nil {
 		t.Fatal(err)
 	}
 	h.d.mu.Lock()
-	sameDevice := h.d.ups[0].Device == nlDevice
+	sameDevice := h.d.ups[0].link == nlDevice
 	h.d.mu.Unlock()
 	if !sameDevice {
 		t.Error("unchanged upstream was replaced on reload")

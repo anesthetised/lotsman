@@ -154,8 +154,8 @@ func TestLoadUpstreamWireSizes(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					if up.Conf.Interface.Params != tc.params || up.Device != nil {
-						t.Fatalf("loaded params/device = %+v/%v", up.Conf.Interface.Params, up.Device)
+					if up.Conf.Interface.Params != tc.params || up.link != nil {
+						t.Fatalf("loaded params/device = %+v/%v", up.Conf.Interface.Params, up.link)
 					}
 				})
 			}

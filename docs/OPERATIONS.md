@@ -5,7 +5,8 @@
 - Linux with nftables and TUN (any mainstream distribution from the last few years).
 - Root: Lotsman creates TUN interfaces, sets sysctls, and programs policy routing and nftables.
 - UDP port reachable by your users (default 51820).
-- One AmneziaWG config per upstream from your provider, routing `0.0.0.0/0`.
+- Per upstream, an AmneziaWG config from your provider routing `0.0.0.0/0`, or an Outline access
+  key (`ss://…`).
 
 ## Install
 
@@ -90,9 +91,9 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `subnet` | Canonical IPv4 network prefix, /24 or larger; the first host address is the gateway. |
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
 | `state_dir` | Server identity, SQLite database, pid and status files. |
-| `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `conf` path, free-form `geo` and `provider` labels, and `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates). |
+| `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, or `outline`), `conf` path (the provider's AmneziaWG config, or for `outline` a file with the access key), free-form `geo` and `provider` labels, `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates), and for `outline` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams)). |
 | `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider, tag}` matchers (all given fields must match); empty = any upstream. Within a tier the lowest latency wins, so a tag such as `near` groups several countries into one tier. A matcher that matches no upstream, or only upstreams an earlier matcher already took, is ignored with a warning in `config check` and the reload log, so an upstream can be removed without editing every profile. A profile where no matcher matches any upstream is an error. |
-| `health` | `interval`, `probe` (an `ip:port` reachable through every upstream, or a list of them), `down_after`, `up_after`. |
+| `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline upstream; default `1.1.1.1:53`), `down_after`, `up_after`. |
 
 `listen` binds exactly the configured numeric address; hostnames and an omitted
 host are unsupported. An occupied port, unavailable family, or unassigned address
@@ -172,6 +173,57 @@ so a successful revocation blocks traffic even while route cleanup is pending. A
 authorization is reported and retried, not treated as a successful block. Removing a peer also
 revokes its downstream key even while route cleanup is pending.
 
+### Outline upstreams
+
+An Outline (Shadowsocks) server is an upstream like any other: profiles prefer it by its labels,
+health decides, flows are pinned and fail-closed applies. Put the access key the Outline manager
+gave you, one `ss://…` line, into a file and point `conf` at it:
+
+```yaml
+upstreams:
+  - {name: ol-fi, kind: outline, conf: /etc/lotsman/upstreams/ol-fi.key, geo: FI, tags: [eu]}
+```
+
+```bash
+sudo install -m 0600 /dev/stdin /etc/lotsman/upstreams/ol-fi.key <<< 'ss://…'
+```
+
+The key is a password: keep the file 0600 and root-only, like a provider config. Lotsman never logs
+it, and neither error messages nor `config check` quote it. Accepted forms are SIP002
+(`ss://base64url(method:password)@host:port`, or a percent-encoded `method:password`) and the
+legacy `ss://base64(method:password@host:port)`; the `#name` part is ignored. Ciphers:
+`chacha20-ietf-poly1305` (what Outline uses), `aes-256-gcm`, `aes-192-gcm`, `aes-128-gcm`; older
+stream ciphers and SIP003 plugins are refused. Outline's `prefix` parameter (salt prefix disguise,
+percent-encoded bytes) is applied to TCP, as the Outline client does, and may take at most half of
+the salt (16 bytes with chacha20). Dynamic `ssconf://` keys and WebSocket transports are not
+supported yet. A hostname server is resolved at start and on reload (IPv4), and again when the
+upstream fails its probes, as for AmneziaWG endpoints; the address change applies to new flows.
+
+How it works: the kernel routes the client's packets into `lm-up-<name>` as usual, and a userspace
+TCP/IP stack in the daemon terminates each TCP connection and UDP flow there and opens a matching
+one through the Shadowsocks server. Consequences:
+
+- No ICMP: ping and traceroute through an Outline upstream get no answer.
+- The client's TCP handshake completes only once the server accepted the connection; if the server
+  is unreachable, the client gets a reset after up to 10 s. A connection the server breaks off is
+  reset towards the client too.
+- UDP needs the server's UDP relay. A UDP flow ends after 1 minute without packets, DNS (port 53)
+  after 10 seconds.
+- Every Outline upstream's interface has the address `192.0.0.8/32` (the IPv4 dummy address,
+  RFC 7600); health probes and masqueraded client flows leave from it. The client `subnet` must not
+  contain it. Its MTU is 1500 and adds nothing to the client MTU.
+- `max_flows` caps TCP and UDP flows the upstream carries at once (default 4096). Beyond it, new TCP
+  connections are reset and UDP packets that would start a flow are dropped; both are counted in
+  `lotsman_upstream_flows_refused_total`. A reload changes it without touching open flows.
+- CPU: TCP termination and Shadowsocks encryption run in the daemon. In a container one flow moved
+  about 2 Gbit/s; the stack adds roughly 1.5–4 ns of CPU per byte over Shadowsocks itself.
+
+Health: a TCP handshake proves nothing here (the stack completes it, and an Outline server keeps a
+connection with a wrong key open without answering), so an Outline upstream is up only when a DNS
+query to a `health.dns` resolver gets an answer both over UDP and over TCP through it. Either
+failing counts as a failed round. The reported latency is the UDP query's. `health.probe` is not
+used for Outline upstreams.
+
 ## Users
 
 ```bash
@@ -213,7 +265,8 @@ The daemon logs at `info` by default. For more detail, pass `-log-level debug` b
 AmneziaWG device logs, including handshake diagnostics. In the systemd unit, add
 `Environment=LOTSMAN_LOG_LEVEL=debug` and restart; an invalid value stops `lotsman` before it starts.
 
-`ROUTED` counts clients whose traffic is directed through the upstream — every client in the
+`KIND` is `awg` or `outline`. `LAST HANDSHAKE` is the upstream device's handshake with its provider;
+an Outline upstream has none and shows `-`. `ROUTED` counts clients whose traffic is directed through the upstream — every client in the
 database is routed somewhere whether or not it is connected. `ACTIVE` counts those with a
 WireGuard handshake in the last three minutes, which is what "connected" means for WireGuard;
 `user list` shows each client's last handshake and current upstream (`blocked` when no healthy
@@ -234,13 +287,16 @@ the host can. Changing `metrics.listen` needs a restart.
 
 | Metric | Labels | Meaning |
 |---|---|---|
+| `lotsman_upstream_info` | `upstream`, `kind`, `interface` | always 1; `kind` is `awg` or `outline` |
 | `lotsman_upstream_up` | `upstream` | 1 while probes pass |
+| `lotsman_upstream_flows` | `upstream` | Outline only: TCP and UDP flows open now |
+| `lotsman_upstream_flows_refused_total` | `upstream` | Outline only: flows refused at `max_flows` |
 | `lotsman_upstream_probe_latency_seconds` | `upstream` | last successful probe |
 | `lotsman_upstream_probes_total` | `upstream`, `result` | `ok` / `fail` |
-| `lotsman_upstream_last_handshake_timestamp_seconds` | `upstream` | 0 if never |
+| `lotsman_upstream_last_handshake_timestamp_seconds` | `upstream` | AWG only; 0 if never |
 | `lotsman_upstream_clients` | `upstream` | clients routed through it, connected or not |
 | `lotsman_upstream_active_clients` | `upstream` | of those, with a handshake in the last 3 minutes |
-| `lotsman_upstream_receive_bytes_total`, `…_transmit_bytes_total` | `upstream` | provider tunnel counters |
+| `lotsman_upstream_receive_bytes_total`, `…_transmit_bytes_total` | `upstream` | AWG only: provider tunnel counters |
 | `lotsman_peer_receive_bytes_total`, `…_transmit_bytes_total` | `user`, `device`, `profile` | client tunnel counters |
 | `lotsman_peer_last_handshake_timestamp_seconds` | `user`, `device`, `profile` | 0 if never |
 | `lotsman_peer_upstream` | `user`, `device`, `profile`, `upstream` | 1 for the current upstream |
@@ -304,6 +360,12 @@ editing and `systemctl reload lotsman`.
 **Clients connect but nothing loads.** Check `upstream status`; if everything is `down`, the
 probes cannot get out. Test an upstream config by hand with `awg-quick`, and confirm the probe
 target is reachable through it.
+
+**An Outline upstream stays down.** Its health needs a DNS answer over UDP *and* TCP from a
+`health.dns` resolver through the server. A wrong key looks like an unreachable server (the server
+answers nothing); a server without UDP relay, or a network that blocks its UDP port, fails the UDP
+half. The probe error in the `upstream health changed` log line says which protocol failed. Check
+the key with the Outline client on another machine.
 
 **Sites open, large downloads or video hang.** MTU. `config check` prints the client MTU; make
 sure clients actually imported the config with that `MTU` line. Try a lower value in a provider

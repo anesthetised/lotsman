@@ -22,12 +22,12 @@ func TestReloadKeepsUpstreamWhenReplacementFails(t *testing.T) {
 	path := filepath.Join(h.dir, "nl.conf")
 	good := mustRead(t, path)
 	h.d.mu.Lock()
-	device := h.d.ups[0].Device
+	device := h.d.ups[0].link
 	h.d.mu.Unlock()
 	kept := func() bool {
 		h.d.mu.Lock()
 		defer h.d.mu.Unlock()
-		return len(h.d.ups) == 2 && h.d.ups[0].Name == "nl" && h.d.ups[0].Device == device
+		return len(h.d.ups) == 2 && h.d.ups[0].Name == "nl" && h.d.ups[0].link == device
 	}
 
 	write := func(content string) func(*testing.T) {

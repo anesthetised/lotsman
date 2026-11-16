@@ -30,7 +30,13 @@ import (
 // DownstreamInterface is the TUN users' tunnels terminate on.
 const DownstreamInterface = "lm0"
 
+// ProbeFunc checks one target through an upstream by a TCP handshake, as
+// health.ProbeOnInterface does.
 type ProbeFunc func(ctx context.Context, iface string, source netip.Addr, target netip.AddrPort, timeout time.Duration) (time.Duration, error)
+
+// DNSProbeFunc queries one resolver through an upstream over network, "udp"
+// or "tcp", as health.DNSOnInterface does.
+type DNSProbeFunc func(ctx context.Context, network, iface string, source netip.Addr, target netip.AddrPort, timeout time.Duration) (time.Duration, error)
 
 // TUNFunc creates the interface a device runs on: a kernel TUN in production,
 // a netstack one in tests.
@@ -43,18 +49,20 @@ type Deps struct {
 	Store     *store.Store
 	Dataplane dataplane.Dataplane
 	NewTUN    TUNFunc
-	Probe     ProbeFunc
+	Probe     ProbeFunc    // AWG upstreams
+	ProbeDNS  DNSProbeFunc // proxy upstreams
 	Log       *slog.Logger
 }
 
 type Daemon struct {
-	version string
-	id      Identity
-	store   *store.Store
-	dp      dataplane.Dataplane
-	newTUN  TUNFunc
-	probe   ProbeFunc
-	log     *slog.Logger
+	version  string
+	id       Identity
+	store    *store.Store
+	dp       dataplane.Dataplane
+	newTUN   TUNFunc
+	probe    ProbeFunc
+	probeDNS DNSProbeFunc
+	log      *slog.Logger
 
 	mu             sync.Mutex
 	cfg            *config.Config
@@ -80,7 +88,8 @@ type Daemon struct {
 
 func New(d Deps) *Daemon {
 	return &Daemon{
-		version: d.Version, cfg: d.Config, id: d.Identity, store: d.Store, dp: d.Dataplane, newTUN: d.NewTUN, probe: d.Probe, log: d.Log,
+		version: d.Version, cfg: d.Config, id: d.Identity, store: d.Store, dp: d.Dataplane, newTUN: d.NewTUN,
+		probe: d.Probe, probeDNS: d.ProbeDNS, log: d.Log,
 		assignments:    map[netip.Addr]string{},
 		unroutePending: map[netip.Addr]bool{},
 		devicePeers:    map[awgconf.Key]store.Peer{},
@@ -209,7 +218,7 @@ func (d *Daemon) start(ctx context.Context) error {
 		return fmt.Errorf("dataplane setup: %w", err)
 	}
 	for _, u := range d.ups {
-		if err := u.Device.Up(); err != nil {
+		if err := u.link.Up(); err != nil {
 			return err
 		}
 	}
@@ -217,24 +226,19 @@ func (d *Daemon) start(ctx context.Context) error {
 }
 
 // openDevice creates the TUN for a loaded and resolved upstream and starts
-// its device (still down).
+// its link (still down).
 func (d *Daemon) openDevice(up *Upstream) error {
 	t, err := d.newTUN(up.InterfaceName(), up.MTU)
 	if err != nil {
 		return fmt.Errorf("create %s: %w", up.InterfaceName(), err)
 	}
-	up.Device = tunnel.New(up.InterfaceName(), t, d.log)
-	if err := up.Device.Configure(up.Conf.UAPI()); err != nil {
-		up.Device.Close()
-		return err
-	}
-	return nil
+	return up.open(t, d.log)
 }
 
 func (d *Daemon) interfaces() []dataplane.Interface {
 	var out []dataplane.Interface
 	for _, u := range d.ups {
-		out = append(out, dataplane.Interface{Name: u.Device.Name(), Addr: u.Addr})
+		out = append(out, dataplane.Interface{Name: u.InterfaceName(), Addr: u.Addr})
 	}
 	return out
 }
@@ -257,7 +261,7 @@ func (d *Daemon) stop() {
 		}
 	}
 	for _, u := range d.ups {
-		u.Device.Close()
+		u.link.Close()
 	}
 }
 
@@ -325,7 +329,13 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 			if err != nil {
 				errs = append(errs, err)
 			}
+			// Labels and limits apply live, but the kind is what runs: a
+			// changed kind only comes with a file that loaded.
+			u.Kind = old.Kind
 			old.Upstream = u
+			if l, ok := old.link.(*proxyLink); ok {
+				l.stack.SetMaxFlows(u.MaxFlows)
+			}
 			old.Tracker.SetThresholds(cfg.Health.DownAfter, cfg.Health.UpAfter)
 			next = append(next, old)
 			continue
@@ -386,7 +396,7 @@ func (d *Daemon) dropUpstream(u *Upstream) {
 	delete(d.aliveFailed, u.Name)
 	delete(d.notUp, u)
 	delete(d.failures, failure{"up", u.Name})
-	u.Device.Close()
+	u.link.Close()
 }
 
 // logWarnings reports configuration problems that do not stop it from loading.
@@ -448,7 +458,7 @@ func (d *Daemon) activate() []error {
 	for _, u := range d.ups {
 		if d.notUp[u] {
 			key := failure{"up", u.Name}
-			if err := u.Device.Up(); err != nil {
+			if err := u.link.Up(); err != nil {
 				d.fail(key, "upstream device not up, will retry every health round", err, "upstream", u.Name)
 				errs = append(errs, err)
 				continue
@@ -565,7 +575,7 @@ func probeTimeout(h config.Health) time.Duration {
 // the fastest latency. The first answer cancels the others, and probeAny
 // returns only after every attempt has, so none outlives the round. d.mu is
 // not held.
-func (d *Daemon) probeAny(ctx context.Context, iface string, source netip.Addr, targets config.ProbeTargets, timeout time.Duration) (time.Duration, error) {
+func probeAny(ctx context.Context, targets []netip.AddrPort, probe func(context.Context, netip.AddrPort) (time.Duration, error)) (time.Duration, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	type result struct {
@@ -575,7 +585,7 @@ func (d *Daemon) probeAny(ctx context.Context, iface string, source netip.Addr, 
 	results := make(chan result, len(targets))
 	for _, target := range targets {
 		go func() {
-			latency, err := d.probe(ctx, iface, source, target, timeout)
+			latency, err := probe(ctx, target)
 			results <- result{latency, err}
 		}()
 	}
@@ -599,6 +609,37 @@ func (d *Daemon) probeAny(ctx context.Context, iface string, source netip.Addr, 
 	return 0, errors.New(strings.Join(failures, "; "))
 }
 
+// probeUpstream runs one health round's probe through an upstream. An AWG
+// upstream passes when a TCP handshake with any probe target completes. A
+// proxy upstream completes TCP handshakes itself, and its server may accept
+// a connection it will never serve (outline-ss-server does that with a wrong
+// key), so it passes only when DNS queries get answers both over UDP, which
+// needs the server's UDP relay, and over TCP. Its latency is that of UDP, one
+// round trip to the resolver like the AWG handshake. d.mu is not held.
+func (d *Daemon) probeUpstream(ctx context.Context, proxied bool, iface string, source netip.Addr, h config.Health) (time.Duration, error) {
+	timeout := probeTimeout(h)
+	if !proxied {
+		return probeAny(ctx, h.Probe, func(ctx context.Context, target netip.AddrPort) (time.Duration, error) {
+			return d.probe(ctx, iface, source, target, timeout)
+		})
+	}
+	dns := func(network string) func(context.Context, netip.AddrPort) (time.Duration, error) {
+		return func(ctx context.Context, target netip.AddrPort) (time.Duration, error) {
+			return d.probeDNS(ctx, network, iface, source, target, timeout)
+		}
+	}
+	var latency time.Duration
+	var udpErr, tcpErr error
+	var wg sync.WaitGroup
+	wg.Go(func() { latency, udpErr = probeAny(ctx, h.DNS, dns("udp")) })
+	wg.Go(func() { _, tcpErr = probeAny(ctx, h.DNS, dns("tcp")) })
+	wg.Wait()
+	if err := errors.Join(udpErr, tcpErr); err != nil {
+		return 0, err
+	}
+	return latency, nil
+}
+
 func (d *Daemon) probeAll(ctx context.Context) {
 	// First, so a pending dataplane push finds the firewall in place.
 	d.verifyFirewall()
@@ -606,12 +647,12 @@ func (d *Daemon) probeAll(ctx context.Context) {
 	d.reopenMissing(ctx)
 	var wg sync.WaitGroup
 	d.mu.Lock()
-	targets := d.cfg.Health.Probe
-	timeout := probeTimeout(d.cfg.Health)
+	h := d.cfg.Health
+	timeout := probeTimeout(h)
 	for _, u := range d.ups {
-		iface, source, endpoint := u.InterfaceName(), u.Addr.Addr(), u.Endpoint
+		iface, source, endpoint, proxied := u.InterfaceName(), u.Addr.Addr(), u.Endpoint, u.Key != nil
 		wg.Go(func() {
-			latency, err := d.probeAny(ctx, iface, source, targets, timeout)
+			latency, err := d.probeUpstream(ctx, proxied, iface, source, h)
 			d.mu.Lock()
 			d.countProbe(u.Name, err == nil)
 			before := u.Tracker.State()
@@ -741,7 +782,7 @@ func (d *Daemon) refreshEndpoint(ctx context.Context, u *Upstream, endpoint stri
 // to a dead upstream. A failure is remembered so the next probe round retries
 // it, and logged only when the error changes; the observed health is untouched.
 func (d *Daemon) applyAlive(u *Upstream) error {
-	err := d.dp.SetAlive(u.Device.Name(), u.Tracker.State() == health.Up)
+	err := d.dp.SetAlive(u.InterfaceName(), u.Tracker.State() == health.Up)
 	if err == nil {
 		if _, stale := d.aliveFailed[u.Name]; stale {
 			d.log.Info("set alive recovered", "upstream", u.Name)
@@ -870,7 +911,7 @@ func (d *Daemon) countProbe(upstream string, ok bool) {
 func (d *Daemon) interfaceOf(upstream string) string {
 	for _, u := range d.ups {
 		if u.Name == upstream {
-			return u.Device.Name()
+			return u.InterfaceName()
 		}
 	}
 	return ""
@@ -894,12 +935,13 @@ const ActiveWindow = 3 * time.Minute
 
 type UpstreamStatus struct {
 	Name          string
+	Kind          string
 	Interface     string
 	State         health.State
 	Latency       time.Duration
-	LastHandshake time.Time
-	Routed        int // clients whose traffic is directed through this upstream
-	Active        int // of those, clients with a handshake inside ActiveWindow
+	LastHandshake time.Time // with the provider; zero if never, and for proxy upstreams
+	Routed        int       // clients whose traffic is directed through this upstream
+	Active        int       // of those, clients with a handshake inside ActiveWindow
 }
 
 type PeerStatus struct {
@@ -935,10 +977,10 @@ func (d *Daemon) Status() Status {
 		return cmp.Or(strings.Compare(a.User, b.User), strings.Compare(a.Device, b.Device), strings.Compare(a.Profile, b.Profile))
 	})
 	for _, u := range d.ups {
-		s := UpstreamStatus{Name: u.Name, Interface: u.Device.Name(), State: u.Tracker.State(), Latency: u.Tracker.Latency(),
+		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Interface: u.InterfaceName(), State: u.Tracker.State(), Latency: u.Tracker.Latency(),
 			Routed: routed[u.Name], Active: active[u.Name]}
-		if peers, err := u.Device.Peers(); err == nil && len(peers) == 1 {
-			s.LastHandshake = peers[0].LastHandshake
+		if peer := u.link.Stats().Peer; peer != nil {
+			s.LastHandshake = peer.LastHandshake
 		}
 		st.Upstreams = append(st.Upstreams, s)
 	}

@@ -14,7 +14,10 @@ import (
 var Families = []metrics.Family{
 	{Name: "lotsman_build_info", Type: "gauge", Help: "Build version; always 1."},
 	{Name: "lotsman_client_mtu", Type: "gauge", Help: "MTU written into client configs."},
+	{Name: "lotsman_upstream_info", Type: "gauge", Help: "The upstream's kind and interface; always 1."},
 	{Name: "lotsman_upstream_up", Type: "gauge", Help: "1 while the upstream passes its health probes."},
+	{Name: "lotsman_upstream_flows", Type: "gauge", Help: "TCP and UDP flows a proxy upstream carries now."},
+	{Name: "lotsman_upstream_flows_refused_total", Type: "counter", Help: "Flows a proxy upstream refused at its max_flows limit."},
 	{Name: "lotsman_upstream_probe_latency_seconds", Type: "gauge", Help: "Latency of the last successful probe."},
 	{Name: "lotsman_upstream_probes_total", Type: "counter", Help: "Probes by result."},
 	{Name: "lotsman_upstream_last_handshake_timestamp_seconds", Type: "gauge", Help: "Unix time of the last handshake with the provider; 0 if none yet."},
@@ -63,6 +66,7 @@ func (d *Daemon) Metrics() []metrics.Sample {
 	for _, u := range d.ups {
 		up := metrics.Label{Name: "upstream", Value: u.Name}
 		out = append(out,
+			sample("lotsman_upstream_info", 1, up, metrics.Label{Name: "kind", Value: u.Kind}, metrics.Label{Name: "interface", Value: u.InterfaceName()}),
 			sample("lotsman_upstream_up", boolean(u.Tracker.State() == health.Up), up),
 			sample("lotsman_upstream_probe_latency_seconds", u.Tracker.Latency().Seconds(), up),
 			sample("lotsman_upstream_clients", float64(clients[u.Name]), up),
@@ -75,11 +79,18 @@ func (d *Daemon) Metrics() []metrics.Sample {
 				sample("lotsman_upstream_probes_total", float64(c[1]), up, metrics.Label{Name: "result", Value: "fail"}),
 			)
 		}
-		if peers, err := u.Device.Peers(); err == nil && len(peers) == 1 {
+		st := u.link.Stats()
+		if p := st.Peer; p != nil {
 			out = append(out,
-				sample("lotsman_upstream_last_handshake_timestamp_seconds", unixOrZero(peers[0].LastHandshake), up),
-				sample("lotsman_upstream_receive_bytes_total", float64(peers[0].RxBytes), up),
-				sample("lotsman_upstream_transmit_bytes_total", float64(peers[0].TxBytes), up),
+				sample("lotsman_upstream_last_handshake_timestamp_seconds", unixOrZero(p.LastHandshake), up),
+				sample("lotsman_upstream_receive_bytes_total", float64(p.RxBytes), up),
+				sample("lotsman_upstream_transmit_bytes_total", float64(p.TxBytes), up),
+			)
+		}
+		if f := st.Flows; f != nil {
+			out = append(out,
+				sample("lotsman_upstream_flows", float64(f.Flows), up),
+				sample("lotsman_upstream_flows_refused_total", float64(f.Refused), up),
 			)
 		}
 	}
