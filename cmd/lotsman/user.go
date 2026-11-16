@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -160,7 +159,7 @@ func parseUserArgs(cmd string, args []string, profileRequired bool) (userArgs, e
 // printClientConfig writes the config to stdout so it can be redirected to a
 // file; the optional QR code goes to stderr so it never ends up in that file.
 func printClientConfig(e *env, peer store.Peer, qr bool) error {
-	m, err := e.clientMTU(context.Background())
+	m, err := e.clientMTU()
 	if err != nil {
 		return err
 	}

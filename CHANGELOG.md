@@ -6,6 +6,10 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Keep a running upstream when its changed provider config fails to read, parse, validate or
+  resolve on reload; only TUN creation happens after the old device is closed. `user add` and
+  `user show` no longer resolve provider endpoints, so they work while DNS is down; `config check`
+  still resolves them (#45).
 - Assume an IPv6 outer header (80 bytes of encapsulation overhead) for every client MTU,
   so clients that reach Lotsman over IPv6 no longer get a 20-byte-too-large MTU; the
   client MTU without a tighter upstream drops from 1440 to 1420 (#43).

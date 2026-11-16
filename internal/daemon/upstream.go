@@ -28,12 +28,13 @@ type Upstream struct {
 	Tracker  *health.Tracker
 }
 
-// LoadUpstream reads a provider config and resolves its endpoint. The device
-// is attached later by whoever creates the TUN.
-func LoadUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Upstream, error) {
+// LoadUpstream reads and validates a provider config without touching the
+// network: the endpoint stays as written until Resolve. The device is
+// attached later by whoever creates the TUN.
+func LoadUpstream(u config.Upstream, h config.Health) (*Upstream, error) {
 	source, err := os.ReadFile(u.Conf)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("upstream %s: %w", u.Name, err)
 	}
 	conf, err := awgconf.Parse(bytes.NewReader(source))
 	if err != nil {
@@ -46,17 +47,14 @@ func LoadUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Ups
 	if !routesEverything(peer.AllowedIPs) {
 		return nil, fmt.Errorf("upstream %s: [Peer] AllowedIPs must include 0.0.0.0/0", u.Name)
 	}
-	endpoint := peer.Endpoint
-	if peer.Endpoint, err = resolveEndpoint(ctx, endpoint); err != nil {
+	if _, _, err := splitEndpoint(peer.Endpoint); err != nil {
 		return nil, fmt.Errorf("upstream %s: %w", u.Name, err)
 	}
-	remote, err := netip.ParseAddrPort(peer.Endpoint)
-	if err != nil {
-		return nil, fmt.Errorf("upstream %s: resolved endpoint: %w", u.Name, err)
-	}
 	// Ordinary UDP payload limits, also used by the pinned AWG StdNetBind.
+	// Hostnames resolve to IPv4 only, so only a literal IPv6 endpoint gets
+	// the larger limit.
 	payloadMax := 65507
-	if remote.Addr().Is6() && !remote.Addr().Is4In6() {
+	if remote, err := netip.ParseAddrPort(peer.Endpoint); err == nil && remote.Addr().Is6() && !remote.Addr().Is4In6() {
 		payloadMax = 65527
 	}
 	if p := conf.Interface.Params; p.Jc > 0 {
@@ -97,7 +95,7 @@ func LoadUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Ups
 		Upstream: u,
 		Conf:     conf,
 		Source:   string(source),
-		Endpoint: endpoint,
+		Endpoint: peer.Endpoint,
 		Addr:     addr,
 		MTU:      m,
 		Tracker:  health.NewTracker(h.DownAfter, h.UpAfter),
@@ -122,6 +120,17 @@ func firstIPv4(prefixes []netip.Prefix) (netip.Prefix, bool) {
 	return netip.Prefix{}, false
 }
 
+// Resolve points the peer at the endpoint's current address; amneziawg-go's
+// UAPI takes addresses only.
+func (u *Upstream) Resolve(ctx context.Context) error {
+	resolved, err := resolveEndpoint(ctx, u.Endpoint)
+	if err != nil {
+		return fmt.Errorf("upstream %s: %w", u.Name, err)
+	}
+	u.Conf.Peers[0].Endpoint = resolved
+	return nil
+}
+
 // RefreshEndpoint re-resolves a hostname endpoint and, if the provider moved
 // to another address, points the running device at it. Returns whether the
 // endpoint changed. Literal IP endpoints never change.
@@ -144,22 +153,15 @@ func (u *Upstream) RefreshEndpoint(ctx context.Context) (bool, error) {
 // lookupNetIP is swapped in tests.
 var lookupNetIP = net.DefaultResolver.LookupNetIP
 
-// resolveEndpoint turns host:port into ip:port; amneziawg-go's UAPI takes
-// addresses only. Providers usually hand out IPs, so this is mostly a no-op.
+// resolveEndpoint turns host:port into ip:port. Providers usually hand out
+// IPs, so this is mostly a no-op.
 func resolveEndpoint(ctx context.Context, endpoint string) (string, error) {
-	if endpoint == "" {
-		return "", fmt.Errorf("[Peer] Endpoint is required")
-	}
 	if _, err := netip.ParseAddrPort(endpoint); err == nil {
 		return endpoint, nil
 	}
-	host, port, err := net.SplitHostPort(endpoint)
+	host, port, err := splitEndpoint(endpoint)
 	if err != nil {
-		return "", fmt.Errorf("endpoint %q: %w", endpoint, err)
-	}
-	portNum, err := strconv.ParseUint(port, 10, 16)
-	if err != nil {
-		return "", fmt.Errorf("endpoint %q: bad port", endpoint)
+		return "", err
 	}
 	addrs, err := lookupNetIP(ctx, "ip4", host)
 	if err != nil {
@@ -168,5 +170,21 @@ func resolveEndpoint(ctx context.Context, endpoint string) (string, error) {
 	if len(addrs) == 0 {
 		return "", fmt.Errorf("resolve endpoint %q: no IPv4 address", endpoint)
 	}
-	return netip.AddrPortFrom(addrs[0].Unmap(), uint16(portNum)).String(), nil
+	return netip.AddrPortFrom(addrs[0].Unmap(), port).String(), nil
+}
+
+// splitEndpoint checks the host:port syntax without resolving anything.
+func splitEndpoint(endpoint string) (string, uint16, error) {
+	if endpoint == "" {
+		return "", 0, fmt.Errorf("[Peer] Endpoint is required")
+	}
+	host, port, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return "", 0, fmt.Errorf("endpoint %q: %w", endpoint, err)
+	}
+	portNum, err := strconv.ParseUint(port, 10, 16)
+	if err != nil {
+		return "", 0, fmt.Errorf("endpoint %q: bad port", endpoint)
+	}
+	return host, uint16(portNum), nil
 }

@@ -123,11 +123,11 @@ func openEnv(configPath string) (*env, error) {
 }
 
 // clientMTU loads the upstream configs to size client packets. It mirrors
-// Daemon.ClientMTU without needing devices.
-func (e *env) clientMTU(ctx context.Context) (int, error) {
+// Daemon.ClientMTU without needing devices or DNS.
+func (e *env) clientMTU() (int, error) {
 	var ups []mtu.Upstream
 	for _, u := range e.cfg.Upstreams {
-		up, err := daemon.LoadUpstream(ctx, u, e.cfg.Health)
+		up, err := daemon.LoadUpstream(u, e.cfg.Health)
 		if err != nil {
 			return 0, err
 		}
