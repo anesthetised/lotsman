@@ -142,6 +142,27 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 func (d *Daemon) start(ctx context.Context) error {
 	d.mu.Lock()
+	cfg := d.cfg
+	d.mu.Unlock()
+	// Provider configs are loaded and resolved before d.mu is taken, so slow
+	// DNS never blocks Status or Metrics. The serve loop delivers SIGHUP only
+	// after Ready, so no reload or reconcile races a half-started daemon.
+	var ups []*Upstream
+	for _, u := range cfg.Upstreams {
+		up, err := LoadUpstream(u, cfg.Health)
+		if err != nil {
+			return err
+		}
+		rctx, cancel := context.WithTimeout(ctx, probeTimeout(cfg.Health))
+		err = up.Resolve(rctx)
+		cancel()
+		if err != nil {
+			return err
+		}
+		ups = append(ups, up)
+	}
+
+	d.mu.Lock()
 	defer d.mu.Unlock()
 	listen, err := netip.ParseAddrPort(d.cfg.Listen)
 	if err != nil {
@@ -158,14 +179,7 @@ func (d *Daemon) start(ctx context.Context) error {
 	if err := d.down.Configure(downCfg.UAPI()); err != nil {
 		return err
 	}
-	for _, u := range d.cfg.Upstreams {
-		up, err := LoadUpstream(u, d.cfg.Health)
-		if err != nil {
-			return err
-		}
-		if err := up.Resolve(ctx); err != nil {
-			return err
-		}
+	for _, up := range ups {
 		if err := d.openDevice(up); err != nil {
 			return err
 		}
@@ -235,26 +249,59 @@ func (d *Daemon) stop() {
 // whole reload.
 func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	if err := restartRequired(d.cfg, cfg); err != nil {
+	err := restartRequired(d.cfg, cfg)
+	if err != nil {
 		d.reloads[1]++
+	}
+	running := map[string]*Upstream{}
+	for _, u := range d.ups {
+		running[u.Name] = u
+	}
+	d.mu.Unlock()
+	if err != nil {
 		return err
 	}
+
+	// Provider configs are read, and changed ones resolved, without d.mu, so
+	// slow DNS never blocks Status or Reconcile. A loaded upstream is private
+	// until it is applied, and Source never changes after load.
+	type loaded struct {
+		up    *Upstream
+		basis *Upstream // what ran under this name when it was loaded
+		err   error
+	}
+	loads := make([]loaded, len(cfg.Upstreams))
+	for i, u := range cfg.Upstreams {
+		// Health settings are passed in because d.cfg switches to the
+		// incoming configuration only when this reload applies.
+		up, err := LoadUpstream(u, cfg.Health)
+		basis := running[u.Name]
+		if err == nil && (basis == nil || up.Source != basis.Source) {
+			rctx, cancel := context.WithTimeout(ctx, probeTimeout(cfg.Health))
+			err = up.Resolve(rctx)
+			cancel()
+		}
+		loads[i] = loaded{up, basis, err}
+	}
+
+	// Restart-only settings never change live, so the check above still holds.
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	current := map[string]*Upstream{}
 	for _, u := range d.ups {
 		current[u.Name] = u
 	}
 	var next []*Upstream
 	var errs []error
-	for _, u := range cfg.Upstreams {
+	for i, u := range cfg.Upstreams {
 		old, exists := current[u.Name]
 		delete(current, u.Name)
-		// Health settings are passed in because d.cfg switches to the
-		// incoming configuration only after this loop.
-		up, err := LoadUpstream(u, cfg.Health)
+		up, err := loads[i].up, loads[i].err
 		unchanged := err == nil && exists && up.Source == old.Source
-		if err == nil && !unchanged {
-			err = up.Resolve(ctx)
+		if err == nil && !unchanged && loads[i].basis != old {
+			// A concurrent reload added, replaced or removed this upstream
+			// after it was loaded; whatever runs now is kept.
+			err = fmt.Errorf("upstream %s: changed by a concurrent reload, not applied", u.Name)
 		}
 		if exists && (unchanged || err != nil) {
 			// A broken or unreadable replacement never takes the running
@@ -350,17 +397,21 @@ func restartRequired(old, cfg *config.Config) error {
 	return nil
 }
 
+// probeTimeout bounds each probe and each endpoint lookup.
+func probeTimeout(h config.Health) time.Duration {
+	return max(h.Interval/2, time.Second)
+}
+
 func (d *Daemon) probeAll(ctx context.Context) {
 	var wg sync.WaitGroup
 	d.mu.Lock()
 	target, _ := netip.ParseAddrPort(d.cfg.Health.Probe)
-	timeout := max(d.cfg.Health.Interval/2, time.Second)
+	timeout := probeTimeout(d.cfg.Health)
 	for _, u := range d.ups {
-		iface, source := u.InterfaceName(), u.Addr.Addr()
+		iface, source, endpoint := u.InterfaceName(), u.Addr.Addr(), u.Endpoint
 		wg.Go(func() {
 			latency, err := d.probe(ctx, iface, source, target, timeout)
 			d.mu.Lock()
-			defer d.mu.Unlock()
 			d.countProbe(u.Name, err == nil)
 			before := u.Tracker.State()
 			changed := u.Tracker.Observe(err == nil, latency)
@@ -370,19 +421,38 @@ func (d *Daemon) probeAll(ctx context.Context) {
 			if _, stale := d.aliveFailed[u.Name]; changed || stale {
 				_ = d.applyAlive(u) // failure is logged and retried next round
 			}
-			if err == nil {
-				return
-			}
-			// A failing upstream may simply have moved; providers change IPs.
-			if changed, rerr := u.RefreshEndpoint(ctx); rerr != nil {
-				d.log.Warn("re-resolve endpoint", "upstream", u.Name, "err", rerr)
-			} else if changed {
-				d.log.Info("upstream endpoint changed", "upstream", u.Name, "endpoint", u.Conf.Peers[0].Endpoint)
+			d.mu.Unlock()
+			if err != nil {
+				// A failing upstream may simply have moved; providers change IPs.
+				d.refreshEndpoint(ctx, u, endpoint, timeout)
 			}
 		})
 	}
 	d.mu.Unlock()
 	wg.Wait()
+}
+
+// refreshEndpoint re-resolves an upstream's endpoint without holding d.mu, so
+// slow DNS never blocks Status or Reconcile, and applies the answer only if a
+// reload has not replaced or removed u meanwhile.
+func (d *Daemon) refreshEndpoint(ctx context.Context, u *Upstream, endpoint string, timeout time.Duration) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	resolved, err := resolveEndpoint(ctx, endpoint)
+	cancel()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !slices.Contains(d.ups, u) {
+		return
+	}
+	changed := false
+	if err == nil {
+		changed, err = u.SetEndpoint(resolved)
+	}
+	if err != nil {
+		d.log.Warn("re-resolve endpoint", "upstream", u.Name, "err", err)
+	} else if changed {
+		d.log.Info("upstream endpoint changed", "upstream", u.Name, "endpoint", resolved)
+	}
 }
 
 // applyAlive pushes the observed health to the dataplane, which drops flow pins

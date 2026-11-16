@@ -6,6 +6,11 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Fixed
+- Resolve provider endpoints outside the daemon lock at startup, on reload and when a failing
+  upstream re-resolves, so slow or dead DNS no longer stalls status, metrics, reconciliation or
+  reloads. Every endpoint lookup times out after the probe timeout (half the health interval, at
+  least 1 s). SIGHUP is handled only once the daemon is ready, so a reload or `user add` during
+  startup waits instead of racing it (#44).
 - Keep a running upstream when its changed provider config fails to read, parse, validate or
   resolve on reload; only TUN creation happens after the old device is closed. `user add` and
   `user show` no longer resolve provider endpoints, so they work while DNS is down; `config check`

@@ -157,11 +157,19 @@ func TestRefreshEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if changed, err := u.RefreshEndpoint(context.Background()); err != nil || changed {
+	// As the daemon does: resolve without the lock, then apply.
+	refresh := func() (bool, error) {
+		resolved, err := resolveEndpoint(context.Background(), u.Endpoint)
+		if err != nil {
+			return false, err
+		}
+		return u.SetEndpoint(resolved)
+	}
+	if changed, err := refresh(); err != nil || changed {
 		t.Errorf("unchanged DNS: changed=%v err=%v", changed, err)
 	}
 	dns.set("vpn.provider.test", "192.0.2.2")
-	if changed, err := u.RefreshEndpoint(context.Background()); err != nil || !changed {
+	if changed, err := refresh(); err != nil || !changed {
 		t.Fatalf("changed DNS: changed=%v err=%v", changed, err)
 	}
 	peers, _ := u.Device.Peers()
@@ -175,7 +183,7 @@ func TestRefreshEndpoint(t *testing.T) {
 	// A literal IP endpoint is never re-resolved.
 	dns.set("vpn.provider.test", "192.0.2.3")
 	u.Endpoint = "192.0.2.2:51820"
-	if changed, err := u.RefreshEndpoint(context.Background()); err != nil || changed {
+	if changed, err := refresh(); err != nil || changed {
 		t.Errorf("literal endpoint: changed=%v err=%v", changed, err)
 	}
 }
@@ -282,6 +290,9 @@ health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 2, up_after: 1}
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
+	// Provider endpoints are localhost; keep lookups off the system resolver,
+	// which can exceed the lookup timeout on a loaded CI runner.
+	useResolver(t, &fakeResolver{hosts: map[string]string{"localhost": "127.0.0.1"}})
 	dir := t.TempDir()
 	providerConf(t, dir, "nl", "10.8.0.2/32", 1400)
 	providerConf(t, dir, "de", "10.9.0.2/32", 0)
@@ -485,9 +496,9 @@ func TestDaemon(t *testing.T) {
 }
 
 func TestProbeFailureReresolvesEndpoint(t *testing.T) {
+	h := newHarness(t)
 	dns := &fakeResolver{hosts: map[string]string{"localhost": "127.0.0.1"}}
 	useResolver(t, dns)
-	h := newHarness(t)
 	// Providers may assign identical tunnel addresses. Only DE will fail.
 	providerConf(t, h.dir, "de", "10.8.0.2/32", 0)
 	h.run(t)

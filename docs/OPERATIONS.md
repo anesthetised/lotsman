@@ -135,7 +135,8 @@ the collision and preserves ambiguous interfaces and routes for inspection.
 `systemctl reload lotsman` (SIGHUP) applies the file live, without dropping tunnels: upstreams are
 added, removed or replaced (a changed provider config counts as a replacement), profiles and
 `health` are swapped in, and every client is re-evaluated. A replacement is read, validated and its
-endpoint resolved before the running upstream is touched; if any of that fails, including an
+endpoint resolved before the running upstream is touched (the lookup is bounded by the probe
+timeout and does not block status, metrics or client changes); if any of that fails, including an
 unreadable provider file, the old upstream keeps running and routing its clients, and the error is
 logged and counted in `lotsman_reloads_total{result="error"}`. Clients whose upstream was removed are
 blocked for a moment and rerouted on the same pass. `listen`, `subnet` and `state_dir` cannot change
@@ -263,8 +264,9 @@ keys so configs can be re-shown; treat both files like the server key (mode 0600
 ## Troubleshooting
 
 **The provider changed its server IP.** Nothing to do if the provider config names a hostname:
-when an upstream's probes fail, Lotsman re-resolves the name and, if the address changed, points
-the running tunnel at it (`upstream endpoint changed` in the log). A config with a literal IP needs
+when an upstream's probes fail, Lotsman re-resolves the name (bounded by the probe timeout, half
+the health interval and at least 1 s) and, if the address changed, points the running tunnel at
+it (`upstream endpoint changed` in the log). A config with a literal IP needs
 editing and `systemctl reload lotsman`.
 
 **Clients connect but nothing loads.** Check `upstream status`; if everything is `down`, the
