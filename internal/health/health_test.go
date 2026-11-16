@@ -121,7 +121,7 @@ func TestProbe(t *testing.T) {
 	target := netip.MustParseAddrPort(ln.Addr().String())
 	source := netip.MustParseAddr("127.0.0.1")
 
-	latency, err := Probe(context.Background(), source, target, time.Second)
+	latency, err := probe(context.Background(), "", source, target, time.Second)
 	if err != nil {
 		t.Fatalf("probe failed: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestProbe(t *testing.T) {
 	}
 
 	ln.Close()
-	if _, err := Probe(context.Background(), source, target, time.Second); err == nil {
+	if _, err := probe(context.Background(), "", source, target, time.Second); err == nil {
 		t.Error("expected failure against closed listener")
 	}
 }

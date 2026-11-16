@@ -8,13 +8,6 @@ import (
 	"time"
 )
 
-// Probe opens a TCP connection to target with the given source address and
-// returns how long the handshake took. Source binding alone does not isolate
-// upstreams that share an address; use ProbeOnInterface for tunnel health.
-func Probe(ctx context.Context, source netip.Addr, target netip.AddrPort, timeout time.Duration) (time.Duration, error) {
-	return probe(ctx, "", source, target, timeout)
-}
-
 // ProbeOnInterface measures a TCP handshake through the named interface with
 // the given source address. It fails if interface binding is unavailable;
 // it never falls back to an unbound connection.

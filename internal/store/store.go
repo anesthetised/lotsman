@@ -235,7 +235,9 @@ func (s *Store) ListUsers() ([]User, error) {
 		if err := rows.Scan(&u.ID, &u.Name, &created); err != nil {
 			return nil, err
 		}
-		u.CreatedAt, _ = time.Parse(time.RFC3339, created)
+		if u.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
+			return nil, fmt.Errorf("user %d: %w", u.ID, err)
+		}
 		users = append(users, u)
 	}
 	return users, rows.Err()
@@ -343,7 +345,9 @@ func (s *Store) queryPeers(where string, args ...any) ([]Peer, error) {
 		if p.IP, err = netip.ParseAddr(ip); err != nil {
 			return nil, fmt.Errorf("peer %d: %w", p.ID, err)
 		}
-		p.CreatedAt, _ = time.Parse(time.RFC3339, created)
+		if p.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
+			return nil, fmt.Errorf("peer %d: %w", p.ID, err)
+		}
 		peers = append(peers, p)
 	}
 	return peers, rows.Err()

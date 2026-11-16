@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -9,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/anesthetised/lotsman/internal/awgconf"
 )
 
 const identityHelperEnv = "LOTSMAN_IDENTITY_HELPER_DIR"
@@ -137,4 +140,63 @@ func TestIdentityConcurrentProcesses(t *testing.T) {
 		}
 	}
 	checkPublished(t, dir)
+}
+
+// legacyIdentity is a file as written before the explicit lowercase tags.
+const legacyIdentity = `{
+  "private_key": "%s",
+  "S1": 21, "S2": 22, "S3": 23, "S4": 9,
+  "H1": "65536-69631", "H2": "1114112-1118207",
+  "H3": "2162688-2166783", "H4": "3211264"
+}`
+
+func TestIdentityLoadsLegacyCapitalizedKeys(t *testing.T) {
+	key, err := awgconf.GeneratePrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "identity.json"), fmt.Appendf(nil, legacyIdentity, key), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	id, err := LoadOrCreateIdentity(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := awgconf.Params{
+		S1: 21, S2: 22, S3: 23, S4: 9,
+		H1: awgconf.Range{Lo: 65536, Hi: 69631}, H2: awgconf.Range{Lo: 1114112, Hi: 1118207},
+		H3: awgconf.Range{Lo: 2162688, Hi: 2166783}, H4: awgconf.Range{Lo: 3211264, Hi: 3211264},
+	}
+	if id.PrivateKey != key || id.Params != want {
+		t.Errorf("legacy identity = %+v, want key %s params %+v", id.Params, key, want)
+	}
+}
+
+func TestIdentityRoundTripUsesLowercaseKeys(t *testing.T) {
+	want, err := newIdentity()
+	if err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "identity.json")
+	if err := saveIdentity(path, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := loadIdentity(path)
+	if err != nil || got != want {
+		t.Fatalf("round trip: %+v, %v; want %+v", got, err, want)
+	}
+	data, _ := os.ReadFile(path)
+	var raw map[string]any
+	if err := json.Unmarshal(data, &raw); err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"private_key", "s1", "s2", "s3", "s4", "h1", "h2", "h3", "h4"} {
+		if _, ok := raw[k]; !ok {
+			t.Errorf("saved file lacks key %q: %s", k, data)
+		}
+	}
+	if len(raw) != 9 {
+		t.Errorf("saved file has %d keys, want 9: %s", len(raw), data)
+	}
 }
