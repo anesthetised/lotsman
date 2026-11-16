@@ -1,0 +1,465 @@
+# Audit remediation plan
+
+## Status and source of truth
+
+Two audits feed this plan:
+
+- First audit (2026-10-15, commit `e6efaca96e1bb4ca073c9c62df67f8ba9766ba0f`):
+  #6–#22, #29, #32. All closed and merged; sections titled "First audit" are
+  its history and evidence.
+- Second audit (2026-11-07, baseline `2160572c65350db99ced77cd6a2dc905b8d9f8e8`):
+  #43–#57, plus the test flake #42. Active; see the next section.
+- Features scheduled with it (2026-11-16): AmneziaWG 3.1 upstreams (#59), a configurable AWG
+  generation on the listener (#60), and Outline (Shadowsocks) upstreams (#61).
+
+Start new implementation only within the user's authorized scope. Once a scope is
+approved, continue within it without repeatedly requesting approval.
+
+Tasks and their acceptance criteria live in
+[GitHub Issues](https://github.com/anesthetised/lotsman/issues). This file is the
+execution order and coordination guide, not a second completion checklist.
+Read the current issue before starting: its state or the implementation may have
+changed since this snapshot.
+
+Lotsman is not in production yet. Behavior changes are documented, but no
+migration or compatibility handling is needed for already issued client configs
+or existing deployments.
+
+Terminology: an *agent tier* (`agent:light`, `agent:strong`; see
+[AGENTS.md](../AGENTS.md)) selects who implements an issue. A *preference tier* is
+a priority level of a profile's `prefer` list in `lotsman.yaml`: the
+upstreams whose first matching `prefer` entry (a matcher) is that one.
+
+## Second audit (2026-11-07)
+
+### Approved decisions (2026-11-16)
+
+| Issue | Decision |
+|---|---|
+| #43 | `mtu.Overhead = 80` (IPv6 outer header) for every client. |
+| #46 | Add an `input` base chain to `table inet lotsman`: from `iifname lm0` accept ICMP to the gateway and `metrics.listen` when set, drop the rest. |
+| #48 | The user verifies `AllowedIPs = 0.0.0.0/0, ::/0` without an IPv6 `Address` on the official Amnezia client. The parent prepares the test config and checklist; the result decides between shipping `::/0` and a README statement. The client's own self-hosted template already renders exactly this, so rejection is unlikely. |
+| #50 | Option 3: a profile is an error only when none of its preference tiers matches an upstream; a partially empty `prefer` list is a warning in `config check` and the reload log. |
+| PR #27 | Upstream tags stay parked until wave 2, then rebase after #45 and #50, because both change the same loading and validation code. |
+| #59 | Move to the tag `amneziawg-go/v3 v3.1.20260828`; accept and validate all nine AWG 3.x keys on upstreams; keep rejecting AWG 1.5-only keys with a clearer error. |
+| #60 | One listener with a configurable AWG generation, default 3; several listeners are deferred. |
+| #61 | Outline upstreams on gVisor netstack + Outline SDK, in process. Keys: `ss://`, `ssconf://` and WebSocket transports, in separate slices after a spike. UDP is required and health-checked. New direct dependencies (Outline SDK, gVisor) are approved; versions are reviewed in the spike. |
+
+### Wave 2 decisions (2026-11-16)
+
+| Issue | Decision |
+|---|---|
+| #54 | Runs first in wave 2. Pin staticcheck and govulncheck with the `tool` directive in `go.mod` (`go tool …`); raise the `toolchain` line so govulncheck passes on the standard library. |
+| #50 | A matcher whose upstreams are all taken by earlier matchers (an effectively empty preference tier) is also a warning, naming the shadowing matcher. |
+| #56 | A `-log-level` flag with a `LOTSMAN_LOG_LEVEL` environment fallback, following `-config`/`LOTSMAN_CONFIG`. |
+| #60 | A top-level `awg: 2 | 3` key next to `listen`, default 3, restart-only. |
+
+### Wave 1: P1 (done 2026-11-16, PRs #62–#64)
+
+Sequential. Each issue gets its own `fix/<issue>-<slug>` branch and one
+reviewed commit. Stop at the checkpoint below.
+
+| Order | Issue | Agent tier | Exclusive files |
+|---|---|---|---|
+| 1 | #43 Client MTU for IPv6 outer headers | light | `internal/mtu/*`; the two downstream-bound assertions in `internal/daemon/daemon_test.go` (`ClientMTU`, `dp.MTU`) |
+| 2 | #45 Reload validates before dropping; split `LoadUpstream` | strong | `internal/daemon/upstream.go`, `internal/daemon/daemon.go`, `internal/daemon/*_test.go`, `cmd/lotsman/main.go`, `cmd/lotsman/status.go`, `cmd/lotsman/main_test.go` |
+| 3 | #44 No DNS under `d.mu`; bounded lookup | strong | same as #45 |
+
+#43 goes first because its new overhead changes assertions in a test file that #45
+and #44 own; it is small. #45 precedes #44: once the pure loading step is split
+from endpoint resolution, the `Reload` half of #44 reduces to resolving before
+taking the lock, and the remaining work is `probeAll`.
+
+Checkpoint: the parent presents diffs, regressions (each failing before its fix),
+and the verification gate results. Wave 2 starts only after user approval.
+
+### Wave 2 (authorized 2026-11-16)
+
+The user authorized up to five concurrent subagents and merging each PR without
+further approval once CI is green. The parent integrates one PR at a time: rebase
+on `main`, push, wait for CI, merge. Lanes run concurrently; issues within a lane
+run in the order given.
+
+First batch: #54, #49, #50, #46, #52. Next, as files free up: #59 after #54 (both
+change `go.mod`); #56 after #49; #53 after #46; #47 after #52 and #53; #51 after
+#50 and #52; #60 after #59; #57 and the PR #27 rebase last.
+
+| Lane | Queue | Agent tier | Notes |
+|---|---|---|---|
+| AWG | #59, then #60 | strong | First in wave 2: provider configs with AWG 3.x keys do not load today. #59 owns `go.mod`, `internal/awgconf/*`, `internal/tunnel/*` imports and `internal/daemon/upstream.go`; the daemon lane waits for it to release `upstream.go`. #60 owns `internal/daemon/identity.go`, `internal/daemon/client.go` and the listener setting in `internal/config/*`, coordinated with the config lane. |
+| Daemon | #52, #47, #51 | light, strong, light | #52 reuses the #45 split. #47 adds a dataplane method and its Linux part takes the Linux lane's files for its duration. |
+| Linux | #46, #53 | strong, light | Sequential with the Linux part of #47 (`internal/dataplane/linux/linux.go`). |
+| Config | #50, then PR #27 rebase and review | light | `internal/config/*`, `cmd/lotsman/status.go` after wave 1 releases it. Open point for #50: a matcher can match upstreams that an earlier matcher already took, leaving its preference tier empty; current validation misses this. Confirm with the user whether that is also a warning. |
+| CLI | #49, #56 | light | `cmd/lotsman/*` after wave 1 releases it. |
+| Tooling | #54, #57 | light | #54 owns `go.mod`/`go.sum`, `.github/workflows/ci.yml`, `justfile`, README's development section and the files its findings touch; `writeStatus` moves to a Linux-only file instead of editing `status.go`. |
+| Manual | #48 | user | Client test by the user; code change only after the result. |
+
+### Wave 3: Outline upstreams (#61)
+
+After wave 2. Slices, each reviewed and committed separately: (1) a spike on the gVisor
+glue in a disposable container, with a go/no-go checkpoint; (2) the upstream kind, `ss://`,
+health with the UDP check, metrics and CLI output; (3) `ssconf://`; (4) WebSocket transports.
+
+### Manual and deferred
+
+- #55 throughput: a benchmark, so it needs an agreed workload and a real client.
+  The user has a disposable test host for this; any remote command needs an
+  explicit request in that message.
+- #42 `TestDaemonListenAddress` flake: first reproduce in a local
+  `--platform linux/amd64` container and look for state leaking between subtests.
+  Not scheduled; light tier when it is.
+
+## First audit: approved follow-up slice (2026-10-16)
+
+The user approved nftables peer authorization for #14 and disabling the downstream
+interface before teardown for #8. Implement these sequentially from current main,
+with packet regressions in disposable containers. No push, PR, or benchmark is
+part of this slice. The earlier authorization paragraph describes the original
+plan preparation, not this follow-up.
+
+- #14: the Linux firewall starts with no authorized peers. `Route` grants access
+  after installing rules; `Unroute` revokes access before deleting rules. Failed
+  rule cleanup remains retryable while the peer stays blocked after revocation.
+  Local verification: `just test`, `just lint`, explicit gofmt check,
+  `just test-integration`, and amd64/arm64 builds passed. The packet regression
+  failed on the original implementation and when the outbound authorization
+  check was removed in a disposable review copy. It covers never-assigned,
+  revoked, reauthorized, and repeatedly failed rule-cleanup cases. Kernel rule
+  deletion failures were injected at the call boundary, not produced by Linux.
+- #8: Linux `Teardown` must disable downstream ingress before removing protection;
+  failure to disable it preserves rules and returns an error. The daemon closes
+  downstream and retries cleanup once before closing upstreams, preserving route
+  ownership evidence. Packet tests cover the boundary after teardown but before
+  downstream close, including partial setup, and inspect protection before the
+  link-down call. Disable failures are injected at the call boundary, not produced
+  by Linux. Lifecycle tests cover zero, one, and repeated teardown failures.
+  Local verification: `just test`, `just lint`, explicit gofmt check,
+  `just test-integration`, and amd64/arm64 builds passed with both fixes applied.
+  The shutdown packet regression failed before the fix for complete and partial
+  startup. In disposable review copies, skipping link-down broke the packet and
+  preservation tests; restoring the old daemon stop broke the cleanup retry tests.
+  The existing routing-ownership and live-flow-pinning regressions also passed.
+
+## First audit: approved remaining work (2026-10-16)
+
+The user authorized parallel follow-up work on #10, #13, #19, #20, #21, and #22.
+Use GPT-6-Luna at medium effort for the focused #22 test repair and GPT-6.1-Sol
+at medium effort for the other implementation/research assignments. The parent
+reviews and integrates each issue-sized slice. Keep #10 and #13 network contract
+changes sequential; independent research can proceed without edit ownership.
+Assignments stop at their focused acceptance/checkpoint. No push, PR, benchmark,
+or dependency upgrade is included.
+
+Approved behavior choices:
+
+- #10: support identical provider tunnel IPs by binding health probes to their
+  intended interface and selecting routes by source IP and output interface.
+  Host processes bound only to a provider source IP no longer implicitly select
+  that provider's route; they must also bind the interface.
+- #13: honor the exact downstream listen address and address family. In particular,
+  `0.0.0.0` is IPv4-only and `[::]` is IPv6-only. The default no longer opens an
+  additional IPv6 socket. Keep upstream binds unchanged. The simpler downstream
+  bind loses default-bind UDP batching/offload optimizations; throughput impact
+  is unmeasured and no benchmark is included.
+- #20: reject subnet prefixes with host bits set, with a clear validation error;
+  do not normalize them silently.
+
+### Integration status and local verification
+
+As of 2026-10-16 every audit issue (#6–#22, #29, #32) is closed and merged to
+`main` through PRs #23–#40. The only open PR is #27 (upstream tags), labelled
+`parked`: it conflicts with `internal/config/*` after #20/#21/#22 and needs a
+rebase before review. The notes below are the local evidence recorded before
+publication; GitHub remains the completion tracker.
+
+- #22: `go test -race ./internal/config` passed. A temporary Go overlay replacing
+  both name regexes with `.*` passed against the original tests and failed the
+  repaired upstream/profile-name cases. Real production source was not weakened.
+- #20/#21: focused config/store/daemon/CLI race tests and vet passed. Regressions
+  failed before their guards, and now prove invalid config checks and client
+  commands produce the intended errors without creating users or changing peers.
+  Canonical allocation/gateway boundaries and existing peer output are preserved.
+  An overlay removing host-bit rejection failed the corresponding regression.
+- #19: parse/load-only malformed and valid-boundary tests passed, including
+  fixed/exclusive junk ranges, runtime batch capacity, inert I strings, peer
+  keys, integer extremes, and endpoint-family MTU/S4 bounds. Invalid fixtures
+  never reached device startup or allocation. Boundary and inert-I overlay
+  mutations failed as expected. I allocation lengths and S1–S3 wire lengths were
+  deferred to #32 (done, see below).
+- #10: `go test -tags integration ./cmd/lotsman -run TestEndToEnd -count=1 -v
+  -timeout 180s` passed in a disposable Linux container for distinct and identical
+  provider IPs. Each outer UDP endpoint was blocked/restored independently while
+  checking health, real client exit, reload, and live-flow pinning. An isolated
+  overlay removing both interface binding and the output-interface route selector
+  failed waiting for DE to become independently down. Focused binding, routing,
+  legacy/detached ownership, foreign-state, and uninstall tests also passed.
+  Independent review found an uninstall ordering regression: a disposable packet
+  test captured one forwarded request before the correction and zero afterward.
+  Injected inspect/disable failures preserve firewall and routing; these are call
+  boundary injections, not real kernel failures.
+- #13: container `go test -race -tags integration ./internal/tunnel -count=1
+  -timeout=90s` and focused `TestDaemonListenAddress` passed. Tests inspect actual
+  sockets and datagrams for assigned/loopback/wildcard IPv4 and IPv6, scoped IPv6,
+  mapped IPv4, lifecycle/reopen, send batches, and bind errors. Authenticated daemon
+  echo succeeds only on permitted addresses/families. Default-bind baselines and
+  constructor overlays failed the new exposure assertions. Existing AWG transport
+  and stock WireGuard interoperability passed. A diagnostic wildcard reply-source
+  check failed against both the pinned default and custom bind; no introduced
+  regression was established, and that diagnostic was not retained as a test.
+  Throughput remains unmeasured.
+- #29 (PR #39): `run()` rejects trailing arguments once, before dispatch, for
+  `version`, `serve`, `config check`, `user list`, and `upstream status`.
+  Documented argument-free invocations are unchanged. The regression covers all
+  five commands and fails without the check. Side effect: `lotsman serve -config X`
+  is now rejected; the global `-config` flag must precede the command. The
+  shipped unit file and docs never used the old form.
+- #32 (PR #40): config load rejects I-chain allocations and S1–S3-padded handshake
+  sizes that the pinned runtime would mishandle. The check mirrors the runtime's
+  chain parser (checked against its source) and bounds S1+148, S2+92, and S3+64
+  by the UDP maximum (65507 for IPv4, 65527 for IPv6). Boundary-shift and
+  missing-negative-check mutations fail the tests. Nothing dangerous was
+  allocated or sent.
+
+On the integrated code, every command in the verification gate below passed:
+`just test`, `just lint`, `test -z "$(gofmt -l .)"`, `just test-integration`,
+`just build amd64`, and `just build arm64`. New networking regressions ran only in
+disposable containers without host networking. No dependency files changed.
+
+Known test flake: locally, on Docker 29.8.2 on arm64, `TestDaemonListenAddress`
+fails with `allowed echo: i/o timeout` on repeated runs in one process
+(`-count=2`) and on the subtest that runs second; each subtest passes alone. CI
+(amd64) is green on `main` and on #39/#40. The cause is unknown and no fix is
+claimed; a hypothesis that `Ready()` races peer setup was checked and did not
+hold, because `Ready()` closes after the first reconcile.
+
+## Working rules
+
+- Use the existing package boundaries and dependencies first. Read the relevant
+  code and callers before choosing a fix. Apply `ponytail` at full intensity,
+  `caveman` for concise handoffs, and the relevant implementation, test, git, and
+  review skills available in the session.
+- The parent orchestrates and subagents implement. The parent assigns work,
+  reviews actual diffs, integrates and commits; it does not implement issues
+  itself beyond small review fixes. At most three subagents are active at once
+  unless the current wave allows more.
+  Pick the model from the issue's agent tier in [AGENTS.md](../AGENTS.md) and
+  announce each assignment's scope, model, and effort. Subagents never delegate.
+- Assign one issue-sized slice at a time. Use separate `fix/<issue>-<slug>`
+  branches/worktrees when practical. Shared files still require exclusive
+  ownership even across worktrees; do not create competing implementations.
+- Only the parent commits, using Conventional Commits and an accurate
+  `Co-Authored-By` trailer. Subagents may edit their assigned files and run agreed
+  checks. No push without an explicit request; no PR without user approval,
+  except where the current wave records a standing authorization.
+- Consult the user before architectural decisions, dependency changes, or other
+  consequential behavior choices. Present alternatives, trade-offs, and a
+  recommendation. An issue's suggested approach is not an approved decision.
+- Preserve unrelated/uncommitted work. The parent owns `CHANGELOG.md`, shared
+  operations/architecture documentation, this plan, and final integration.
+  Subagents propose documentation entries in their handoff instead of colliding
+  on shared documents.
+- Run networking tests only in disposable containers/network namespaces, never
+  against the developer host's routes/firewall. Do not use host networking.
+  Benchmarks require a separately agreed workload and resource budget.
+- Stop when the assigned acceptance criteria and checks pass. Do not broaden a
+  fix into speculative refactoring, dependency upgrades, or feature work.
+
+## First audit: baseline and evidence limits
+
+At the audited commit, `go vet ./...`, Linux integration-tag vet,
+`go test -race ./...`, formatting, `go mod verify`, and the Docker Linux
+integration/end-to-end suite passed. These passes do not invalidate the findings.
+The latest CI run inspected during the audit covered an older commit, `0ca3e06`.
+Check CI for the actual implementation commit before claiming it is green.
+
+Temporary audit reproductions are not committed tests and may no longer exist.
+Recreate focused regressions in the repository. Some audit tests asserted that a
+bug exists; convert them into assertions of the required corrected behavior.
+
+- #8: the shutdown window is established by code order; no packet leak was captured.
+- #10: kernel lookup showed both probes selecting one upstream; independent
+  provider failure still needs an end-to-end regression.
+- #14: kernel lookup plus firewall inspection demonstrated a bypass path; add an
+  actual packet test before claiming the forwarding behavior is fixed.
+- #7 and #12: failures were injected into the fake dataplane; no real kernel
+  failure was injected. Test eventual convergence, not only call counts.
+- #19: malformed settings were accepted and dangerous allocation arithmetic was
+  inspected. Do not reproduce an out-of-memory allocation; test early rejection.
+- #22: an isolated overlay replacing both name regexes with `.*` left tests green.
+  Repair the fixtures and repeat that bounded mutation before calling coverage fixed.
+
+## First audit: task index
+
+P1 means urgent correctness/security remediation; P2 means a concrete defect to
+address after its prerequisites. Scope estimates count production/test file groups,
+not elapsed hours: S = about 1-2 files, M = about 3-5. Split larger changes.
+
+| Issue | Priority | Owner lane | Scope | Required result / verification focus |
+|---|---|---|---|---|
+| [#7](https://github.com/anesthetised/lotsman/issues/7) Retry failed route cleanup | P1 | A | M | Retain retry state until removal succeeds; one-shot and repeated cleanup failures converge. |
+| [#6](https://github.com/anesthetised/lotsman/issues/6) Removed profiles | P1 | A | S | Previously routed peers lose routes/pins when their profile disappears; upstream stays configured in the regression. |
+| [#8](https://github.com/anesthetised/lotsman/issues/8) Shutdown fail-closed | P1 | A, exclusive handoff | M | Downstream traffic cannot escape while rules are torn down; deterministic Linux packet test. |
+| [#9](https://github.com/anesthetised/lotsman/issues/9) Routing ownership | P1 | B | M | Foreign rules/routes survive setup, reload, failed startup, teardown, and uninstall. |
+| [#10](https://github.com/anesthetised/lotsman/issues/10) Duplicate upstream IPs | P1 | B, exclusive handoff | M+ | Approved overlap policy; correct independent probe routing or explicit early rejection. Split if cross-package work exceeds five files. |
+| [#11](https://github.com/anesthetised/lotsman/issues/11) Secret file modes | P1 | C | M | Database, relevant sidecars, and backups stay private, including migration in an existing searchable directory. |
+| [#12](https://github.com/anesthetised/lotsman/issues/12) Health application retry | P2 | A | M | Failed `SetAlive(false)` is retried and stale pins are eventually removed. |
+| [#13](https://github.com/anesthetised/lotsman/issues/13) Listen address | P1 | B, exclusive handoff | M | Actual sockets honor supported addresses, or unsupported settings are explicitly rejected after approval. |
+| [#14](https://github.com/anesthetised/lotsman/issues/14) Unrouted-peer bypass | P2 | B | M | Blocked peers cannot use connected/main-table upstream routes; verify packets with an upstream /24. |
+| [#15](https://github.com/anesthetised/lotsman/issues/15) CLI argument rejection | P2 | C | S | Malformed `user rm alice phone -profile nl` fails before any deletion; documented syntax still works. |
+| [#16](https://github.com/anesthetised/lotsman/issues/16) Atomic identity creation | P2 | C | S | Concurrent first creators/readers see one complete identity without overwriting existing keys. |
+| [#17](https://github.com/anesthetised/lotsman/issues/17) IP reuse | P2 | A | S | Replacing a peer between reconciles preserves the new peer's route and revokes the old key in the same successful pass. |
+| [#18](https://github.com/anesthetised/lotsman/issues/18) Reload thresholds | P2 | A | S | Added/replaced upstreams use the incoming health settings, alongside retained upstreams. |
+| [#19](https://github.com/anesthetised/lotsman/issues/19) Upstream validation | P2 | C, handoff | M | Reject unsafe junk parameters, missing required peer keys, and invalid effective MTU before device startup. |
+| [#20](https://github.com/anesthetised/lotsman/issues/20) Subnet host bits | P2 | C | M | Approved rejection/normalization behavior; gateway and allocations remain valid. |
+| [#21](https://github.com/anesthetised/lotsman/issues/21) Advertised endpoint | P2 | C | M | Reject empty host and invalid numeric ports while preserving valid address forms. |
+| [#22](https://github.com/anesthetised/lotsman/issues/22) Validation tests | P2 | C | S | Tests reach the intended validator; weakening regex validation makes them fail. |
+
+## First audit: execution order and ownership
+
+These are proposed assignments for a future authorized run, not active agents.
+The parent may reduce concurrency to avoid conflicts or unnecessary cost.
+Prioritize P1 work as soon as its dependencies, decisions, and file ownership are
+ready; wave labels must not delay an otherwise unblocked security fix.
+
+### Wave 1: containment and retry foundations
+
+Run up to three lanes concurrently, one issue at a time within each lane:
+
+| Lane | Ordered queue | Exclusive files during the assignment |
+|---|---|---|
+| A: daemon reconciliation | #7, then #6, then #12 | `internal/daemon/daemon.go`, `daemon_test.go`, and `internal/dataplane/fake/*` when needed |
+| B: Linux routing | #9, then #14 | `internal/dataplane/linux/*`, `deploy/uninstall.sh`; changes to the dataplane interface require a coordinated handoff |
+| C: secrets and test foundations | #11, then #16, then #22 | `internal/store/*`, `internal/daemon/identity.go`, a dedicated `identity_test.go`, then `internal/config/config_test.go` |
+
+For #11/#16, use dedicated identity tests rather than editing lane A's
+`daemon_test.go`. Existing tests can be read and run without acquiring edit ownership.
+If #9 needs a user decision, pause its dependent edits and continue independent
+authorized work; do not let another agent choose the answer on the user's behalf.
+
+After the first 2-3 completed issues in a lane, the parent reviews the actual diffs,
+regressions, and evidence before assigning the next batch. At the wave checkpoint:
+
+- Verify cleanup retries do not falsely report a peer as blocked while leaving
+  untracked forwarding state; reconcile removal paths consistently.
+- Verify foreign-network preservation and blocked-peer behavior in Linux, using
+  the revised real dataplane rather than relying solely on its fake.
+- Verify key permissions at creation/migration and stable identity publication.
+- Integrate approved slices and run the common verification gate below. Record
+  exact commands/results and unresolved decisions in the issue handoffs.
+
+### Wave 2: lifecycle, CLI, and validation
+
+- Lane A: take #8 as soon as lane B releases Linux ownership; then #17 and #18.
+  For #8, acquire `daemon.go`, the necessary Linux dataplane files, and the
+  Linux end-to-end test file as one exclusive assignment. Coordinate the
+  teardown contract; do not independently redesign it in two branches.
+- Lane C: #15, then #20 and #21 after #22. Keep exclusive ownership of
+  `internal/config/*` and `cmd/lotsman/main_test.go` while these are active.
+  Acquire `store_test.go` explicitly for subnet allocation coverage.
+- Lane B may prepare the alternatives and focused test designs for #10 and #13
+  while awaiting the cross-package handoff. It must not edit lane A/C files.
+- Run #19 only after lane A releases `daemon_test.go` and `upstream.go` is
+  assigned explicitly; a dedicated upstream-validation test file can reduce
+  contention, but does not authorize overlapping production edits.
+
+At the checkpoint, verify malformed CLI input leaves stored users unchanged,
+invalid configs fail for the correct reason, reload uses incoming settings, and
+packet-level shutdown containment works. Keep the test-quality repair separate
+from production validation changes so the regression is reviewable.
+
+### Wave 3: approved cross-package network behavior
+
+Run #10 and #13 sequentially after the parent transfers all affected daemon,
+health, tunnel, config, dataplane, and test ownership. These tasks may alter
+contracts across packages; no concurrent edits to those contracts are allowed.
+Each task starts with its approved choice, a narrow regression, and an explicit
+compatibility statement. Re-run existing tunnel interoperability, failover,
+pinning, and Linux end-to-end coverage after integration.
+
+## First audit: decisions
+
+The #10, #13, #14, and #20 choices are approved by the follow-ups above. Their
+original alternatives below remain for context; consult current issues for the
+other tasks' decisions and completion.
+
+| Issue | Alternatives / trade-off | Recommended discussion starting point |
+|---|---|---|
+| #9 | Explicitly reserved/rejected occupied IDs are simpler; discovered or persisted allocation supports more host layouts but adds lifecycle state. | Prove ownership and refuse unsafe collisions first; agree on crash-leftover compatibility before implementation. |
+| #10 | Reject duplicate tunnel IPs with a clear error, or support them through independently selected probe routes. Supporting them is useful for provider configs but touches more contracts. | Inspect how often real provider configs overlap, then choose deliberately; do not silently rewrite provider IPs. |
+| #13 | Implement address-specific binding, or reject addresses the existing bind cannot honor. Rejection is smaller but does not deliver the documented address-specific behavior. | Prefer honoring the documented setting if existing library interfaces allow a bounded change; otherwise present explicit rejection as an interim option. |
+| #14 | Approved: nftables peer authorization independent of route selection. | Preserve live-flow pinning; revoke before route cleanup and test actual packets with an upstream /24. |
+| #20 | Reject host bits, or normalize with `Masked()`. Normalization is convenient but can alter the interpretation of existing configs. | Prefer explicit validation failure over silently changing a running deployment's address plan. |
+
+For #6, the existing issue specifies blocking affected peers. Do not replace that
+criterion with a different reload policy without consulting the user.
+
+## Verification gate
+
+Every fix needs a meaningful regression that fails before the fix and passes
+after it, plus the focused package tests. For file permissions and concurrency,
+assert externally observable results, not internal implementation details.
+
+The parent serializes suites using fixed UDP ports: two simultaneous host test
+processes can contend for `:51820`. Separate worktrees do not isolate ports.
+Use separate container network namespaces for independent networking runs.
+
+After integrating a coherent batch, run the repository gates:
+
+```sh
+just test
+just lint
+test -z "$(gofmt -l .)"
+just test-integration
+just build amd64
+just build arm64
+```
+
+`just lint` prints formatting deviations; the explicit `test -z` makes them a
+failure, matching CI. `just test-integration` uses a privileged disposable
+container; never replace it with execution against the developer host network.
+Run `go mod verify` if dependency files/cache integrity is relevant; it is not a
+vulnerability scan. No dependency upgrade or benchmark is part of this plan.
+
+Do not repeat broad checks after they pass unless new changes, failures, or
+unresolved concerns justify another run. Update `CHANGELOG.md` and relevant
+operations/architecture documentation for shipped behavior in the corresponding
+fix, then review the consolidated diff before integration. Preserve required
+coverage; #22 explicitly requires a bounded mutation check.
+
+## Assignment and handoff template
+
+The parent supplies each subagent:
+
+```text
+Issue: <URL and current acceptance criteria>
+Authorized scope: <one concrete slice and expected outcome>
+Base branch/commit and worktree: <exact values>
+Exclusive editable files: <explicit list>
+Dependencies already integrated: <issues/commits>
+Relevant skills and evidence: <minimal references, no full-history dump>
+Model/effort and time/resource budget: <agreed limits>
+Checks: <focused commands; reserve fixed ports before running>
+Pending decisions: <pause affected work until user answers>
+Constraints: no delegation, commits, pushes, PRs, benchmarks, or unrelated edits
+Stop: acceptance criteria pass, an external decision blocks progress, or budget is reached
+```
+
+The handoff must name changed files, explain behavior, provide regression and
+test evidence, identify risks and pending decisions, and propose any changelog
+entry. The parent reads the actual diff and validates claims before committing.
+Do not mark an issue complete merely because code exists or a bug-asserting audit
+test is green. Track completion in GitHub with the fixing commit/PR and evidence
+once the change has actually been integrated under the repository workflow.
+
+## Deferred investigation and exclusions
+
+- IPv6 DNS on a client with native IPv6 may bypass the IPv4-only tunnel or fail.
+  Official-client behavior was not tested. Coordinate a separate investigation
+  with [#4](https://github.com/anesthetised/lotsman/issues/4); do not claim either
+  leakage or leak prevention from the absence of `::/0` alone.
+- A stale probe completing after an upstream replacement may affect the reused
+  interface name. User-visible harm was not reproduced; do not silently expand
+  the retry fixes into a reload redesign to address this hypothesis.
+- CVE scanning, throughput benchmarking, a DNS forwarder, a web UI, and full IPv6
+  support are outside this remediation scope. Existing unrelated issues remain
+  untouched.
