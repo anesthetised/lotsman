@@ -3,7 +3,6 @@ package daemon
 import (
 	"bytes"
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -96,15 +95,12 @@ func loadProxy(source []byte) (*Upstream, error) {
 		up.Location = loc
 		return up, nil
 	}
-	key, err := proxy.ParseKey(string(source))
+	// The link parses the same text again: an ss:// key, or an Outline
+	// config such as one with WebSocket transports.
+	text := strings.TrimSpace(string(source))
+	key, err := proxy.ParseConfig(text)
 	if err != nil {
 		return nil, err
-	}
-	// The link parses the key again as a dynamic key's response, which a
-	// plain key is too; check that now rather than when it starts.
-	text := strings.TrimSpace(string(source))
-	if _, err := proxy.ParseConfig(text); err != nil {
-		return nil, errors.New("access key: not readable as a plain ss:// key")
 	}
 	up.Key, up.keyText, up.Endpoint = key, text, key.Server()
 	return up, nil

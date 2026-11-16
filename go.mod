@@ -9,6 +9,7 @@ require (
 	github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20260828
 	github.com/google/go-cmp v0.7.0
 	github.com/google/nftables v0.3.0
+	github.com/gorilla/websocket v1.5.3
 	github.com/mdp/qrterminal/v3 v3.2.1
 	github.com/shadowsocks/go-shadowsocks2 v0.1.5
 	github.com/vishvananda/netlink v1.3.1

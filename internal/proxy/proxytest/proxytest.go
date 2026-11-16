@@ -30,6 +30,7 @@ const Cipher = "chacha20-ietf-poly1305"
 type Server struct {
 	tcp      *net.TCPListener
 	udp      *net.UDPConn
+	ciph     core.Cipher
 	password string
 	redirect map[string]string // target as requested → address actually dialed
 
@@ -51,11 +52,10 @@ func NewServer(t testing.TB, password string, redirect map[string]string) *Serve
 		t.Fatal(err)
 	}
 	ln, pc := listenPair(t)
-	s := &Server{tcp: ln, udp: pc, password: password, redirect: redirect,
+	s := &Server{tcp: ln, udp: pc, ciph: ciph, password: password, redirect: redirect,
 		clients: map[string]bool{}, conns: map[io.Closer]bool{}, nat: map[string]net.PacketConn{}}
-	s.wg.Add(2)
-	go s.serveTCP(ciph)
-	go s.serveUDP(ciph.PacketConn(pc))
+	s.wg.Go(s.serveTCP)
+	s.wg.Go(func() { s.serveUDP(ciph.PacketConn(pc)) })
 	t.Cleanup(s.Close)
 	return s
 }
@@ -150,8 +150,7 @@ func (s *Server) track(c io.Closer) bool {
 	return true
 }
 
-func (s *Server) serveTCP(ciph core.Cipher) {
-	defer s.wg.Done()
+func (s *Server) serveTCP() {
 	for {
 		raw, err := s.tcp.AcceptTCP()
 		if err != nil {
@@ -159,40 +158,50 @@ func (s *Server) serveTCP(ciph core.Cipher) {
 		}
 		s.wg.Go(func() {
 			defer raw.Close()
-			if !s.track(raw) {
-				return
+			if s.track(raw) {
+				s.serveStream(raw)
 			}
-			c := ciph.StreamConn(raw)
-			tgt, err := socks.ReadAddr(c)
-			if err != nil {
-				return // a wrong key: keep quiet, as outline-ss-server does
-			}
-			s.mu.Lock()
-			s.targets = append(s.targets, "tcp "+tgt.String())
-			s.mu.Unlock()
-			rc, err := net.Dial("tcp", s.dialAddr(tgt.String()))
-			if err != nil {
-				return
-			}
-			defer rc.Close()
-			if !s.track(rc) {
-				return
-			}
-			done := make(chan struct{})
-			go func() {
-				io.Copy(rc, c)
-				rc.(*net.TCPConn).CloseWrite()
-				close(done)
-			}()
-			io.Copy(c, rc)
-			raw.CloseWrite()
-			<-done
 		})
 	}
 }
 
+// halfCloser is a client connection: TCP, or a WebSocket.
+type halfCloser interface {
+	net.Conn
+	CloseWrite() error
+}
+
+// serveStream relays one Shadowsocks TCP connection to its target.
+func (s *Server) serveStream(raw halfCloser) {
+	c := s.ciph.StreamConn(raw)
+	tgt, err := socks.ReadAddr(c)
+	if err != nil {
+		return // a wrong key: keep quiet, as outline-ss-server does
+	}
+	s.mu.Lock()
+	s.targets = append(s.targets, "tcp "+tgt.String())
+	s.mu.Unlock()
+	rc, err := net.Dial("tcp", s.dialAddr(tgt.String()))
+	if err != nil {
+		return
+	}
+	defer rc.Close()
+	if !s.track(rc) {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		io.Copy(rc, c)
+		rc.(*net.TCPConn).CloseWrite()
+		close(done)
+	}()
+	io.Copy(c, rc)
+	raw.CloseWrite()
+	<-done
+}
+
+// serveUDP relays Shadowsocks UDP from pc until it is closed.
 func (s *Server) serveUDP(pc net.PacketConn) {
-	defer s.wg.Done()
 	buf := make([]byte, 64<<10)
 	for {
 		n, client, err := pc.ReadFrom(buf)

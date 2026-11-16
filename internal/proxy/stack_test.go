@@ -50,21 +50,33 @@ func dialers(t testing.TB, server *proxytest.Server) Dialers {
 // in front of it, reached by a userspace client.
 func newTestFlow(t *testing.T, password string, opts Options) *testFlow {
 	t.Helper()
+	server := newTestServer(t, password)
+	return newStack(t, server, dialers(t, server), opts)
+}
+
+// newTestServer starts a server with its own echo and DNS targets.
+func newTestServer(t *testing.T, password string) *proxytest.Server {
+	t.Helper()
 	echo, err := net.Listen("tcp4", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	proxytest.Serve(t, echo, proxytest.Echo)
 	dns := proxytest.DNS(t)
-	server := proxytest.NewServer(t, password, map[string]string{
+	return proxytest.NewServer(t, password, map[string]string{
 		echoTarget.String(): echo.Addr().String(),
 		dnsTarget.String():  dns.String(),
 	})
+}
+
+// newStack starts a Stack on d, reached by a userspace client.
+func newStack(t *testing.T, server *proxytest.Server, d Dialers, opts Options) *testFlow {
+	t.Helper()
 	dev, client, err := netstack.CreateNetTUN([]netip.Addr{netip.MustParseAddr("10.0.0.2")}, nil, 1420)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s, err := New(dev, dialers(t, server), opts, slog.New(slog.DiscardHandler))
+	s, err := New(dev, d, opts, slog.New(slog.DiscardHandler))
 	if err != nil {
 		t.Fatal(err)
 	}

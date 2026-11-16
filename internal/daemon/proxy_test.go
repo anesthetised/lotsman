@@ -97,6 +97,35 @@ func TestLoadProxyUpstream(t *testing.T) {
 	}
 }
 
+// A key file may hold an Outline config with WebSocket transports: the
+// URL's host is the server, resolved up front like any other.
+func TestLoadProxyUpstreamWebSocket(t *testing.T) {
+	h, dns := newProxyHarness(t)
+	dns.set("ws.provider.test", "192.0.2.20")
+	path := filepath.Join(h.dir, "ol.key")
+	side := func(path string) string {
+		return `{$type: shadowsocks, endpoint: {$type: websocket, url: "wss://ws.provider.test/` + ssSecret + path + `"}, cipher: chacha20-ietf-poly1305, secret: ` + ssSecret + `}`
+	}
+	os.WriteFile(path, []byte("transport:\n  $type: tcpudp\n  tcp: "+side("/tcp")+"\n  udp: "+side("/udp")+"\n"), 0o600)
+	u, err := LoadUpstream(h.cfg.Upstreams[1], h.cfg.Health)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Endpoint != "ws.provider.test:443" || u.Key.String() != "shadowsocks chacha20-ietf-poly1305 over WebSocket" {
+		t.Errorf("endpoint %q, key %q", u.Endpoint, u.Key)
+	}
+	if err := u.Resolve(context.Background()); err != nil || u.Resolved != "192.0.2.20:443" {
+		t.Errorf("Resolve: %v, %q", err, u.Resolved)
+	}
+
+	// An unsupported transport names the upstream but never quotes the file.
+	os.WriteFile(path, []byte("transport: {$type: tcpudp, tcp: {$type: iptable, secret: "+ssSecret+"}}\n"), 0o600)
+	_, err = LoadUpstream(h.cfg.Upstreams[1], h.cfg.Health)
+	if err == nil || !strings.Contains(err.Error(), `upstream ol: access key: tcp: dialer "iptable" is not supported`) || strings.Contains(err.Error(), ssSecret) {
+		t.Errorf("unsupported transport: %v", err)
+	}
+}
+
 func TestProxyUpstream(t *testing.T) {
 	h, dns := newProxyHarness(t)
 	h.st.CreateUser("alice")

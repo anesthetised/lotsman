@@ -1,9 +1,11 @@
 package proxy
 
 import (
+	"context"
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"strings"
@@ -12,12 +14,14 @@ import (
 	"golang.getoutline.org/sdk/transport/shadowsocks"
 )
 
-// shadowsocksKey is a parsed ss:// key, as Outline servers hand out.
+// shadowsocksKey is a parsed ss:// key, as Outline servers hand out, or a
+// Shadowsocks transport of an Outline config (see parseTransport).
 type shadowsocksKey struct {
-	server string
+	server string // host:port to connect to
 	cipher string
 	key    *shadowsocks.EncryptionKey
-	prefix []byte // the first bytes of every TCP salt; Outline's "prefix" disguise
+	prefix []byte      // the first bytes of every TCP salt; Outline's "prefix" disguise
+	ws     *wsEndpoint // set: Shadowsocks over a WebSocket, connected at server
 }
 
 // parseShadowsocks reads what follows "ss://": SIP002
@@ -145,22 +149,70 @@ func (k *shadowsocksKey) String() string {
 	if len(k.prefix) > 0 {
 		s += fmt.Sprintf(", %d-byte prefix", len(k.prefix))
 	}
+	if k.ws != nil {
+		s += " over WebSocket"
+	}
 	return s
 }
 
-// Dialers dial addr directly over the host's network. Like Outline's own
-// client, only TCP salts carry the prefix.
+// Dialers reach the server at addr over the host's network. Like Outline's
+// own client, only TCP salts carry the prefix.
 func (k *shadowsocksKey) Dialers(addr netip.AddrPort) (Dialers, error) {
-	streams, err := shadowsocks.NewStreamDialer(&transport.TCPEndpoint{Address: addr.String()}, k.key)
+	streams, err := k.streams(addr)
 	if err != nil {
 		return Dialers{}, err
 	}
-	if len(k.prefix) > 0 {
-		streams.SaltGenerator = shadowsocks.NewPrefixSaltGenerator(k.prefix)
-	}
-	packets, err := shadowsocks.NewPacketListener(transport.UDPEndpoint{Address: addr.String()}, k.key)
+	packets, err := k.packets(addr, false)
 	if err != nil {
 		return Dialers{}, err
 	}
 	return Dialers{Streams: streams, Packets: packets}, nil
+}
+
+// streams carries TCP flows through the server at addr, each over its own
+// TCP connection or WebSocket.
+func (k *shadowsocksKey) streams(addr netip.AddrPort) (transport.StreamDialer, error) {
+	var endpoint transport.StreamEndpoint = &transport.TCPEndpoint{Address: addr.String()}
+	if k.ws != nil {
+		endpoint = transport.FuncStreamEndpoint(func(ctx context.Context) (transport.StreamConn, error) {
+			c, err := k.ws.connect(ctx, addr, false)
+			if err != nil {
+				return nil, err // not a typed nil
+			}
+			return c, nil
+		})
+	}
+	d, err := shadowsocks.NewStreamDialer(endpoint, k.key)
+	if err != nil {
+		return nil, err
+	}
+	if len(k.prefix) > 0 {
+		d.SaltGenerator = shadowsocks.NewPrefixSaltGenerator(k.prefix)
+	}
+	return d, nil
+}
+
+// packets carries UDP flows through the server at addr, each over its own
+// UDP socket or WebSocket. The prefix applies to UDP salts only when prefix
+// is set: Outline applies it to a UDP transport of its own (tcpudp's udp),
+// not to one shared with TCP.
+func (k *shadowsocksKey) packets(addr netip.AddrPort, prefix bool) (transport.PacketListener, error) {
+	var endpoint transport.PacketEndpoint = transport.UDPEndpoint{Address: addr.String()}
+	if k.ws != nil {
+		endpoint = transport.FuncPacketEndpoint(func(ctx context.Context) (net.Conn, error) {
+			c, err := k.ws.connect(ctx, addr, true)
+			if err != nil {
+				return nil, err
+			}
+			return c, nil
+		})
+	}
+	l, err := shadowsocks.NewPacketListener(endpoint, k.key)
+	if err != nil {
+		return nil, err
+	}
+	if prefix && len(k.prefix) > 0 {
+		l.SetSaltGenerator(shadowsocks.NewPrefixSaltGenerator(k.prefix))
+	}
+	return l, nil
 }
