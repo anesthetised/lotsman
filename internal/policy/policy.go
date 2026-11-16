@@ -12,15 +12,17 @@ import (
 
 type Upstream struct {
 	config.Upstream
-	Healthy bool
-	Latency time.Duration
+	Healthy  bool
+	Degraded bool // reachable, but too slow for real traffic: a last resort
+	Latency  time.Duration
 }
 
 // Select returns the upstream a peer with the given profile should use.
 //
 // Preference tiers come from profile.Prefer in order; an empty Prefer is one
 // tier matching everything. Only healthy upstreams in the best available tier
-// are candidates.
+// are candidates. Degraded ones count only when the profile has no other
+// healthy upstream in any tier: slow connectivity beats none.
 //
 // The choice is sticky: if current is a candidate it is kept even when a
 // sibling now has lower latency, because switching costs the user every open
@@ -29,11 +31,20 @@ type Upstream struct {
 //
 // ok is false when nothing usable exists; the caller must then fail closed.
 func Select(profile config.Profile, upstreams []Upstream, current string) (name string, ok bool) {
+	if name, ok := pick(profile, upstreams, current, false); ok {
+		return name, true
+	}
+	return pick(profile, upstreams, current, true)
+}
+
+// pick applies Select's rules to the healthy upstreams, degraded ones
+// included only if lastResort is set.
+func pick(profile config.Profile, upstreams []Upstream, current string, lastResort bool) (name string, ok bool) {
 	var candidates []Upstream
 	bestTier := -1
 	for _, u := range upstreams {
 		tier := tierOf(profile, u.Upstream)
-		if !u.Healthy || tier < 0 {
+		if !u.Healthy || (u.Degraded && !lastResort) || tier < 0 {
 			continue
 		}
 		switch {

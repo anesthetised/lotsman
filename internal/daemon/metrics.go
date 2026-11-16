@@ -20,6 +20,9 @@ var Families = []metrics.Family{
 	{Name: "lotsman_upstream_flows_refused_total", Type: "counter", Help: "Flows a proxy upstream refused at its max_flows limit."},
 	{Name: "lotsman_upstream_probe_latency_seconds", Type: "gauge", Help: "Latency of the last successful probe."},
 	{Name: "lotsman_upstream_probes_total", Type: "counter", Help: "Probes by result."},
+	{Name: "lotsman_upstream_degraded", Type: "gauge", Help: "1 while the upstream is reachable but fails its transfer probes."},
+	{Name: "lotsman_upstream_transfer_seconds", Type: "gauge", Help: "Duration of the last transfer probe, a failed one included."},
+	{Name: "lotsman_upstream_transfer_probes_total", Type: "counter", Help: "Transfer probes by result."},
 	{Name: "lotsman_upstream_last_handshake_timestamp_seconds", Type: "gauge", Help: "Unix time of the last handshake with the provider; 0 if none yet."},
 	{Name: "lotsman_upstream_clients", Type: "gauge", Help: "Clients whose traffic is routed through the upstream, connected or not."},
 	{Name: "lotsman_upstream_active_clients", Type: "gauge", Help: "Routed clients with a handshake in the last 3 minutes."},
@@ -68,6 +71,7 @@ func (d *Daemon) Metrics() []metrics.Sample {
 		out = append(out,
 			sample("lotsman_upstream_info", 1, up, metrics.Label{Name: "kind", Value: u.Kind}, metrics.Label{Name: "interface", Value: u.InterfaceName()}),
 			sample("lotsman_upstream_up", boolean(u.Tracker.State() == health.Up), up),
+			sample("lotsman_upstream_degraded", boolean(d.degraded(u)), up),
 			sample("lotsman_upstream_probe_latency_seconds", u.Tracker.Latency().Seconds(), up),
 			sample("lotsman_upstream_clients", float64(clients[u.Name]), up),
 			sample("lotsman_upstream_active_clients", float64(active[u.Name]), up),
@@ -78,6 +82,15 @@ func (d *Daemon) Metrics() []metrics.Sample {
 				sample("lotsman_upstream_probes_total", float64(c[0]), up, metrics.Label{Name: "result", Value: "ok"}),
 				sample("lotsman_upstream_probes_total", float64(c[1]), up, metrics.Label{Name: "result", Value: "fail"}),
 			)
+		}
+		if c := d.transferCounts[u.Name]; c != nil {
+			out = append(out,
+				sample("lotsman_upstream_transfer_probes_total", float64(c[0]), up, metrics.Label{Name: "result", Value: "ok"}),
+				sample("lotsman_upstream_transfer_probes_total", float64(c[1]), up, metrics.Label{Name: "result", Value: "fail"}),
+			)
+		}
+		if t := d.transfers[u]; t != nil && t.ran {
+			out = append(out, sample("lotsman_upstream_transfer_seconds", t.last.Seconds(), up))
 		}
 		st := u.link.Stats()
 		if p := st.Peer; p != nil {

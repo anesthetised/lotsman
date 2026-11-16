@@ -93,7 +93,7 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `state_dir` | Server identity, SQLite database, pid and status files, cached dynamic Outline keys. |
 | `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, or `outline`), `conf` path (the provider's AmneziaWG config, or for `outline` a file with the access key or its `ssconf://` URL), free-form `geo` and `provider` labels, `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates), and for `outline` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams)). |
 | `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider, tag}` matchers (all given fields must match); empty = any upstream. Within a tier the lowest latency wins, so a tag such as `near` groups several countries into one tier. A matcher that matches no upstream, or only upstreams an earlier matcher already took, is ignored with a warning in `config check` and the reload log, so an upstream can be removed without editing every profile. A profile where no matcher matches any upstream is an error. |
-| `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline upstream; default `1.1.1.1:53`), `down_after`, `up_after`. |
+| `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline upstream; default `1.1.1.1:53`), `down_after`, `up_after`, and the optional `transfer` block (off when absent; see [Throttled upstreams](#throttled-upstreams-transfer-probe)). |
 
 `listen` binds exactly the configured numeric address; hostnames and an omitted
 host are unsupported. An occupied port, unavailable family, or unassigned address
@@ -288,7 +288,8 @@ The daemon logs at `info` by default. For more detail, pass `-log-level debug` b
 AmneziaWG device logs, including handshake diagnostics. In the systemd unit, add
 `Environment=LOTSMAN_LOG_LEVEL=debug` and restart; an invalid value stops `lotsman` before it starts.
 
-`KIND` is `awg` or `outline`. `LAST HANDSHAKE` is the upstream device's handshake with its provider;
+`STATE` is `up`, `down`, `unknown` (not probed to a verdict yet) or `degraded` (reachable, but
+failing its [transfer probes](#throttled-upstreams-transfer-probe)). `KIND` is `awg` or `outline`. `LAST HANDSHAKE` is the upstream device's handshake with its provider;
 an Outline upstream has none and shows `-`. `ROUTED` counts clients whose traffic is directed through the upstream — every client in the
 database is routed somewhere whether or not it is connected. `ACTIVE` counts those with a
 WireGuard handshake in the last three minutes, which is what "connected" means for WireGuard;
@@ -316,6 +317,9 @@ the host can. Changing `metrics.listen` needs a restart.
 | `lotsman_upstream_flows_refused_total` | `upstream` | Outline only: flows refused at `max_flows` |
 | `lotsman_upstream_probe_latency_seconds` | `upstream` | last successful probe |
 | `lotsman_upstream_probes_total` | `upstream`, `result` | `ok` / `fail` |
+| `lotsman_upstream_degraded` | `upstream` | 1 while it is reachable but fails its transfer probes; always 0 with `health.transfer` off |
+| `lotsman_upstream_transfer_seconds` | `upstream` | duration of the last transfer probe, a failed one included (then about `timeout`) |
+| `lotsman_upstream_transfer_probes_total` | `upstream`, `result` | transfer probes, `ok` / `fail` |
 | `lotsman_upstream_last_handshake_timestamp_seconds` | `upstream` | AWG only; 0 if never |
 | `lotsman_upstream_clients` | `upstream` | clients routed through it, connected or not |
 | `lotsman_upstream_active_clients` | `upstream` | of those, with a handshake in the last 3 minutes |
@@ -363,6 +367,63 @@ Uninstall also disables surviving downstream ingress before removing protection,
 even if stopping the service fails. If interface inspection or disabling fails,
 it stops while preserving the firewall and routing state.
 
+### Throttled upstreams (transfer probe)
+
+Reachability probes catch an upstream that is cut off. They miss one that is throttled or whose
+TCP flows freeze after the first 15–20 KB, a common way of blocking traffic to foreign hosting:
+the handshake and the small DNS answer pass, real traffic does not. The transfer probe, off unless
+configured, downloads through each upstream every few minutes:
+
+```yaml
+health:
+  transfer:
+    url: https://speed.cloudflare.com/__down?bytes=65536   # or a list, tried in random order until one passes
+    min_bytes: 65536   # default
+    timeout: 10s       # default; covers lookup, connect, TLS, request and body
+    interval: 5m       # default; each upstream draws its own ±20% per probe
+```
+
+- A probe passes when at least `min_bytes` of the response body (status 2xx) arrive within
+  `timeout`; it reads that much and closes. A short body, an error status or a timeout fail it.
+  Redirects are followed through the same upstream. Lotsman ships no default URL: pick one that
+  serves at least `min_bytes` without compression and does not mind the traffic, such as
+  Cloudflare's speed test endpoint above.
+- The connection is bound to the upstream's interface and source address, like the reachability
+  probes, for AWG and Outline upstreams alike. The URL's host is resolved by the host's own
+  resolver at probe time, outside the upstream.
+- `down_after` consecutive failed transfer probes mark an upstream *degraded*; `up_after` passing
+  ones clear it. Probes run only while the upstream is up by its reachability probes, at most one
+  per upstream at a time, outside the health round. A result that arrives after the upstream went
+  down is discarded.
+- A degraded upstream is a last resort. A client moves to the best healthy, not degraded upstream
+  of its profile in any tier, with the usual tier, latency and stickiness rules. Only when its
+  profile has none does it stay on (or go to) a degraded one, chosen by the same rules: slow
+  connectivity beats none. `upstream status` shows it as `degraded`, `lotsman_upstream_up` stays 1
+  and `lotsman_upstream_degraded` is 1.
+- Pinned connections: once no client is routed through a degraded upstream, its pins are released
+  as for a dead one; connections that clients opened through it follow their new route and break,
+  rather than hanging on a frozen path. While it is still some client's last resort it stays
+  alive, so that client's connections are not cut, and the old connections of clients that moved
+  away also stay pinned to it until they close.
+- Timing: the full `interval` applies while probes pass. After a failure, and for as long as the
+  upstream is degraded, the next probe comes after a fifth of it (±20%, at least
+  `health.interval`): 48–72 s at the defaults. A freeze is caught by the first scheduled probe that
+  hits it (within 4–6 minutes) and confirmed `down_after` − 1 retries later, about 2 more minutes:
+  degraded within roughly 3 to 8.5 minutes of the freeze. Recovery takes `up_after` passing
+  retries: about 1 to 2.5 minutes after the path recovers.
+- Cost: about `min_bytes` × 86400 / `interval` per upstream per day plus TCP, TLS and HTTP overhead
+  (a few KB per probe): 18 MiB a day per upstream at the defaults, 90 MiB with `interval: 1m`.
+  Only while an upstream's probes fail or it is degraded does it probe five times as often; a
+  failing probe moves only what the path lets through, so the extra cost is at most 64 KiB a
+  minute (90 MiB a day at the defaults) for that upstream, and only while it lasts.
+- Pattern and privacy: inside the tunnel a probe is a ~64 KiB download at an irregular interval,
+  among the clients' own traffic. The URL's server sees each upstream's exit address every few
+  minutes. The lookup of the URL's host leaves through the host's own uplink, so whoever watches
+  that uplink sees the name every interval; an `http://` URL with an IP address, or a resolver you
+  trust, avoids that.
+- `health.transfer` applies on reload; removing it clears every degraded mark at once. A new
+  `interval` takes effect after each upstream's next probe.
+
 ## Identity and secrets
 
 `state_dir/identity.json` holds the server key, the S1–S4/H1–H4 parameters and the AWG 3 header
@@ -393,6 +454,11 @@ half. The probe error in the `upstream health changed` log line says which proto
 the key with the Outline client on another machine. With a dynamic key, look for
 `dynamic key fetch failed` (it names the HTTP status, a certificate problem or the provider's
 error message) and run `lotsman config check`, which fetches the key once.
+
+**An upstream shows `degraded`.** Its transfer probes fail while it stays reachable. The
+`upstream degraded` log line carries the last error: `16384 of 65536 bytes in 10s` is a path that
+freezes or crawls; an error status, `the body ended` or a lookup failure point at the URL, and
+then every upstream degrades at once. Run with `-log-level debug` to see each failed probe.
 
 **Sites open, large downloads or video hang.** MTU. `config check` prints the client MTU; make
 sure clients actually imported the config with that `MTU` line. Try a lower value in a provider

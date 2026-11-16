@@ -36,7 +36,8 @@ var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 type provider struct {
 	name   string
 	dev    *tunnel.Device
-	conf   string // what the provider hands to its customer (Lotsman)
+	tnet   *netstack.Net // the provider's side, where the fake internet lives
+	conf   string        // what the provider hands to its customer (Lotsman)
 	params awgconf.Params
 }
 
@@ -113,7 +114,7 @@ func newProvider(t *testing.T, name string, tunnelNet netip.Prefix, port uint16)
 		Peers: []awgconf.Peer{{PublicKey: serverKey.Public(), Endpoint: "localhost:" + strconv.Itoa(int(port)),
 			AllowedIPs: []netip.Prefix{netip.MustParsePrefix("0.0.0.0/0")}, PersistentKeepalive: awgconf.Range{Lo: 5, Hi: 5}}},
 	}
-	return &provider{name: name, dev: dev, conf: customer.String(), params: params}
+	return &provider{name: name, dev: dev, tnet: tnet, conf: customer.String(), params: params}
 }
 
 // client is a user's Amnezia app: a netstack device configured from the
