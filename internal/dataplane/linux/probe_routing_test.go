@@ -31,7 +31,7 @@ func TestProbeRoutesWithOverlappingAddresses(t *testing.T) {
 		{Name: "lm-up-a", Addr: netip.PrefixFrom(source, 32)},
 		{Name: "lm-up-b", Addr: netip.PrefixFrom(source, 32)},
 	}
-	if err := d.Setup(dataplane.Interface{Name: "lm0", Addr: netip.MustParsePrefix("10.77.0.1/16")}, ups, 1380); err != nil {
+	if err := d.Setup(dataplane.Interface{Name: "lm0", Addr: netip.MustParsePrefix("10.77.0.1/16")}, ups, 1380, netip.AddrPort{}); err != nil {
 		t.Fatal(err)
 	}
 	for _, up := range ups {

@@ -39,7 +39,7 @@ func TestTeardownStopsIngressPackets(t *testing.T) {
 			if startup == "partial" {
 				ups = append(ups, dataplane.Interface{Name: "lm-up-missing", Addr: netip.MustParsePrefix("10.9.0.2/32")})
 			}
-			err := d.Setup(dataplane.Interface{Name: "lm0", Addr: netip.MustParsePrefix("10.77.0.1/24")}, ups, 1380)
+			err := d.Setup(dataplane.Interface{Name: "lm0", Addr: netip.MustParsePrefix("10.77.0.1/24")}, ups, 1380, netip.AddrPort{})
 			if (err != nil) != (startup == "partial") {
 				t.Fatalf("setup: %v", err)
 			}
@@ -114,7 +114,7 @@ func TestTeardownAfterDownstreamRemoved(t *testing.T) {
 	t.Cleanup(func() { d.Teardown() })
 	if err := d.Setup(
 		dataplane.Interface{Name: "lm0", Addr: netip.MustParsePrefix("10.77.0.1/24")},
-		[]dataplane.Interface{{Name: "lm-up-a", Addr: netip.MustParsePrefix("10.8.0.2/32")}}, 1380,
+		[]dataplane.Interface{{Name: "lm-up-a", Addr: netip.MustParsePrefix("10.8.0.2/32")}}, 1380, netip.AddrPort{},
 	); err != nil {
 		t.Fatal(err)
 	}

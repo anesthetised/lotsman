@@ -9,6 +9,8 @@
 // forwarded packet from the downstream interface unless its peer is authorized
 // and it is going into an upstream. Authorization is revoked before route
 // cleanup, so connected routes in main and stale policy rules cannot bypass it.
+// It also drops what clients send to the host itself, except a ping to the
+// gateway, the metrics endpoint and replies to what the host opened.
 //
 // Lotsman shares the host's rule and route space with other software, so it
 // only touches what it can prove it created: a rule of exactly the shape it
@@ -62,7 +64,7 @@ func New() *Dataplane {
 	return &Dataplane{tables: map[string]int{}, alive: map[string]bool{}}
 }
 
-func (d *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, mtu int) error {
+func (d *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, mtu int, metrics netip.AddrPort) error {
 	if err := sysctl("net/ipv4/ip_forward", "1"); err != nil {
 		return err
 	}
@@ -80,7 +82,7 @@ func (d *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, m
 			return err
 		}
 	}
-	return d.installFirewall(down.Name, ups)
+	return d.installFirewall(down.Name, down.Addr.Addr(), ups, metrics)
 }
 
 func (d *Dataplane) SetUpstreams(ups []dataplane.Interface, mtu int) error {
@@ -664,7 +666,7 @@ func sysctl(key, value string) error {
 	return nil
 }
 
-func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) error {
+func (d *Dataplane) installFirewall(down string, gateway netip.Addr, ups []dataplane.Interface, metrics netip.AddrPort) error {
 	c := &nftables.Conn{}
 	if err := closeForeignForwardChains(c); err != nil {
 		return err
@@ -693,6 +695,12 @@ func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) erro
 	forward := c.AddChain(&nftables.Chain{
 		Name: "forward", Table: table, Type: nftables.ChainTypeFilter,
 		Hooknum: nftables.ChainHookForward, Priority: nftables.ChainPriorityFilter, Policy: &accept,
+	})
+	// Clients reach the host itself only for ping to the gateway and the
+	// metrics endpoint. Our drop is final: no other firewall can reopen it.
+	input := c.AddChain(&nftables.Chain{
+		Name: "input", Table: table, Type: nftables.ChainTypeFilter,
+		Hooknum: nftables.ChainHookInput, Priority: nftables.ChainPriorityFilter, Policy: &accept,
 	})
 	postrouting := c.AddChain(&nftables.Chain{
 		Name: "postrouting", Table: table, Type: nftables.ChainTypeNAT,
@@ -751,6 +759,15 @@ func (d *Dataplane) installFirewall(down string, ups []dataplane.Interface) erro
 	rule(forward, iifInUps, oifIs(down), peerInSet(16), ctEstablished, accepting) // IPv4 destination
 	rule(forward, iifIs(down), dropping)
 	rule(forward, iifInUps, dropping)
+	// A first packet from a client is dropped before conntrack confirms it, so
+	// established/related only admits replies to what the host opened toward
+	// clients, ICMP errors included. Cryptokey routing pins each client's source.
+	rule(input, iifIs(down), ctEstablished, accepting)
+	rule(input, iifIs(down), daddrIs(gateway), icmpEchoRequest, accepting)
+	if a := metrics.Addr().Unmap(); a.Is4() { // the tunnel carries only IPv4
+		rule(input, iifIs(down), daddrIs(a), tcpDport(metrics.Port()), accepting)
+	}
+	rule(input, iifIs(down), dropping)
 	rule(postrouting, oifInUps, []expr.Any{&expr.Masq{}})
 	// iifname lm0 ct mark != 0 meta mark set ct mark
 	rule(restore, iifIs(down), []expr.Any{
@@ -937,7 +954,34 @@ var (
 		},
 		&expr.Cmp{Op: expr.CmpOpNeq, Register: 1, Data: []byte{0, 0, 0, 0}},
 	}
+	// icmp type echo-request
+	icmpEchoRequest = []expr.Any{
+		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.IPPROTO_ICMP}},
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 0, Len: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{8}},
+	}
 )
+
+// daddrIs matches "ip daddr <a>" for an IPv4 address.
+func daddrIs(a netip.Addr) []expr.Any {
+	return []expr.Any{
+		&expr.Meta{Key: expr.MetaKeyNFPROTO, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.NFPROTO_IPV4}},
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseNetworkHeader, Offset: 16, Len: 4},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: a.AsSlice()},
+	}
+}
+
+// tcpDport matches "tcp dport <port>".
+func tcpDport(port uint16) []expr.Any {
+	return []expr.Any{
+		&expr.Meta{Key: expr.MetaKeyL4PROTO, Register: 1},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: []byte{unix.IPPROTO_TCP}},
+		&expr.Payload{DestRegister: 1, Base: expr.PayloadBaseTransportHeader, Offset: 2, Len: 2},
+		&expr.Cmp{Op: expr.CmpOpEq, Register: 1, Data: binaryutil.BigEndian.PutUint16(port)},
+	}
+}
 
 // ifname is an interface name as nftables stores it: zero-padded to IFNAMSIZ.
 func ifname(n string) []byte {

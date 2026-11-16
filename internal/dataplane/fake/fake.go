@@ -14,6 +14,7 @@ type Dataplane struct {
 	Down      dataplane.Interface
 	Ups       []dataplane.Interface
 	MTU       int
+	Metrics   netip.AddrPort
 	Routes    map[netip.Addr]string
 	Pins      map[netip.Addr]map[string]bool // peer → upstreams its old flows stay on
 	Alive     map[string]bool
@@ -26,10 +27,10 @@ func New() *Dataplane {
 	return &Dataplane{Routes: map[netip.Addr]string{}, Pins: map[netip.Addr]map[string]bool{}, Alive: map[string]bool{}}
 }
 
-func (f *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, mtu int) error {
+func (f *Dataplane) Setup(down dataplane.Interface, ups []dataplane.Interface, mtu int, metrics netip.AddrPort) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.Down, f.Ups, f.MTU, f.SetupDone = down, ups, mtu, true
+	f.Down, f.Ups, f.MTU, f.Metrics, f.SetupDone = down, ups, mtu, metrics, true
 	f.Log = append(f.Log, fmt.Sprintf("setup %s mtu=%d ups=%d", down.Name, mtu, len(ups)))
 	return nil
 }

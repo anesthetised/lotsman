@@ -16,6 +16,9 @@ All notable changes to Lotsman are documented here. The format follows
   raised to go1.27.4 for GO-2026-6859 (#54).
 
 ### Fixed
+- Drop everything VPN clients send to the host itself (SSH, Docker bridges, services bound to
+  `0.0.0.0`) except a ping to the gateway, the `metrics.listen` endpoint and replies to
+  connections the host opened; forwarded traffic is unchanged (#46).
 - Upstreams that fail to open on reload, and devices left down after a dataplane error, are
   retried every health round instead of staying out of service until the next SIGHUP; the
   failure is logged once as "not running, will retry" (#52).

@@ -11,9 +11,11 @@ type Interface struct {
 
 type Dataplane interface {
 	// Setup assigns addresses and MTU, creates a routing table per upstream and
-	// installs the firewall rules (NAT, MSS clamp, fail-closed drop). It is
-	// idempotent so a restart can reconcile leftovers from a previous run.
-	Setup(down Interface, ups []Interface, mtu int) error
+	// installs the firewall rules (NAT, MSS clamp, fail-closed drop). Clients
+	// may reach the host itself only for ping to the gateway and, when metrics
+	// is valid, the TCP endpoint at that address. It is idempotent so a
+	// restart can reconcile leftovers from a previous run.
+	Setup(down Interface, ups []Interface, mtu int, metrics netip.AddrPort) error
 	// SetUpstreams makes the set of upstreams equal to ups without touching
 	// the firewall table or the routes of upstreams that stay: new ones get a
 	// table, route and probe rule, removed ones lose theirs. Peers routed

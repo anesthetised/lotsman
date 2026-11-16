@@ -216,8 +216,9 @@ metrics:
 
 `GET /metrics` serves the Prometheus text format. The endpoint is off unless `metrics.listen` is
 set, and an unspecified address (`0.0.0.0`, `::`) is refused: the per-client series carry user,
-device and profile names. On the gateway address every connected client can read it; on loopback
-only a scraper on the host can. Changing `metrics.listen` needs a restart.
+device and profile names. On the gateway address every connected client can read it (Lotsman's
+firewall lets clients reach only that address and port on the host); on loopback only a scraper on
+the host can. Changing `metrics.listen` needs a restart.
 
 | Metric | Labels | Meaning |
 |---|---|---|
@@ -300,6 +301,14 @@ Lotsman also inserts two `accept` rules tagged `comment "lotsman"` at the top of
 forward chain and removes them on shutdown. Only nftables-backed chains are handled; on a host
 still using `iptables-legacy` allow `lm0 → lm-up-*` and the replies by hand. The UDP listen port
 must be open for input.
+
+**Clients and the host itself.** Lotsman's `input` chain drops everything clients send to the host
+itself except a ping to the gateway address, the `metrics.listen` endpoint when it is set, and
+replies to connections the host opened toward a client. SSH, Docker's bridge address, a resolver or
+anything else bound to `0.0.0.0` is unreachable through the tunnel, even if ufw or firewalld allows
+it: a drop in any nftables chain is final. Lotsman's accepts do not override other firewalls either,
+so on a host with ufw or firewalld the metrics port must still be opened for input on `lm0`.
+Clients that need DNS should use a resolver on the internet, not one on the gateway.
 
 **Restart left rules behind.** Lotsman removes its rules, routes and nftables table on shutdown and
 recreates them on start, so a crash is harmless. It only removes rules and routes of the exact

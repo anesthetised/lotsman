@@ -11,7 +11,7 @@ func TestFake(t *testing.T) {
 	f := New()
 	var dp dataplane.Dataplane = f
 	ups := []dataplane.Interface{{Name: "a"}, {Name: "b"}}
-	if err := dp.Setup(dataplane.Interface{Name: "lm0"}, ups, 1400); err != nil {
+	if err := dp.Setup(dataplane.Interface{Name: "lm0"}, ups, 1400, netip.AddrPort{}); err != nil {
 		t.Fatal(err)
 	}
 	peer := netip.MustParseAddr("10.77.0.2")
