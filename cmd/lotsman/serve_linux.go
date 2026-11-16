@@ -20,8 +20,10 @@ import (
 	"github.com/anesthetised/lotsman/internal/tunnel"
 )
 
-func serve(ctx context.Context, configPath string) error {
-	log := slog.New(slog.NewTextHandler(os.Stderr, nil))
+// serve runs the daemon. level filters everything logged, including the AWG
+// device logs that tunnel maps to Debug.
+func serve(ctx context.Context, configPath string, level slog.Level) error {
+	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	e, err := openEnv(configPath)
 	if err != nil {
 		return err

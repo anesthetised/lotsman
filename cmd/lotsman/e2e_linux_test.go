@@ -284,7 +284,7 @@ metrics: {listen: 127.0.0.1:19100}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
-	go func() { served <- serve(ctx, cfgPath) }()
+	go func() { served <- serve(ctx, cfgPath, slog.LevelInfo) }()
 	t.Cleanup(func() {
 		cancel()
 		if err := <-served; err != nil {

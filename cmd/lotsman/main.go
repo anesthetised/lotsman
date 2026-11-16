@@ -6,8 +6,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/daemon"
@@ -18,7 +20,7 @@ import (
 // version is set at build time from git (see justfile).
 var version = "dev"
 
-const usage = `Usage: lotsman [-config FILE] <command> [args]
+const usage = `Usage: lotsman [-config FILE] [-log-level LEVEL] <command> [args]
 
 Commands:
   version                     print the build version
@@ -34,6 +36,7 @@ Commands:
   upstream status             show upstream health as last written by the daemon
 
 Config file: -config, or $LOTSMAN_CONFIG, or /etc/lotsman/lotsman.yaml
+Log level (serve): -log-level, or $LOTSMAN_LOG_LEVEL, or info; one of debug, info, warn, error
 `
 
 func main() {
@@ -47,7 +50,12 @@ func run(args []string) error {
 	fs := flag.NewFlagSet("lotsman", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	configPath := fs.String("config", defaultConfigPath(), "path to lotsman.yaml")
+	logLevel := fs.String("log-level", "", "log level: debug, info, warn or error (default $LOTSMAN_LOG_LEVEL, then info)")
 	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	level, err := resolveLogLevel(fs, *logLevel)
+	if err != nil {
 		return err
 	}
 	rest := fs.Args()
@@ -74,7 +82,7 @@ func run(args []string) error {
 		fmt.Println(version)
 		return nil
 	case "serve":
-		return serve(context.Background(), *configPath)
+		return serve(context.Background(), *configPath, level)
 	case "config check":
 		return checkConfig(*configPath)
 	case "user add":
@@ -97,6 +105,39 @@ func defaultConfigPath() string {
 		return p
 	}
 	return "/etc/lotsman/lotsman.yaml"
+}
+
+// resolveLogLevel picks the log level from -log-level, else $LOTSMAN_LOG_LEVEL,
+// else info. It runs for every command, so a typo is reported at once rather
+// than only when `serve` is finally started.
+func resolveLogLevel(fs *flag.FlagSet, flagValue string) (slog.Level, error) {
+	value, source := os.Getenv("LOTSMAN_LOG_LEVEL"), "$LOTSMAN_LOG_LEVEL"
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "log-level" {
+			value, source = flagValue, "-log-level"
+		}
+	})
+	level, err := parseLogLevel(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", source, err)
+	}
+	return level, nil
+}
+
+// parseLogLevel maps a level name to slog's. The empty string means the
+// default, info.
+func parseLogLevel(s string) (slog.Level, error) {
+	switch strings.ToLower(s) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "info", "":
+		return slog.LevelInfo, nil
+	case "warn":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	}
+	return 0, fmt.Errorf("invalid log level %q: want debug, info, warn or error", s)
 }
 
 // env is what every command needs: the config, the server identity and the store.

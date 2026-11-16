@@ -192,6 +192,11 @@ Health transitions and every routing decision are logged. `status.json` in the s
 what `upstream status` and the live columns of `user list` read; the daemon writes it right after
 its first reconcile and then every health interval.
 
+The daemon logs at `info` by default. For more detail, pass `-log-level debug` before `serve` or set
+`LOTSMAN_LOG_LEVEL=debug` (`debug`, `info`, `warn`, `error`; the flag wins). `debug` also shows the
+AmneziaWG device logs, including handshake diagnostics. In the systemd unit, add
+`Environment=LOTSMAN_LOG_LEVEL=debug` and restart; an invalid value stops `lotsman` before it starts.
+
 `ROUTED` counts clients whose traffic is directed through the upstream — every client in the
 database is routed somewhere whether or not it is connected. `ACTIVE` counts those with a
 WireGuard handshake in the last three minutes, which is what "connected" means for WireGuard;

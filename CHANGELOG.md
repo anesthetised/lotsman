@@ -5,6 +5,11 @@ All notable changes to Lotsman are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- `-log-level` flag and `LOTSMAN_LOG_LEVEL` (`debug`, `info`, `warn`, `error`; default `info`)
+  set the daemon's log level; at `debug` the AmneziaWG device logs become visible. An invalid
+  value is rejected before any command runs (#56).
+
 ### Changed
 - CI and `just lint` run `go mod verify`, staticcheck and govulncheck for the host and the Linux
   integration build; the tools are pinned with `tool` directives in `go.mod`. The toolchain is
