@@ -2,22 +2,86 @@
 
 ## Status and source of truth
 
-Prepared on 2026-10-15 for the audit of commit
-`e6efaca96e1bb4ca073c9c62df67f8ba9766ba0f`.
+Two audits feed this plan:
 
-The initial request authorized creating issues and this plan. Implementation was
-subsequently authorized; current completion and evidence live in GitHub Issues.
+- First audit (2026-10-15, commit `e6efaca96e1bb4ca073c9c62df67f8ba9766ba0f`):
+  #6–#22, #29, #32. All closed and merged; sections titled "First audit" are
+  its history and evidence.
+- Second audit (2026-11-07, baseline `2160572c65350db99ced77cd6a2dc905b8d9f8e8`):
+  #43–#57, plus the test flake #42. Active; see the next section.
+
 Start new implementation only within the user's authorized scope. Once a scope is
 approved, continue within it without repeatedly requesting approval.
 
 Tasks and their acceptance criteria live in
 [GitHub Issues](https://github.com/anesthetised/lotsman/issues). This file is the
 execution order and coordination guide, not a second completion checklist.
-Issues #6 and #7 already existed and are reused; #8 through #22 were created for
-the remaining audit findings. Read the current issue before starting: its state or
-the implementation may have changed since this snapshot.
+Read the current issue before starting: its state or the implementation may have
+changed since this snapshot.
 
-## Approved follow-up slice (2026-10-16)
+Lotsman is not in production yet. Behavior changes are documented, but no
+migration or compatibility handling is needed for already issued client configs
+or existing deployments.
+
+Terminology: an *agent tier* (`agent:light`, `agent:strong`; see
+[AGENTS.md](../AGENTS.md)) selects who implements an issue. A *preference tier* is
+a priority level of a profile's `prefer` list in `lotsman.yaml`: the
+upstreams whose first matching `prefer` entry (a matcher) is that one.
+
+## Second audit (2026-11-07)
+
+### Approved decisions (2026-11-16)
+
+| Issue | Decision |
+|---|---|
+| #43 | `mtu.Overhead = 80` (IPv6 outer header) for every client. |
+| #46 | Add an `input` base chain to `table inet lotsman`: from `iifname lm0` accept ICMP to the gateway and `metrics.listen` when set, drop the rest. |
+| #48 | The user verifies `AllowedIPs = 0.0.0.0/0, ::/0` without an IPv6 `Address` on the official Amnezia client. The parent prepares the test config and checklist; the result decides between shipping `::/0` and a README statement. |
+| #50 | Option 3: a profile is an error only when none of its preference tiers matches an upstream; a partially empty `prefer` list is a warning in `config check` and the reload log. |
+| PR #27 | Upstream tags stay parked until wave 2, then rebase after #45 and #50, because both change the same loading and validation code. |
+
+### Wave 1: P1 (authorized 2026-11-16)
+
+Sequential. Each issue gets its own `fix/<issue>-<slug>` branch and one
+reviewed commit. Stop at the checkpoint below.
+
+| Order | Issue | Agent tier | Exclusive files |
+|---|---|---|---|
+| 1 | #43 Client MTU for IPv6 outer headers | light | `internal/mtu/*`; the two downstream-bound assertions in `internal/daemon/daemon_test.go` (`ClientMTU`, `dp.MTU`) |
+| 2 | #45 Reload validates before dropping; split `LoadUpstream` | strong | `internal/daemon/upstream.go`, `internal/daemon/daemon.go`, `internal/daemon/*_test.go`, `cmd/lotsman/main.go`, `cmd/lotsman/status.go`, `cmd/lotsman/main_test.go` |
+| 3 | #44 No DNS under `d.mu`; bounded lookup | strong | same as #45 |
+
+#43 goes first because its new overhead changes assertions in a test file that #45
+and #44 own; it is small. #45 precedes #44: once the pure loading step is split
+from endpoint resolution, the `Reload` half of #44 reduces to resolving before
+taking the lock, and the remaining work is `probeAll`.
+
+Checkpoint: the parent presents diffs, regressions (each failing before its fix),
+and the verification gate results. Wave 2 starts only after user approval.
+
+### Wave 2: proposed, needs approval at the checkpoint
+
+Lanes run concurrently; issues within a lane run in the order given.
+
+| Lane | Queue | Agent tier | Notes |
+|---|---|---|---|
+| Daemon | #52, #47, #51 | light, strong, light | #52 reuses the #45 split. #47 adds a dataplane method and its Linux part takes the Linux lane's files for its duration. |
+| Linux | #46, #53 | strong, light | Sequential with the Linux part of #47 (`internal/dataplane/linux/linux.go`). |
+| Config | #50, then PR #27 rebase and review | light | `internal/config/*`, `cmd/lotsman/status.go` after wave 1 releases it. Open point for #50: a matcher can match upstreams that an earlier matcher already took, leaving its preference tier empty; current validation misses this. Confirm with the user whether that is also a warning. |
+| CLI | #49, #56 | light | `cmd/lotsman/*` after wave 1 releases it. |
+| Tooling | #54, #57 | light | #54: how the tools are pinned (`go run pkg@version` vs the `tool` directive in `go.mod`, a dependency change) is decided with the user first. |
+| Manual | #48 | user | Client test by the user; code change only after the result. |
+
+### Manual and deferred
+
+- #55 throughput: a benchmark, so it needs an agreed workload and a real client.
+  The user has a disposable test host for this; any remote command needs an
+  explicit request in that message.
+- #42 `TestDaemonListenAddress` flake: first reproduce in a local
+  `--platform linux/amd64` container and look for state leaking between subtests.
+  Not scheduled; light tier when it is.
+
+## First audit: approved follow-up slice (2026-10-16)
 
 The user approved nftables peer authorization for #14 and disabling the downstream
 interface before teardown for #8. Implement these sequentially from current main,
@@ -48,7 +112,7 @@ plan preparation, not this follow-up.
   preservation tests; restoring the old daemon stop broke the cleanup retry tests.
   The existing routing-ownership and live-flow-pinning regressions also passed.
 
-## Approved remaining audit work (2026-10-16)
+## First audit: approved remaining work (2026-10-16)
 
 The user authorized parallel follow-up work on #10, #13, #19, #20, #21, and #22.
 Use GPT-6-Luna at medium effort for the focused #22 test repair and GPT-6.1-Sol
@@ -146,11 +210,11 @@ hold, because `Ready()` closes after the first reconcile.
   code and callers before choosing a fix. Apply `ponytail` at full intensity,
   `caveman` for concise handoffs, and the relevant implementation, test, git, and
   review skills available in the session.
-- The parent alone creates or assigns subagents, with at most three active at
-  once. Announce each assignment's scope, model, and effort. Subagents never
-  delegate. Default focused implementation/review to GPT-6.1-Sol, medium effort;
-  use a cheaper capable model for simple tasks and escalate only with a concrete
-  reason. Do not assume model-switch controls exist.
+- The parent orchestrates and subagents implement. The parent assigns work,
+  reviews actual diffs, integrates and commits; it does not implement issues
+  itself beyond small review fixes. At most three subagents are active at once.
+  Pick the model from the issue's agent tier in [AGENTS.md](../AGENTS.md) and
+  announce each assignment's scope, model, and effort. Subagents never delegate.
 - Assign one issue-sized slice at a time. Use separate `fix/<issue>-<slug>`
   branches/worktrees when practical. Shared files still require exclusive
   ownership even across worktrees; do not create competing implementations.
@@ -170,7 +234,7 @@ hold, because `Ready()` closes after the first reconcile.
 - Stop when the assigned acceptance criteria and checks pass. Do not broaden a
   fix into speculative refactoring, dependency upgrades, or feature work.
 
-## Baseline and evidence limits
+## First audit: baseline and evidence limits
 
 At the audited commit, `go vet ./...`, Linux integration-tag vet,
 `go test -race ./...`, formatting, `go mod verify`, and the Docker Linux
@@ -194,7 +258,7 @@ bug exists; convert them into assertions of the required corrected behavior.
 - #22: an isolated overlay replacing both name regexes with `.*` left tests green.
   Repair the fixtures and repeat that bounded mutation before calling coverage fixed.
 
-## Task index
+## First audit: task index
 
 P1 means urgent correctness/security remediation; P2 means a concrete defect to
 address after its prerequisites. Scope estimates count production/test file groups,
@@ -220,7 +284,7 @@ not elapsed hours: S = about 1-2 files, M = about 3-5. Split larger changes.
 | [#21](https://github.com/anesthetised/lotsman/issues/21) Advertised endpoint | P2 | C | M | Reject empty host and invalid numeric ports while preserving valid address forms. |
 | [#22](https://github.com/anesthetised/lotsman/issues/22) Validation tests | P2 | C | S | Tests reach the intended validator; weakening regex validation makes them fail. |
 
-## Execution order and ownership
+## First audit: execution order and ownership
 
 These are proposed assignments for a future authorized run, not active agents.
 The parent may reduce concurrency to avoid conflicts or unnecessary cost.
@@ -282,7 +346,7 @@ Each task starts with its approved choice, a narrow regression, and an explicit
 compatibility statement. Re-run existing tunnel interoperability, failover,
 pinning, and Linux end-to-end coverage after integration.
 
-## Decisions that remain open
+## First audit: decisions
 
 The #10, #13, #14, and #20 choices are approved by the follow-ups above. Their
 original alternatives below remain for context; consult current issues for the
