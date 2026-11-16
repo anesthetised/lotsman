@@ -22,12 +22,19 @@ type Identity struct {
 	Params awgconf.Params
 }
 
+// identityFile is the on-disk JSON. Files written before the explicit tags
+// have capitalized S1..H4 keys; encoding/json matches keys case-insensitively,
+// so they still load.
 type identityFile struct {
 	PrivateKey string `json:"private_key"`
-	S1, S2     uint16
-	S3, S4     uint16
-	H1, H2     string
-	H3, H4     string
+	S1         uint16 `json:"s1"`
+	S2         uint16 `json:"s2"`
+	S3         uint16 `json:"s3"`
+	S4         uint16 `json:"s4"`
+	H1         string `json:"h1"`
+	H2         string `json:"h2"`
+	H3         string `json:"h3"`
+	H4         string `json:"h4"`
 }
 
 // LoadOrCreateIdentity returns the saved identity, creating it on first use.

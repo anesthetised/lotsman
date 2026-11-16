@@ -386,3 +386,25 @@ func TestMigrationBackupIsPrivateAndRestorable(t *testing.T) {
 	}
 	assertMode(t, path, 0o600)
 }
+
+func TestCorruptTimestampIsReported(t *testing.T) {
+	s := open(t)
+	if _, err := s.CreateUser("alice"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddPeer("alice", DefaultDevice, "nl", subnet); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE users SET created_at = 'garbage'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE peers SET created_at = 'garbage'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ListUsers(); err == nil {
+		t.Error("ListUsers accepted a corrupt created_at")
+	}
+	if _, err := s.ListPeers(); err == nil {
+		t.Error("ListPeers accepted a corrupt created_at")
+	}
+}

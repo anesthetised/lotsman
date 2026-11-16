@@ -13,7 +13,7 @@ COPY . .
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /lotsman ./cmd/lotsman
 
 FROM gcr.io/distroless/static-debian12:nonroot
-# Root: TUN creation and netlink need it even with NET_ADMIN granted.
+# Root: writing /proc/sys needs it. TUN and netlink need only NET_ADMIN.
 USER root
 COPY --from=build /lotsman /usr/local/bin/lotsman
 VOLUME /var/lib/lotsman
