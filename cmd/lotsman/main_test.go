@@ -2,7 +2,10 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"io"
+	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -381,5 +384,43 @@ func TestCLIRejectsInvalidEndpoint(t *testing.T) {
 	after, err := capture(t, "-config", path, "user", "show", "alice", "-profile", "nl")
 	if err != nil || after != before {
 		t.Errorf("valid endpoint no longer reproduces stored peer: %v", err)
+	}
+}
+
+// Client configs depend on provider MTU and S4 only, so user commands must work
+// while DNS fails. config check still resolves provider endpoints.
+func TestUserCommandsWithoutDNS(t *testing.T) {
+	path := testConfig(t)
+	providerPath := filepath.Join(filepath.Dir(path), "nl.conf")
+	provider, err := os.ReadFile(providerPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostname := strings.Replace(string(provider), "192.0.2.1:51820", "vpn.provider.test:51820", 1)
+	if err := os.WriteFile(providerPath, []byte(hostname), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// The Go resolver sends queries through Dial, so none leaves the host.
+	r := net.DefaultResolver
+	preferGo, dial := r.PreferGo, r.Dial
+	r.PreferGo = true
+	r.Dial = func(context.Context, string, string) (net.Conn, error) {
+		return nil, errors.New("DNS disabled by test")
+	}
+	t.Cleanup(func() { r.PreferGo, r.Dial = preferGo, dial })
+
+	if _, err := capture(t, "-config", path, "config", "check"); err == nil || !strings.Contains(err.Error(), "resolve endpoint") {
+		t.Fatalf("config check error = %v, want a resolve error", err)
+	}
+	added, err := capture(t, "-config", path, "user", "add", "alice", "-profile", "nl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client, err := awgconf.Parse(strings.NewReader(added)); err != nil || client.Interface.MTU != 1392 {
+		t.Errorf("user add output is not a config with MTU 1392: %v\n%s", err, added)
+	}
+	shown, err := capture(t, "-config", path, "user", "show", "alice", "-profile", "nl")
+	if err != nil || shown != added {
+		t.Errorf("user show: %v\n%s", err, shown)
 	}
 }

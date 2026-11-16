@@ -134,7 +134,10 @@ the collision and preserves ambiguous interfaces and routes for inspection.
 
 `systemctl reload lotsman` (SIGHUP) applies the file live, without dropping tunnels: upstreams are
 added, removed or replaced (a changed provider config counts as a replacement), profiles and
-`health` are swapped in, and every client is re-evaluated. Clients whose upstream was removed are
+`health` are swapped in, and every client is re-evaluated. A replacement is read, validated and its
+endpoint resolved before the running upstream is touched; if any of that fails, including an
+unreadable provider file, the old upstream keeps running and routing its clients, and the error is
+logged and counted in `lotsman_reloads_total{result="error"}`. Clients whose upstream was removed are
 blocked for a moment and rerouted on the same pass. `listen`, `subnet` and `state_dir` cannot change
 live; a reload that touches them is rejected as a whole and logged. A config that fails validation is
 logged and ignored. A changed client MTU only reaches clients that re-import their config.

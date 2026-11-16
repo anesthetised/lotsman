@@ -1,7 +1,6 @@
 package daemon
 
 import (
-	"context"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -66,7 +65,7 @@ func TestLoadUpstreamParameterBounds(t *testing.T) {
 					if err := os.WriteFile(path, []byte(conf.String()), 0o600); err != nil {
 						t.Fatal(err)
 					}
-					up, err := LoadUpstream(context.Background(), config.Upstream{Name: "bounds", Conf: path}, config.Health{})
+					up, err := LoadUpstream(config.Upstream{Name: "bounds", Conf: path}, config.Health{})
 					if tc.wantError != "" {
 						if err == nil || !strings.Contains(err.Error(), tc.wantError) {
 							t.Fatalf("LoadUpstream error = %v, want %q", err, tc.wantError)
@@ -136,7 +135,7 @@ func TestLoadUpstreamWireSizes(t *testing.T) {
 					if err := os.WriteFile(path, []byte(conf.String()), 0o600); err != nil {
 						t.Fatal(err)
 					}
-					up, err := LoadUpstream(context.Background(), config.Upstream{Name: "wire", Conf: path}, config.Health{})
+					up, err := LoadUpstream(config.Upstream{Name: "wire", Conf: path}, config.Health{})
 					if tc.wantError != "" {
 						if err == nil || !strings.Contains(err.Error(), tc.wantError) {
 							t.Fatalf("LoadUpstream error = %v, want %q", err, tc.wantError)

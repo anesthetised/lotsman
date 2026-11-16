@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/netip"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -160,8 +159,14 @@ func (d *Daemon) start(ctx context.Context) error {
 		return err
 	}
 	for _, u := range d.cfg.Upstreams {
-		up, err := d.openUpstream(ctx, u, d.cfg.Health)
+		up, err := LoadUpstream(u, d.cfg.Health)
 		if err != nil {
+			return err
+		}
+		if err := up.Resolve(ctx); err != nil {
+			return err
+		}
+		if err := d.openDevice(up); err != nil {
 			return err
 		}
 		d.ups = append(d.ups, up)
@@ -177,24 +182,19 @@ func (d *Daemon) start(ctx context.Context) error {
 	return d.down.Up()
 }
 
-// openUpstream loads the provider config and starts its device (still down).
-// Health settings are passed in because Reload opens upstreams before d.cfg
-// switches to the incoming configuration.
-func (d *Daemon) openUpstream(ctx context.Context, u config.Upstream, h config.Health) (*Upstream, error) {
-	up, err := LoadUpstream(ctx, u, h)
+// openDevice creates the TUN for a loaded and resolved upstream and starts
+// its device (still down).
+func (d *Daemon) openDevice(up *Upstream) error {
+	t, err := d.newTUN(up.InterfaceName(), up.MTU)
 	if err != nil {
-		return nil, err
+		return fmt.Errorf("create %s: %w", up.InterfaceName(), err)
 	}
-	t, err := d.newTUN(u.InterfaceName(), up.MTU)
-	if err != nil {
-		return nil, fmt.Errorf("create %s: %w", u.InterfaceName(), err)
-	}
-	up.Device = tunnel.New(u.InterfaceName(), t, d.log)
+	up.Device = tunnel.New(up.InterfaceName(), t, d.log)
 	if err := up.Device.Configure(up.Conf.UAPI()); err != nil {
 		up.Device.Close()
-		return nil, err
+		return err
 	}
-	return up, nil
+	return nil
 }
 
 func (d *Daemon) interfaces() []dataplane.Interface {
@@ -229,8 +229,10 @@ func (d *Daemon) stop() {
 
 // Reload applies a new configuration without dropping anyone's tunnel.
 // Upstreams are matched by name; one whose provider config changed is
-// replaced. Profiles and health settings are swapped in and every peer is
-// re-evaluated. Settings that need a restart reject the whole reload.
+// replaced once the new config loads and resolves, otherwise the running one
+// stays and the error is returned. Profiles and health settings are swapped
+// in and every peer is re-evaluated. Settings that need a restart reject the
+// whole reload.
 func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -247,10 +249,26 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	for _, u := range cfg.Upstreams {
 		old, exists := current[u.Name]
 		delete(current, u.Name)
-		if exists && old.Source == fileContent(u.Conf) {
+		// Health settings are passed in because d.cfg switches to the
+		// incoming configuration only after this loop.
+		up, err := LoadUpstream(u, cfg.Health)
+		unchanged := err == nil && exists && up.Source == old.Source
+		if err == nil && !unchanged {
+			err = up.Resolve(ctx)
+		}
+		if exists && (unchanged || err != nil) {
+			// A broken or unreadable replacement never takes the running
+			// upstream down.
+			if err != nil {
+				errs = append(errs, err)
+			}
 			old.Upstream = u
 			old.Tracker.SetThresholds(cfg.Health.DownAfter, cfg.Health.UpAfter)
 			next = append(next, old)
+			continue
+		}
+		if err != nil {
+			errs = append(errs, err)
 			continue
 		}
 		if exists {
@@ -258,8 +276,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 			d.dropUpstream(old)
 			d.log.Info("upstream replaced", "upstream", u.Name)
 		}
-		up, err := d.openUpstream(ctx, u, cfg.Health)
-		if err != nil {
+		if err := d.openDevice(up); err != nil {
 			errs = append(errs, err)
 			continue
 		}
@@ -311,16 +328,6 @@ func (d *Daemon) dropUpstream(u *Upstream) {
 	}
 	delete(d.aliveFailed, u.Name)
 	u.Device.Close()
-}
-
-// fileContent is the provider file as it is now, or "" if unreadable; an
-// unreadable file counts as changed so the reload reports the error.
-func fileContent(path string) string {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	return string(b)
 }
 
 func restartRequired(old, cfg *config.Config) error {

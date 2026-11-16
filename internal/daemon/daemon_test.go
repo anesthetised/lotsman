@@ -49,18 +49,28 @@ func providerConf(t *testing.T, dir, name, addr string, mtu int) string {
 }
 
 func TestLoadUpstream(t *testing.T) {
+	// Loading never resolves: it must work while DNS fails.
+	dns := &fakeResolver{hosts: map[string]string{}}
+	useResolver(t, dns)
 	dir := t.TempDir()
 	h := config.Health{DownAfter: 2, UpAfter: 1}
 	good := providerConf(t, dir, "good", "10.8.0.2/32", 0)
-	u, err := LoadUpstream(context.Background(), config.Upstream{Name: "good", Conf: good}, h)
+	u, err := LoadUpstream(config.Upstream{Name: "good", Conf: good}, h)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if u.Addr.String() != "10.8.0.2/32" || u.MTU != 1420 || u.Conf.Peers[0].Endpoint != "127.0.0.1:51820" {
+	if u.Addr.String() != "10.8.0.2/32" || u.MTU != 1420 || u.Conf.Peers[0].Endpoint != "localhost:51820" {
 		t.Errorf("upstream = %+v", u)
 	}
 	if !strings.Contains(u.Source, "localhost:51820") {
 		t.Errorf("Source should be the file as written, got %q", u.Source)
+	}
+	if err := u.Resolve(context.Background()); err == nil || !strings.Contains(err.Error(), "upstream good: resolve endpoint") {
+		t.Errorf("Resolve with failing DNS: %v", err)
+	}
+	dns.set("localhost", "127.0.0.1")
+	if err := u.Resolve(context.Background()); err != nil || u.Conf.Peers[0].Endpoint != "127.0.0.1:51820" || u.Endpoint != "localhost:51820" {
+		t.Errorf("Resolve: %v, endpoint %q resolved %q", err, u.Endpoint, u.Conf.Peers[0].Endpoint)
 	}
 
 	bad := map[string]string{
@@ -68,12 +78,13 @@ func TestLoadUpstream(t *testing.T) {
 		"no peer":      strings.Split(mustRead(t, good), "\n[Peer]")[0],
 		"no ipv4":      strings.Replace(mustRead(t, good), "10.8.0.2/32", "fd00::2/128", 1),
 		"no endpoint":  strings.Replace(mustRead(t, good), "Endpoint = localhost:51820\n", "", 1),
+		"bad port":     strings.Replace(mustRead(t, good), "localhost:51820", "localhost:banana", 1),
 	}
 	for name, content := range bad {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(dir, "bad.conf")
 			os.WriteFile(path, []byte(content), 0o600)
-			if _, err := LoadUpstream(context.Background(), config.Upstream{Name: "bad", Conf: path}, h); err == nil {
+			if _, err := LoadUpstream(config.Upstream{Name: "bad", Conf: path}, h); err == nil {
 				t.Error("expected error")
 			}
 		})
@@ -83,7 +94,7 @@ func TestLoadUpstream(t *testing.T) {
 		content := strings.Replace(mustRead(t, good), "localhost:51820", "192.0.2.1:51820", 1)
 		path := filepath.Join(dir, "ip.conf")
 		os.WriteFile(path, []byte(content), 0o600)
-		u, err := LoadUpstream(context.Background(), config.Upstream{Name: "ip", Conf: path}, h)
+		u, err := LoadUpstream(config.Upstream{Name: "ip", Conf: path}, h)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -129,8 +140,11 @@ func TestRefreshEndpoint(t *testing.T) {
 	content := strings.Replace(mustRead(t, path), "localhost:51820", "vpn.provider.test:51820", 1)
 	os.WriteFile(path, []byte(content), 0o600)
 	h := config.Health{DownAfter: 2, UpAfter: 1}
-	u, err := LoadUpstream(context.Background(), config.Upstream{Name: "p", Conf: path}, h)
+	u, err := LoadUpstream(config.Upstream{Name: "p", Conf: path}, h)
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := u.Resolve(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if u.Endpoint != "vpn.provider.test:51820" || u.Conf.Peers[0].Endpoint != "192.0.2.1:51820" {

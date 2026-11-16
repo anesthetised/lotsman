@@ -80,8 +80,11 @@ func checkConfig(configPath string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	for _, u := range cfg.Upstreams {
-		up, err := daemon.LoadUpstream(ctx, u, cfg.Health)
+		up, err := daemon.LoadUpstream(u, cfg.Health)
 		if err != nil {
+			return err
+		}
+		if err := up.Resolve(ctx); err != nil {
 			return err
 		}
 		fmt.Printf("upstream %-10s %s  endpoint %s  address %s  mtu %d  s4 %d\n",
