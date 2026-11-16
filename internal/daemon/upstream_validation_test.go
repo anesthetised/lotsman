@@ -55,6 +55,12 @@ func TestLoadUpstreamParameterBounds(t *testing.T) {
 				{"oversized fixed junk", 1420, awgconf.Params{Jc: 1, Jmin: uint32(family.payloadMax + 1), Jmax: uint32(family.payloadMax + 1)}, "junk packet size must not exceed"},
 				{"oversized junk range", 1420, awgconf.Params{Jc: 1, Jmax: uint32(family.payloadMax + 2)}, "junk packet size must not exceed"},
 				{"dormant oversized junk", 1420, awgconf.Params{Jmax: ^uint32(0)}, ""},
+				{"minimum MTU with content padding", 68 + 64, awgconf.Params{ContentPaddingAddition: awgconf.Range{Hi: 64}}, ""},
+				{"content padding below minimum", 68 + 63, awgconf.Params{ContentPaddingAddition: awgconf.Range{Hi: 64}}, "MTU minus S4 and ContentPaddingAddition must be at least 68 (MTU 131, S4 0, ContentPaddingAddition 0-64)"},
+				{"content padding and S4 below minimum", 68 + 8 + 63, awgconf.Params{S4: 8, ContentPaddingAddition: awgconf.Range{Lo: 64, Hi: 64}}, "MTU minus S4 and ContentPaddingAddition must be at least 68"},
+				{"maximum content padding", 0, awgconf.Params{ContentPaddingAddition: awgconf.Range{Hi: ^uint32(0)}}, "MTU minus S4 and ContentPaddingAddition must be at least 68"},
+				{"content padding leaves wire MTU", family.payloadMax - 32, awgconf.Params{ContentPaddingAddition: awgconf.Range{Hi: 64}}, ""},
+				{"trailers leave wire MTU", family.payloadMax - 32, awgconf.Params{RandomTrailers: true}, ""},
 			} {
 				t.Run(tc.name, func(t *testing.T) {
 					conf := &awgconf.Config{
@@ -154,5 +160,45 @@ func TestLoadUpstreamWireSizes(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+// An AWG 3.x provider config loads, and its content padding reaches the client MTU.
+func TestLoadUpstreamAWG3(t *testing.T) {
+	key, err := awgconf.GeneratePrivateKey()
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := `[Interface]
+PrivateKey = ` + key.String() + `
+Address = 10.8.0.2/32
+S1 = 15
+S2 = 18
+S3 = 20
+S4 = 12
+HeaderProtectionKey = ` + key.Public().String() + `
+ContentPaddingAddition = 16-64
+RekeyAfterTime = 110-130
+RandomTrailers = on
+DisableCookies = off
+
+[Peer]
+PublicKey = ` + key.Public().String() + `
+Endpoint = 192.0.2.1:51820
+AllowedIPs = 0.0.0.0/0
+`
+	path := filepath.Join(t.TempDir(), "provider.conf")
+	if err := os.WriteFile(path, []byte(conf), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	up, err := LoadUpstream(config.Upstream{Name: "awg3", Conf: path}, config.Health{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := up.MTULimit(), (mtu.Upstream{MTU: 1420, S4: 12, ContentPadding: 64}); got != want {
+		t.Fatalf("MTULimit = %+v, want %+v", got, want)
+	}
+	if got := mtu.Client(0, []mtu.Upstream{up.MTULimit()}); got != 1420-12-64 {
+		t.Errorf("client MTU = %d, want %d", got, 1420-12-64)
 	}
 }

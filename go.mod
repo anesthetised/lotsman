@@ -5,7 +5,8 @@ go 1.27.1
 toolchain go1.27.4
 
 require (
-	github.com/amnezia-vpn/amneziawg-go v0.2.20-0.20260724121833-457d920a1a7d
+	github.com/amnezia-vpn/amneziawg-go v0.2.19
+	github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20260828
 	github.com/google/go-cmp v0.7.0
 	github.com/google/nftables v0.3.0
 	github.com/mdp/qrterminal/v3 v3.2.1

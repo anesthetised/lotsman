@@ -80,14 +80,23 @@ func LoadUpstream(u config.Upstream, h config.Health) (*Upstream, error) {
 		m = mtu.DefaultWireGuard
 	}
 	// Linux TUN needs at least 68 bytes, including for the client MTU after
-	// subtracting S4. Compare thresholds to avoid overflowing on a huge MTU.
+	// subtracting S4 and ContentPaddingAddition. Compare thresholds to avoid
+	// overflowing on a huge MTU.
 	s4 := int(conf.Interface.S4)
-	if m < 68+s4 {
+	padding := conf.Interface.ContentPaddingAddition
+	if padding.IsZero() && m < 68+s4 {
 		return nil, fmt.Errorf("upstream %s: [Interface] MTU minus S4 must be at least 68 (MTU %d, S4 %d)", u.Name, m, s4)
 	}
+	if int64(m) < 68+int64(s4)+int64(padding.Hi) {
+		return nil, fmt.Errorf("upstream %s: [Interface] MTU minus S4 and ContentPaddingAddition must be at least 68 (MTU %d, S4 %d, ContentPaddingAddition %s)",
+			u.Name, m, s4, padding)
+	}
 	// AWG reserves a 16-byte transport header and 16-byte authentication tag.
-	// Its content padding clamps to the positive TUN MTU, without rounding
-	// past it, so no additional alignment allowance is needed.
+	// Its default content padding clamps to the positive TUN MTU, without
+	// rounding past it, so no additional alignment allowance is needed.
+	// ContentPaddingAddition and RandomTrailers keep a message below the
+	// runtime's UDP window: 500 bytes or the largest datagram already
+	// exchanged with the provider, which fits payloadMax.
 	if m > payloadMax-32-s4 {
 		return nil, fmt.Errorf("upstream %s: [Interface] MTU plus S4 and transport overhead exceeds UDP payload limit %d for endpoint %s", u.Name, payloadMax, peer.Endpoint)
 	}
@@ -100,6 +109,12 @@ func LoadUpstream(u config.Upstream, h config.Health) (*Upstream, error) {
 		MTU:      m,
 		Tracker:  health.NewTracker(h.DownAfter, h.UpAfter),
 	}, nil
+}
+
+// MTULimit is what the upstream contributes to the client MTU.
+func (u *Upstream) MTULimit() mtu.Upstream {
+	iface := u.Conf.Interface
+	return mtu.Upstream{MTU: u.MTU, S4: iface.S4, ContentPadding: iface.ContentPaddingAddition.Hi}
 }
 
 func routesEverything(prefixes []netip.Prefix) bool {

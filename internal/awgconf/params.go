@@ -6,7 +6,8 @@ import (
 	"strings"
 )
 
-// Range is an AmneziaWG 2.0 header value: a single number or an inclusive "lo-hi" range.
+// Range is an AmneziaWG H1-H4 header or AWG 3.x range value: a single number or
+// an inclusive "lo-hi" range of uint32, as device.UintRange parses it.
 type Range struct {
 	Lo, Hi uint32
 }
@@ -46,6 +47,36 @@ type Params struct {
 	S1, S2, S3, S4 uint16
 	H1, H2, H3, H4 Range
 	I              [5]string
+
+	// AWG 3.x. HeaderProtectionKey and RandomTrailers must match the peer;
+	// the rest is local. The runtime treats an all-zero key and a 0 range as
+	// unset, and picks timings in seconds from a range per use.
+	HeaderProtectionKey    Key
+	ContentPaddingAddition Range
+	RekeyAfterTime         Range
+	RekeyTimeout           Range
+	RejectAfterTime        Range
+	KeepaliveTimeout       Range
+	MaxHandshakeAttempts   Range
+	RandomTrailers         bool
+	DisableCookies         bool
+}
+
+type namedRange struct {
+	conf, uapi string
+	r          Range
+}
+
+// awg3Ranges pairs each AWG 3.x range with its .conf and UAPI key.
+func (p Params) awg3Ranges() []namedRange {
+	return []namedRange{
+		{"ContentPaddingAddition", "content_padding_addition", p.ContentPaddingAddition},
+		{"RekeyAfterTime", "rekey_after_time", p.RekeyAfterTime},
+		{"RekeyTimeout", "rekey_timeout", p.RekeyTimeout},
+		{"RejectAfterTime", "reject_after_time", p.RejectAfterTime},
+		{"KeepaliveTimeout", "keepalive_timeout", p.KeepaliveTimeout},
+		{"MaxHandshakeAttempts", "max_handshake_attempts", p.MaxHandshakeAttempts},
+	}
 }
 
 // UAPI renders the parameters as amneziawg-go device configuration lines.
@@ -71,5 +102,35 @@ func (p Params) UAPI() string {
 			line(fmt.Sprintf("i%d", i+1), v)
 		}
 	}
+	if !p.HeaderProtectionKey.IsZero() {
+		line("header_protection_key", p.HeaderProtectionKey.Hex())
+	}
+	for _, n := range p.awg3Ranges() {
+		if !n.r.IsZero() {
+			line(n.uapi, n.r)
+		}
+	}
+	if p.RandomTrailers {
+		line("random_trailers", true)
+	}
+	if p.DisableCookies {
+		line("disable_cookies", true)
+	}
 	return b.String()
+}
+
+// parseFlag reads an AWG 3.x boolean. Official configs write on/off, which
+// amneziawg-tools accepts; the runtime's UAPI parses strconv.ParseBool forms.
+func parseFlag(s string) (bool, error) {
+	switch {
+	case strings.EqualFold(s, "on"):
+		return true, nil
+	case strings.EqualFold(s, "off"):
+		return false, nil
+	}
+	v, err := strconv.ParseBool(s)
+	if err != nil {
+		return false, fmt.Errorf("flag %q: want on, off, true, false, 1 or 0", s)
+	}
+	return v, nil
 }

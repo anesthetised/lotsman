@@ -124,6 +124,15 @@ func Parse(r io.Reader) (*Config, error) {
 			return nil, fmt.Errorf("[Interface] junk packet size must not exceed 65527")
 		}
 	}
+	// The runtime refuses a nonzero key unless each padding holds the nonce;
+	// an all-zero key disables header protection.
+	if !p.HeaderProtectionKey.IsZero() {
+		for i, s := range [4]uint16{p.S1, p.S2, p.S3, p.S4} {
+			if s < headerNonceSize {
+				return nil, fmt.Errorf("[Interface] HeaderProtectionKey requires S1-S4 of at least %d, got S%d = %d", headerNonceSize, i+1, s)
+			}
+		}
+	}
 	// Smaller IPv4 limits are applied once the endpoint is known.
 	if err := p.CheckWireSizes(65527); err != nil {
 		return nil, err
@@ -167,6 +176,27 @@ func (iface *Interface) set(key, value string) (err error) {
 		iface.H4, err = ParseRange(value)
 	case "i1", "i2", "i3", "i4", "i5":
 		iface.I[key[1]-'1'] = value
+	case "headerprotectionkey":
+		iface.HeaderProtectionKey, err = ParseKey(value)
+	case "contentpaddingaddition":
+		iface.ContentPaddingAddition, err = ParseRange(value)
+	case "rekeyaftertime":
+		iface.RekeyAfterTime, err = ParseRange(value)
+	case "rekeytimeout":
+		iface.RekeyTimeout, err = ParseRange(value)
+	case "rejectaftertime":
+		iface.RejectAfterTime, err = ParseRange(value)
+	case "keepalivetimeout":
+		iface.KeepaliveTimeout, err = ParseRange(value)
+	case "maxhandshakeattempts":
+		iface.MaxHandshakeAttempts, err = ParseRange(value)
+	case "randomtrailers":
+		iface.RandomTrailers, err = parseFlag(value)
+	case "disablecookies":
+		iface.DisableCookies, err = parseFlag(value)
+	case "j1", "j2", "j3", "itime":
+		name := strings.ToUpper(key[:1]) + key[1:]
+		return fmt.Errorf("%s is an AmneziaWG 1.5 key, which Lotsman does not support; ask the provider for an AmneziaWG 2.0 or newer config", name)
 	default:
 		if !ignoredKeys[key] {
 			return fmt.Errorf("unsupported [Interface] key %q", key)
@@ -236,6 +266,20 @@ func (c *Config) String() string {
 		if v != "" {
 			line(fmt.Sprintf("I%d", i+1), v)
 		}
+	}
+	if !iface.HeaderProtectionKey.IsZero() {
+		line("HeaderProtectionKey", iface.HeaderProtectionKey)
+	}
+	for _, n := range iface.awg3Ranges() {
+		if !n.r.IsZero() {
+			line(n.conf, n.r)
+		}
+	}
+	if iface.RandomTrailers {
+		line("RandomTrailers", "on")
+	}
+	if iface.DisableCookies {
+		line("DisableCookies", "on")
 	}
 	for _, p := range c.Peers {
 		b.WriteString("\n[Peer]\n")

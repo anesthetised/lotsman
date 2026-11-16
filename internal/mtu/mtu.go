@@ -17,6 +17,11 @@ const Ethernet = 1500
 type Upstream struct {
 	MTU int    // the upstream interface MTU (provider config or DefaultWireGuard)
 	S4  uint16 // AmneziaWG transport padding on that upstream
+	// ContentPadding is the upper bound of the AWG 3 ContentPaddingAddition
+	// on that upstream, added to each transport message. The runtime also
+	// caps it at the largest datagram exchanged with the provider, but that
+	// can exceed this MTU when the provider sends larger packets.
+	ContentPadding uint32
 }
 
 // Client returns the largest packet a client can send into its tunnel such that it
@@ -28,7 +33,7 @@ func Client(s4Down uint16, upstreams []Upstream) int {
 		if m == 0 {
 			m = DefaultWireGuard
 		}
-		if fits := m - int(u.S4); fits < best {
+		if fits := m - int(u.S4) - int(u.ContentPadding); fits < best {
 			best = fits
 		}
 	}

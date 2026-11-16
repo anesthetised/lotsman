@@ -12,7 +12,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/amnezia-vpn/amneziawg-go/tun"
+	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
 
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/dataplane"
