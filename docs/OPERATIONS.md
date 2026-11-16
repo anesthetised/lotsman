@@ -250,8 +250,7 @@ stays down. A `reporter` section is ignored.
 The URL is a credential: whoever has it gets the key, so it gets the same treatment as a key: it
 is never logged or quoted. Lotsman fetches the key over HTTPS from the host's own network (not
 through an upstream), with standard certificate checks against the system roots, following
-redirects only to `https://`, each fetch bounded like an endpoint lookup (half the health interval,
-at least 1 s). The response may be an `ss://` key, Outline's JSON (`server`, `server_port`,
+redirects only to `https://`, each fetch bounded by half the health interval, at least 5 s. The response may be an `ss://` key, Outline's JSON (`server`, `server_port`,
 `method`, `password`, optional `prefix`) or an Outline `transport:` config as described under
 WebSocket keys; an `{"error": {"message": …}}` answer is a failed fetch whose message is logged.
 The key is fetched:

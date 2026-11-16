@@ -499,15 +499,18 @@ func (d *Daemon) loadResolved(ctx context.Context, u config.Upstream, h config.H
 	if unchanged && up.Location == nil {
 		return up, nil
 	}
-	ctx, cancel := context.WithTimeout(ctx, probeTimeout(h))
-	defer cancel()
 	if up.Location != nil {
 		// A running upstream keeps its key when the fetch fails, so only a
 		// new one falls back on the cache.
-		if err := d.acquireKey(ctx, up, stateDir, !unchanged); err != nil {
+		fctx, cancel := context.WithTimeout(ctx, fetchTimeout(probeTimeout(h)))
+		err := d.acquireKey(fctx, up, stateDir, !unchanged)
+		cancel()
+		if err != nil {
 			return nil, err
 		}
 	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout(h))
+	defer cancel()
 	if err := up.Resolve(ctx); err != nil {
 		return nil, err
 	}
@@ -748,6 +751,12 @@ func probeTimeout(h config.Health) time.Duration {
 	return max(h.Interval/2, time.Second)
 }
 
+// fetchTimeout bounds a dynamic key fetch: the probe timeout, but at least
+// long enough for an HTTPS exchange over a slow or filtered path.
+func fetchTimeout(probe time.Duration) time.Duration {
+	return max(probe, 5*time.Second)
+}
+
 // probeAny tries every target at once and passes when any answers, reporting
 // the fastest latency. The first answer cancels the others, and probeAny
 // returns only after every attempt has, so none outlives the round. d.mu is
@@ -941,16 +950,18 @@ func (d *Daemon) watchFailed(err error) {
 // again first, at most every keyRefreshInterval; if that fails, the running
 // key stays. u.Location never changes, so reading it needs no lock.
 func (d *Daemon) refreshEndpoint(ctx context.Context, u *Upstream, endpoint, stateDir string, timeout time.Duration) {
-	ctx, cancel := context.WithTimeout(ctx, timeout)
 	var fetched *dynamicKey
 	var fetchErr error
 	if u.Location != nil && d.fetchDue(u.Name) {
-		k, err := fetchKey(ctx, u.Location)
+		fctx, cancel := context.WithTimeout(ctx, fetchTimeout(timeout))
+		k, err := fetchKey(fctx, u.Location)
+		cancel()
 		if err == nil {
 			fetched, endpoint = &k, k.key.Server()
 		}
 		fetchErr = err
 	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	resolved, err := resolveEndpoint(ctx, endpoint)
 	cancel()
 	d.mu.Lock()

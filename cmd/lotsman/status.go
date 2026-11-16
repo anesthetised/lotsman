@@ -85,7 +85,7 @@ func checkConfig(configPath string) error {
 		if ups[i], err = daemon.LoadUpstream(u, cfg.Health); err != nil {
 			return err
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), max(cfg.Health.Interval/2, time.Second))
+		ctx, cancel := context.WithTimeout(context.Background(), max(cfg.Health.Interval/2, 5*time.Second))
 		fetchErrs[i] = ups[i].Fetch(ctx)
 		cancel()
 	}
