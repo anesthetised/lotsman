@@ -51,6 +51,20 @@ func parseShadowsocks(rest string) (*shadowsocksKey, error) {
 		}
 		server = decoded[i+1:]
 	}
+	values, err := url.ParseQuery(query)
+	if err != nil {
+		return nil, errors.New("ss key: malformed query")
+	}
+	if values.Has("plugin") {
+		return nil, errors.New("ss key: plugins are not supported")
+	}
+	return newShadowsocksKey(server, method, password, values.Get("prefix"))
+}
+
+// newShadowsocksKey checks a key's parts, however they were written. The
+// prefix is Outline's, decoded from any URL escaping. No error quotes the
+// password.
+func newShadowsocksKey(server, method, password, prefixText string) (*shadowsocksKey, error) {
 	if err := splitServer(server); err != nil {
 		return nil, fmt.Errorf("ss key: %w", err)
 	}
@@ -63,14 +77,7 @@ func parseShadowsocks(rest string) (*shadowsocksKey, error) {
 		// Not quoted: a malformed key may put the password here.
 		return nil, errors.New("ss key: unsupported cipher; want chacha20-ietf-poly1305, aes-256-gcm, aes-192-gcm or aes-128-gcm (AEAD only)")
 	}
-	values, err := url.ParseQuery(query)
-	if err != nil {
-		return nil, errors.New("ss key: malformed query")
-	}
-	if values.Has("plugin") {
-		return nil, errors.New("ss key: plugins are not supported")
-	}
-	prefix, err := parsePrefix(values.Get("prefix"))
+	prefix, err := parsePrefix(prefixText)
 	if err != nil {
 		return nil, err
 	}

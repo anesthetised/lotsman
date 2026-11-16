@@ -25,14 +25,16 @@ import (
 type Upstream struct {
 	config.Upstream
 	Conf     *awgconf.Config // kind awg: the provider config, its endpoint resolved by Resolve
-	Key      proxy.Key       // proxy kinds: the access key
+	Key      proxy.Key       // proxy kinds: the access key; for a dynamic key, set by Fetch
+	Location *proxy.Location // a dynamic key's URL, a secret like the key; nil for a static key
 	Source   string          // the provider file as loaded, to detect edits on reload
 	Endpoint string          // the server as written, possibly a hostname
 	Resolved string          // Endpoint's current address, set by Resolve
 	Addr     netip.Prefix    // the TUN's IPv4 address, also the probe source
 	MTU      int
 	Tracker  *health.Tracker
-	link     link // set by open
+	keyText  string // a dynamic key's response as fetched, to detect a changed key
+	link     link   // set by open
 }
 
 // link carries an upstream's traffic on its TUN: an AmneziaWG device or a
@@ -40,8 +42,9 @@ type Upstream struct {
 type link interface {
 	Up() error
 	Close()
-	// SetEndpoint points the link at a new address of its server.
-	SetEndpoint(resolved string) error
+	// SetServer points the link at its server's current address and, for a
+	// proxy link, at its current key; an AWG link gets a nil key.
+	SetServer(key proxy.Key, resolved string) error
 	Stats() linkStats
 }
 
@@ -74,15 +77,60 @@ func LoadUpstream(u config.Upstream, h config.Health) (*Upstream, error) {
 	return up, nil
 }
 
-// loadProxy reads an access key. The key is a secret, so errors never quote
-// the file.
+// loadProxy reads an access key, or the URL of a dynamic one, which Fetch
+// downloads. Both are secrets, so errors never quote the file.
 func loadProxy(source []byte) (*Upstream, error) {
+	// Nothing on the TUN adds overhead: the stack terminates every flow.
+	up := &Upstream{Addr: config.ProxyAddress, MTU: mtu.Ethernet}
+	if proxy.IsDynamic(string(source)) {
+		loc, err := proxy.ParseLocation(string(source))
+		if err != nil {
+			return nil, err
+		}
+		up.Location = loc
+		return up, nil
+	}
 	key, err := proxy.ParseKey(string(source))
 	if err != nil {
 		return nil, err
 	}
-	// Nothing on the TUN adds overhead: the stack terminates every flow.
-	return &Upstream{Key: key, Endpoint: key.Server(), Addr: config.ProxyAddress, MTU: mtu.Ethernet}, nil
+	up.Key, up.Endpoint = key, key.Server()
+	return up, nil
+}
+
+// fetchClient fetches dynamic keys; swapped in tests.
+var fetchClient = proxy.NewFetchClient(nil)
+
+// dynamicKey is a fetched key with the response it was read from.
+type dynamicKey struct {
+	key  proxy.Key
+	text string
+}
+
+// fetchKey downloads a dynamic key over the host's network. It takes no lock
+// and changes nothing.
+func fetchKey(ctx context.Context, loc *proxy.Location) (dynamicKey, error) {
+	key, text, err := proxy.FetchKey(ctx, fetchClient, loc)
+	return dynamicKey{key, text}, err
+}
+
+// Fetch downloads a dynamic key and installs it on an upstream that is not
+// running; for a static key it does nothing. Resolve comes after.
+func (u *Upstream) Fetch(ctx context.Context) error {
+	if u.Location == nil {
+		return nil
+	}
+	k, err := fetchKey(ctx, u.Location)
+	if err != nil {
+		return fmt.Errorf("upstream %s: %w", u.Name, err)
+	}
+	u.setKey(k)
+	return nil
+}
+
+// setKey installs a dynamic key on an upstream that is not running.
+func (u *Upstream) setKey(k dynamicKey) {
+	u.Key, u.keyText, u.Endpoint = k.key, k.text, k.key.Server()
 }
 
 func loadAWG(source []byte) (*Upstream, error) {
@@ -183,6 +231,9 @@ func firstIPv4(prefixes []netip.Prefix) (netip.Prefix, bool) {
 // Resolve finds the endpoint's current address: amneziawg-go's UAPI takes
 // addresses only, and a proxy stack must not look up its server per flow.
 func (u *Upstream) Resolve(ctx context.Context) error {
+	if u.Location != nil && u.Key == nil {
+		return fmt.Errorf("upstream %s: dynamic key not fetched", u.Name)
+	}
 	resolved, err := resolveEndpoint(ctx, u.Endpoint)
 	if err != nil {
 		return fmt.Errorf("upstream %s: %w", u.Name, err)
@@ -227,14 +278,29 @@ func (u *Upstream) open(t tun.Device, log *slog.Logger) error {
 
 // SetEndpoint points the running link at a freshly resolved endpoint if the
 // server moved to another address, and returns whether it changed. The
-// caller resolves u.Endpoint first; it is fixed at load, so that needs no
-// lock. Literal IP endpoints resolve to themselves and never change.
+// caller resolves u.Endpoint first. Literal IP endpoints resolve to
+// themselves and never change.
 func (u *Upstream) SetEndpoint(resolved string) (bool, error) {
-	if resolved == u.Resolved {
+	return u.setServer(nil, resolved)
+}
+
+// setServer points the running link at resolved and, when k is set and
+// differs from the running key, at k; resolved is then k's server resolved.
+// New flows use them, open ones stay. It returns whether anything changed.
+func (u *Upstream) setServer(k *dynamicKey, resolved string) (bool, error) {
+	newKey := k != nil && k.text != u.keyText
+	if !newKey && resolved == u.Resolved {
 		return false, nil
 	}
-	if err := u.link.SetEndpoint(resolved); err != nil {
+	key := u.Key
+	if newKey {
+		key = k.key
+	}
+	if err := u.link.SetServer(key, resolved); err != nil {
 		return false, err
+	}
+	if newKey {
+		u.Key, u.keyText, u.Endpoint = k.key, k.text, k.key.Server()
 	}
 	u.setResolved(resolved)
 	return true, nil
@@ -249,7 +315,7 @@ type awgLink struct {
 func (l *awgLink) Up() error { return l.dev.Up() }
 func (l *awgLink) Close()    { l.dev.Close() }
 
-func (l *awgLink) SetEndpoint(resolved string) error {
+func (l *awgLink) SetServer(_ proxy.Key, resolved string) error {
 	return l.dev.Configure("public_key=" + l.peer.Hex() + "\nupdate_only=true\nendpoint=" + resolved + "\n")
 }
 
@@ -271,21 +337,26 @@ func (l *proxyLink) Up() error { return nil }
 func (l *proxyLink) Close()    { l.stack.Close() }
 
 func (l *proxyLink) dialers(resolved string) (proxy.Dialers, error) {
+	return keyDialers(l.key, resolved)
+}
+
+func keyDialers(key proxy.Key, resolved string) (proxy.Dialers, error) {
 	addr, err := netip.ParseAddrPort(resolved)
 	if err != nil {
 		return proxy.Dialers{}, fmt.Errorf("server address %q: %w", resolved, err)
 	}
-	return l.key.Dialers(addr)
+	return key.Dialers(addr)
 }
 
-// SetEndpoint swaps the dialers at once: new flows reach the new address,
-// open ones stay where they are.
-func (l *proxyLink) SetEndpoint(resolved string) error {
-	d, err := l.dialers(resolved)
+// SetServer swaps the dialers at once: new flows reach the new address with
+// the new key, open ones stay where they are.
+func (l *proxyLink) SetServer(key proxy.Key, resolved string) error {
+	d, err := keyDialers(key, resolved)
 	if err != nil {
 		return err
 	}
 	l.stack.SetDialers(d)
+	l.key = key
 	return nil
 }
 

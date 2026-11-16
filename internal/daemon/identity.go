@@ -161,10 +161,17 @@ func saveIdentity(path string, id Identity, publish func(oldpath, newpath string
 	if err != nil {
 		return err
 	}
+	return writePrivate(path, data, publish)
+}
+
+// writePrivate publishes data at path atomically as a 0600 file: it writes a
+// temp file in the same directory, creating the directory 0700 if missing,
+// and moves it into place with publish (os.Rename or os.Link).
+func writePrivate(path string, data []byte, publish func(oldpath, newpath string) error) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".identity-*.tmp") // mode 0600
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+"-*.tmp") // mode 0600
 	if err != nil {
 		return err
 	}

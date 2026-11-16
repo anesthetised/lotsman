@@ -72,12 +72,28 @@ func checkConfig(configPath string) error {
 	if err != nil {
 		return err
 	}
+	// Dynamic keys first, each bounded like the daemon's fetch, so a slow
+	// URL does not eat the lookup budget below.
+	ups := make([]*daemon.Upstream, len(cfg.Upstreams))
+	fetchErrs := make([]error, len(cfg.Upstreams))
+	for i, u := range cfg.Upstreams {
+		if ups[i], err = daemon.LoadUpstream(u, cfg.Health); err != nil {
+			return err
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), max(cfg.Health.Interval/2, time.Second))
+		fetchErrs[i] = ups[i].Fetch(ctx)
+		cancel()
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	for _, u := range cfg.Upstreams {
-		up, err := daemon.LoadUpstream(u, cfg.Health)
-		if err != nil {
-			return err
+	var warnings []string
+	for i, u := range cfg.Upstreams {
+		up := ups[i]
+		if err := fetchErrs[i]; err != nil {
+			// Not fatal, as for the daemon, which runs this before it starts.
+			fmt.Printf("upstream %-10s %s  kind %s  dynamic key not fetched\n", u.Name, u.InterfaceName(), u.Kind)
+			warnings = append(warnings, fmt.Sprintf("%v; the daemon uses the key it cached last, if any, or keeps the upstream down until a fetch succeeds", err))
+			continue
 		}
 		if err := up.Resolve(ctx); err != nil {
 			return err
@@ -86,6 +102,9 @@ func checkConfig(configPath string) error {
 			u.Name, u.InterfaceName(), u.Kind, up.Resolved, up.Addr, up.MTU)
 		if up.Key != nil {
 			// The key's description never includes its secret.
+			if up.Location != nil {
+				line += "  dynamic"
+			}
 			line += fmt.Sprintf("  %s  max_flows %d", up.Key, cmp.Or(u.MaxFlows, proxy.DefaultMaxFlows))
 		} else {
 			line += fmt.Sprintf("  s4 %d", up.Conf.Interface.S4)
@@ -100,7 +119,7 @@ func checkConfig(configPath string) error {
 		health += "  dns " + cfg.Health.DNS.String()
 	}
 	fmt.Println(health)
-	for _, w := range cfg.Warnings() {
+	for _, w := range append(cfg.Warnings(), warnings...) {
 		fmt.Println("warning:", w)
 	}
 	fmt.Println("config OK")

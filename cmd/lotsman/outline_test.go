@@ -105,6 +105,30 @@ func TestUpstreamStatusShowsKind(t *testing.T) {
 	}
 }
 
+// A dynamic key that cannot be fetched is a warning: config check runs
+// before the daemon starts, which keeps that upstream down and retries.
+func TestConfigCheckDynamicKeyUnreachable(t *testing.T) {
+	path := outlineConfig(t)
+	// Port 1 on loopback refuses at once.
+	os.WriteFile(filepath.Join(filepath.Dir(path), "ol.key"), []byte("ssconf://127.0.0.1:1/"+outlineSecret+"#name\n"), 0o600)
+	out, err := capture(t, "-config", path, "config", "check")
+	if err != nil {
+		t.Fatalf("config check: %v\n%s", err, out)
+	}
+	for _, want := range []string{
+		"lm-up-ol  kind outline  dynamic key not fetched",
+		"warning: upstream ol: fetch dynamic key: ",
+		"config OK",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("config check output lacks %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, outlineSecret) {
+		t.Errorf("config check prints the URL:\n%s", out)
+	}
+}
+
 // tableFields returns the fields of the first line whose first field is key.
 func tableFields(table, key string) []string {
 	for line := range strings.Lines(table) {

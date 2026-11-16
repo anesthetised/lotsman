@@ -4,14 +4,19 @@ package main
 
 import (
 	"context"
+	"encoding/pem"
+	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -225,4 +230,131 @@ metrics: {listen: 127.0.0.1:19100}
 	if err := c.dnsVia(3); err == nil {
 		t.Error("client still resolves with every upstream down")
 	}
+}
+
+// TestEndToEndOutlineDynamicKey runs an Outline upstream from an ssconf://
+// key: fetched at start, rotated to another server on reload without
+// reopening the upstream, and taken from the cache when a restart finds the
+// key's URL failing.
+func TestEndToEndOutlineDynamicKey(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root: creates TUNs and programs the kernel")
+	}
+	dir := t.TempDir()
+	a, keyA := newOutline(t)
+	b, keyB := newOutline(t)
+	var mu sync.Mutex
+	served, status := keyA, http.StatusOK
+	keys := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Path != "/s3cr3t-e2e" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(status)
+		fmt.Fprintln(w, served)
+	}))
+	defer keys.Close()
+	offer := func(key string, code int) {
+		mu.Lock()
+		defer mu.Unlock()
+		served, status = key, code
+	}
+	// The daemon verifies the key server against the system roots; in this
+	// test binary nothing has loaded them before, so the environment
+	// variable Go reads for them still applies.
+	ca := filepath.Join(dir, "ca.pem")
+	os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: keys.Certificate().Raw}), 0o600)
+	t.Setenv("SSL_CERT_FILE", ca)
+	url := strings.Replace(keys.URL, "https://", "ssconf://", 1) + "/s3cr3t-e2e#Outline"
+	os.WriteFile(filepath.Join(dir, "ol.key"), []byte(url+"\n"), 0o600)
+
+	cfgPath := filepath.Join(dir, "lotsman.yaml")
+	os.WriteFile(cfgPath, []byte(`
+listen: 127.0.0.1:51820
+endpoint: 127.0.0.1:51820
+state_dir: `+filepath.Join(dir, "state")+`
+upstreams:
+  - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, provider: outline}
+profiles:
+  - {name: p, prefer: [{provider: outline}]}
+health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_after: 2, up_after: 1}
+`), 0o600)
+
+	out, err := capture(t, "-config", cfgPath, "config", "check")
+	if err != nil || !strings.Contains(out, "lm-up-ol  kind outline") || !strings.Contains(out, "dynamic  shadowsocks") ||
+		strings.Contains(out, "s3cr3t") || strings.Contains(out, "outline-secret") {
+		t.Fatalf("config check: %v\n%s", err, out)
+	}
+
+	start := func() (stop func()) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- serve(ctx, cfgPath, slog.LevelInfo) }()
+		var once sync.Once
+		stop = func() {
+			once.Do(func() {
+				cancel()
+				if err := <-done; err != nil {
+					t.Errorf("serve: %v", err)
+				}
+			})
+		}
+		t.Cleanup(stop)
+		eventually(t, "daemon status", 5*time.Second, func() bool {
+			_, err := os.Stat(filepath.Join(dir, "state", "status.json"))
+			return err == nil
+		})
+		return stop
+	}
+	exits := func(s *proxytest.Server) int {
+		return strings.Count(strings.Join(s.Seen(), ","), "tcp 198.51.100.1:443")
+	}
+
+	stop := start()
+	out, err = capture(t, "-config", cfgPath, "user", "add", "alice", "-profile", "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := newClient(t, out)
+	eventually(t, "exit via the fetched key's server", 15*time.Second, func() bool {
+		got, err := c.exitVia(2 * time.Second)
+		return err == nil && got == "ol" && exits(a) > 0
+	})
+	if info, err := os.Stat(filepath.Join(dir, "state", "ssconf", "ol.json")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("cached key: %v", err)
+	}
+
+	// A rotated key applies on reload to the running upstream: new
+	// connections reach the other server through the same interface.
+	index := linkIndex(t, "lm-up-ol")
+	offer(keyB, http.StatusOK)
+	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	eventually(t, "exit via the rotated key's server", 15*time.Second, func() bool {
+		got, err := c.exitVia(2 * time.Second)
+		return err == nil && got == "ol" && exits(b) > 0
+	})
+	if linkIndex(t, "lm-up-ol") != index {
+		t.Error("the upstream was reopened for a new key")
+	}
+	before := exits(a)
+	if got, err := c.exitVia(2 * time.Second); err != nil || got != "ol" || exits(a) != before {
+		t.Errorf("after rotation: %q, %v; old server got %d new connections", got, err, exits(a)-before)
+	}
+
+	// A restart while the URL fails runs on the cached key.
+	offer("", http.StatusServiceUnavailable)
+	stop()
+	start()
+	out, err = capture(t, "-config", cfgPath, "user", "show", "alice", "-profile", "p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c = newClient(t, out) // a fresh handshake with the restarted daemon
+	before = exits(b)
+	eventually(t, "exit via the cached key's server", 15*time.Second, func() bool {
+		got, err := c.exitVia(2 * time.Second)
+		return err == nil && got == "ol" && exits(b) > before
+	})
 }
