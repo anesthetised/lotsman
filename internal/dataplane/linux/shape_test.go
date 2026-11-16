@@ -5,6 +5,7 @@ package linux
 import (
 	"net"
 	"net/netip"
+	"reflect"
 	"testing"
 
 	"github.com/vishvananda/netlink"
@@ -67,6 +68,76 @@ func TestOursMatchesOnlyTheRulesWeInstall(t *testing.T) {
 		if got := ours(tt.rule); got != tt.want {
 			t.Errorf("%s: ours = %v, want %v", tt.name, got, tt.want)
 		}
+	}
+}
+
+// TestOursRejectsEveryExtraSelector sets, one at a time, each selector of
+// netlink.Rule that Lotsman never uses, on each rule shape it installs.
+func TestOursRejectsEveryExtraSelector(t *testing.T) {
+	full := uint32(0xffffffff)
+	shapes := []struct {
+		name string
+		rule func(edit ...func(*netlink.Rule)) netlink.Rule
+	}{
+		{"peer", func(edit ...func(*netlink.Rule)) netlink.Rule {
+			return shapeRule(peerRulePriority, "10.77.0.5", 1003, edit...)
+		}},
+		{"probe", func(edit ...func(*netlink.Rule)) netlink.Rule {
+			return shapeRule(probeRulePriority, "10.8.0.2", 1003, edit...)
+		}},
+		{"pin", func(edit ...func(*netlink.Rule)) netlink.Rule {
+			pin := func(r *netlink.Rule) { r.Mark, r.Mask = 1003, &full }
+			return shapeRule(pinRulePriority, "10.77.0.5", 1003, append([]func(*netlink.Rule){pin}, edit...)...)
+		}},
+	}
+	extras := []struct {
+		name string
+		edit func(*netlink.Rule)
+	}{
+		{"dst", func(r *netlink.Rule) { r.Dst = &net.IPNet{IP: net.IPv4(1, 1, 1, 1).To4(), Mask: net.CIDRMask(32, 32)} }},
+		{"iifname", func(r *netlink.Rule) { r.IifName = "eth0" }},
+		{"tos", func(r *netlink.Rule) { r.Tos = 4 }},
+		{"tun id", func(r *netlink.Rule) { r.TunID = 7 }},
+		{"goto", func(r *netlink.Rule) { r.Goto = 6000 }},
+		{"goto 0", func(r *netlink.Rule) { r.Goto = 0 }},
+		{"flow", func(r *netlink.Rule) { r.Flow = 5 }},
+		{"suppress ifgroup", func(r *netlink.Rule) { r.SuppressIfgroup = 1 }},
+		{"suppress prefixlen", func(r *netlink.Rule) { r.SuppressPrefixlen = 0 }},
+		{"invert", func(r *netlink.Rule) { r.Invert = true }},
+		{"dport", func(r *netlink.Rule) { r.Dport = netlink.NewRulePortRange(443, 443) }},
+		{"sport", func(r *netlink.Rule) { r.Sport = netlink.NewRulePortRange(1024, 2048) }},
+		{"ip proto", func(r *netlink.Rule) { r.IPProto = 17 }},
+		{"uid range", func(r *netlink.Rule) { r.UIDRange = netlink.NewRuleUIDRange(1000, 1000) }},
+		{"protocol", func(r *netlink.Rule) { r.Protocol = 12 }},
+		{"type", func(r *netlink.Rule) { r.Type = 6 }},
+		{"family", func(r *netlink.Rule) { r.Family = netlink.FAMILY_V6 }},
+	}
+	for _, s := range shapes {
+		if !ours(s.rule()) {
+			t.Fatalf("%s: the plain rule is not ours", s.name)
+		}
+		for _, e := range extras {
+			if ours(s.rule(e.edit)) {
+				t.Errorf("%s with %s: ours = true, want false", s.name, e.name)
+			}
+		}
+	}
+	for _, s := range shapes[:2] {
+		if ours(s.rule(func(r *netlink.Rule) { r.Mark = 1003 })) {
+			t.Errorf("%s with a mark: ours = true, want false", s.name)
+		}
+	}
+	if ours(shapes[2].rule(func(r *netlink.Rule) { r.OifName = "lm-up-a" })) {
+		t.Error("pin with oif: ours = true, want false")
+	}
+}
+
+// TestRuleFieldsAreAccountedFor fails when a netlink upgrade adds a Rule field:
+// ours and noOtherSelectors must then decide whether Lotsman installs it.
+func TestRuleFieldsAreAccountedFor(t *testing.T) {
+	const accounted = 22 // 7 compared by ours + 15 rejected by noOtherSelectors
+	if got := reflect.TypeOf(netlink.Rule{}).NumField(); got != accounted {
+		t.Errorf("netlink.Rule has %d fields, ours accounts for %d: review ours and noOtherSelectors", got, accounted)
 	}
 }
 
