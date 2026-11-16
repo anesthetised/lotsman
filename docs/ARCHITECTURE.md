@@ -144,8 +144,9 @@ plus spoofing, IPv4 only), terminates each TCP connection and UDP flow, and re-o
 through a `Dialers` value: a `transport.StreamDialer` and `transport.PacketListener` from the
 Outline SDK (`golang.getoutline.org/sdk`, `transport/shadowsocks`), plus an optional closer. A
 `proxy.Key` parses an access key and builds the dialers for a resolved server address; `ss://` is
-the only one so far. The daemon sees either kind through one small `link` interface (`Up`, `Close`,
-`SetEndpoint`, `Stats`), so loading, reload, health, routing and status stay one code path.
+the only one so far, static or fetched from an `ssconf://` URL. The daemon sees either kind through
+one small `link` interface (`Up`, `Close`, `SetServer`, `Stats`), so loading, reload, health,
+routing and status stay one code path.
 
 Alternatives rejected: the SDK's `network/lwip2transport` (cgo, one process-wide instance, so at
 most one Outline upstream); external processes such as outline-cli or sing-box (not embedded, and
@@ -181,6 +182,16 @@ its API is unstable; the `ss://` grammar is small enough to own).
   outer path is the kernel's TCP and UDP to the server.
 - Endpoint: a hostname server is resolved up front like an AWG endpoint, never per flow, and
   re-resolved when probes fail; new dialers are swapped in atomically and apply to new flows.
+- Dynamic keys (`ssconf://`): loading stays offline and keeps only the URL; the key is fetched in
+  the same unlocked phase as the endpoint lookup (start, reload, reopen) and when probes fail, at
+  most every 5 minutes per upstream so a dead server does not become a request stream to the
+  provider. A changed key goes to the running link through `SetServer`, the same path as a moved
+  endpoint, so no TUN or stack is reopened. Response formats follow the Outline client
+  (outline-apps `client/go/outline/parse.go`, `doParseTunnelConfig`): an `ss://` string, the legacy
+  Shadowsocks object, or a provider `error`. The last good response is cached per upstream in the
+  state directory under a SHA-256 fingerprint of the URL, so a restart while the URL is blocked
+  still has a key, and a key never serves a URL it did not come from. Redirects are followed only
+  to `https://`; the Outline client follows any.
 - Health: a TCP handshake proves nothing through a proxy (the stack completes it itself, and
   outline-ss-server keeps a wrong-key connection open silently), so a proxy upstream passes a round
   only when DNS queries to a `health.dns` resolver are answered over UDP and over TCP. Latency is

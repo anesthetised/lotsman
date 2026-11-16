@@ -6,6 +6,14 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Dynamic Outline keys: an `outline` upstream's key file may hold an `ssconf://` (or `https://`) URL.
+  The key is fetched over verified HTTPS (redirects to `https://` only) at start, on every reload,
+  and when the upstream fails its probes, at most every 5 minutes; a changed key applies to the
+  running upstream without reopening it. The response may be an `ss://` key or Outline's JSON key,
+  and a provider's `error` object fails the fetch. The last good key is cached in
+  `state_dir/ssconf/<name>.json` (0600) for restarts while the URL is unreachable; without a fetch
+  or a cached key the upstream stays down and is retried, and the daemon still starts. The URL is
+  never logged (#61).
 - Outline (Shadowsocks) upstreams: `kind: outline` with `conf` pointing at a file holding an
   `ss://` access key (SIP002 or legacy, AEAD ciphers, Outline's `prefix`). A userspace TCP/IP stack
   (gVisor) on the upstream's TUN carries TCP and UDP through the server, so profiles, failover, flow

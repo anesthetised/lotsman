@@ -6,7 +6,7 @@
 - Root: Lotsman creates TUN interfaces, sets sysctls, and programs policy routing and nftables.
 - UDP port reachable by your users (default 51820).
 - Per upstream, an AmneziaWG config from your provider routing `0.0.0.0/0`, or an Outline access
-  key (`ss://…`).
+  key (`ss://…` or `ssconf://…`).
 
 ## Install
 
@@ -90,8 +90,8 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `endpoint` | Nonempty host and numeric UDP port (1–65535) written into client configs; hostname, IPv4, and bracketed IPv6 forms are supported. |
 | `subnet` | Canonical IPv4 network prefix, /24 or larger; the first host address is the gateway. |
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
-| `state_dir` | Server identity, SQLite database, pid and status files. |
-| `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, or `outline`), `conf` path (the provider's AmneziaWG config, or for `outline` a file with the access key), free-form `geo` and `provider` labels, `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates), and for `outline` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams)). |
+| `state_dir` | Server identity, SQLite database, pid and status files, cached dynamic Outline keys. |
+| `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, or `outline`), `conf` path (the provider's AmneziaWG config, or for `outline` a file with the access key or its `ssconf://` URL), free-form `geo` and `provider` labels, `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates), and for `outline` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams)). |
 | `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider, tag}` matchers (all given fields must match); empty = any upstream. Within a tier the lowest latency wins, so a tag such as `near` groups several countries into one tier. A matcher that matches no upstream, or only upstreams an earlier matcher already took, is ignored with a warning in `config check` and the reload log, so an upstream can be removed without editing every profile. A profile where no matcher matches any upstream is an error. |
 | `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline upstream; default `1.1.1.1:53`), `down_after`, `up_after`. |
 
@@ -195,9 +195,32 @@ legacy `ss://base64(method:password@host:port)`; the `#name` part is ignored. Ci
 `chacha20-ietf-poly1305` (what Outline uses), `aes-256-gcm`, `aes-192-gcm`, `aes-128-gcm`; older
 stream ciphers and SIP003 plugins are refused. Outline's `prefix` parameter (salt prefix disguise,
 percent-encoded bytes) is applied to TCP, as the Outline client does, and may take at most half of
-the salt (16 bytes with chacha20). Dynamic `ssconf://` keys and WebSocket transports are not
-supported yet. A hostname server is resolved at start and on reload (IPv4), and again when the
-upstream fails its probes, as for AmneziaWG endpoints; the address change applies to new flows.
+the salt (16 bytes with chacha20). WebSocket transports are not supported yet. A hostname server
+is resolved at start and on reload (IPv4), and again when the upstream fails its probes, as for
+AmneziaWG endpoints; the address change applies to new flows.
+
+**Dynamic keys.** A provider that rotates keys hands out an `ssconf://host/path` URL instead (an
+`https://` URL works too; `ssconf://` means `https://`). Put the URL in the key file the same way.
+The URL is a credential: whoever has it gets the key, so it gets the same treatment as a key: it
+is never logged or quoted. Lotsman fetches the key over HTTPS from the host's own network (not
+through an upstream), with standard certificate checks against the system roots, following
+redirects only to `https://`, each fetch bounded like an endpoint lookup (half the health interval,
+at least 1 s). The response may be an `ss://` key or Outline's JSON (`server`, `server_port`,
+`method`, `password`, optional `prefix`); an `{"error": {"message": …}}` answer is a failed fetch
+whose message is logged. Outline's newer `transport:` format is refused for now. The key is fetched:
+
+- at start and on every reload, even if the file did not change, so `systemctl reload lotsman` picks
+  up a rotated key;
+- when the upstream fails its probes, at most once per 5 minutes per upstream.
+
+A changed key applies to the running upstream at once, for new flows; open ones stay on the old
+key (`upstream key changed` in the log). A failed fetch keeps the running key and is logged as a
+warning. Every fetched key is also saved in `state_dir/ssconf/<name>.json` (0600, written
+atomically, the URL itself not stored), so a restart works while the URL is unreachable: the key
+cached for the same URL is used, with a warning. With neither a fetch nor a cached key, the daemon
+still starts; that upstream stays down (`upstream is not running, will retry every health round`)
+and is fetched again every health round until it comes up. `config check` fetches the key too, and
+reports a failure as a warning, not an error, so `ExecStartPre` does not block the start.
 
 How it works: the kernel routes the client's packets into `lm-up-<name>` as usual, and a userspace
 TCP/IP stack in the daemon terminates each TCP connection and UDP flow there and opens a matching
@@ -348,6 +371,8 @@ selects what is used. An identity written before AWG 3 support is upgraded on fi
 is derived from the server key, S1–S4 below 12 are raised to 12, and the file is replaced
 atomically, so configs issued before must be re-shown. Deleting it invalidates every issued config. `state_dir/lotsman.db` holds client private
 keys so configs can be re-shown; treat both files like the server key (mode 0600, root only).
+`state_dir/ssconf/` holds the last fetched key of each dynamic Outline upstream (0600); a reload
+that removes the upstream, or gives it a static key, deletes its file.
 
 ## Troubleshooting
 
@@ -365,7 +390,9 @@ target is reachable through it.
 `health.dns` resolver through the server. A wrong key looks like an unreachable server (the server
 answers nothing); a server without UDP relay, or a network that blocks its UDP port, fails the UDP
 half. The probe error in the `upstream health changed` log line says which protocol failed. Check
-the key with the Outline client on another machine.
+the key with the Outline client on another machine. With a dynamic key, look for
+`dynamic key fetch failed` (it names the HTTP status, a certificate problem or the provider's
+error message) and run `lotsman config check`, which fetches the key once.
 
 **Sites open, large downloads or video hang.** MTU. `config check` prints the client MTU; make
 sure clients actually imported the config with that `MTU` line. Try a lower value in a provider

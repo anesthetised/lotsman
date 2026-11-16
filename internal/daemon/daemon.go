@@ -23,6 +23,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/mtu"
 	"github.com/anesthetised/lotsman/internal/policy"
+	"github.com/anesthetised/lotsman/internal/proxy"
 	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/tunnel"
 )
@@ -76,6 +77,7 @@ type Daemon struct {
 	notUp          map[*Upstream]bool         // opened upstreams whose device still has to come up
 	reauthorize    bool                       // the firewall was reinstalled; routed peers must be routed again
 	failures       map[failure]string         // retried failure → last logged error, so repeats stay quiet
+	fetched        map[string]time.Time       // upstream → last dynamic key fetch, to space refetches on failed probes
 	wake           chan struct{}              // nudges Run to reprobe and reconcile now
 	ready          chan struct{}              // closed after the first reconcile
 
@@ -96,6 +98,7 @@ func New(d Deps) *Daemon {
 		aliveFailed:    map[string]string{},
 		notUp:          map[*Upstream]bool{},
 		failures:       map[failure]string{},
+		fetched:        map[string]time.Time{},
 		wake:           make(chan struct{}, 1),
 		ready:          make(chan struct{}),
 		probes:         map[string]*[2]uint64{},
@@ -176,14 +179,15 @@ func (d *Daemon) start(ctx context.Context) error {
 	// DNS never blocks Status or Metrics. The serve loop delivers SIGHUP only
 	// after Ready, so no reload or reconcile races a half-started daemon.
 	var ups []*Upstream
+	noKey := map[string]error{}
 	for _, u := range cfg.Upstreams {
-		up, err := LoadUpstream(u, cfg.Health)
-		if err != nil {
-			return err
+		up, err := d.loadResolved(ctx, u, cfg.Health, cfg.StateDir, nil)
+		if errors.Is(err, errNoKey) {
+			// Down until reopenMissing gets a key, like an upstream a
+			// reload failed to open.
+			noKey[u.Name] = err
+			continue
 		}
-		rctx, cancel := context.WithTimeout(ctx, probeTimeout(cfg.Health))
-		err = up.Resolve(rctx)
-		cancel()
 		if err != nil {
 			return err
 		}
@@ -192,6 +196,9 @@ func (d *Daemon) start(ctx context.Context) error {
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	for name, err := range noKey {
+		d.openFailed(name, err)
+	}
 	listen, err := netip.ParseAddrPort(d.cfg.Listen)
 	if err != nil {
 		return err
@@ -300,7 +307,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 		// Health settings are passed in because d.cfg switches to the
 		// incoming configuration only when this reload applies.
 		basis := running[u.Name]
-		up, err := loadResolved(ctx, u, cfg.Health, basis)
+		up, err := d.loadResolved(ctx, u, cfg.Health, cfg.StateDir, basis)
 		loads[i] = loaded{up, basis, err}
 	}
 
@@ -337,6 +344,12 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 				l.stack.SetMaxFlows(u.MaxFlows)
 			}
 			old.Tracker.SetThresholds(cfg.Health.DownAfter, cfg.Health.UpAfter)
+			if unchanged && up.Location != nil {
+				// Fetched again for this reload: a rotated key applies now.
+				if err := d.applyServer(old, &dynamicKey{up.Key, up.keyText}, up.Resolved); err != nil {
+					errs = append(errs, fmt.Errorf("upstream %s: %w", u.Name, err))
+				}
+			}
 			next = append(next, old)
 			continue
 		}
@@ -349,6 +362,9 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 			// The interface name is reused, so the old device must go first.
 			d.dropUpstream(old)
 			d.log.Info("upstream replaced", "upstream", u.Name)
+			if old.Location != nil && up.Location == nil {
+				d.forgetKey(cfg.StateDir, u.Name)
+			}
 		}
 		if err := d.openDevice(up); err != nil {
 			errs = append(errs, err)
@@ -365,6 +381,9 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	for name, old := range current {
 		d.dropUpstream(old)
 		d.log.Info("upstream removed", "upstream", name)
+		if old.Location != nil {
+			d.forgetKey(cfg.StateDir, name)
+		}
 	}
 	d.ups = next
 	d.cfg = cfg
@@ -407,16 +426,114 @@ func (d *Daemon) logWarnings(cfg *config.Config) {
 }
 
 // loadResolved loads a provider config and, unless it matches the running
-// upstream basis, resolves its endpoint within the probe timeout. It takes no
-// lock; the returned upstream is private until applied.
-func loadResolved(ctx context.Context, u config.Upstream, h config.Health, basis *Upstream) (*Upstream, error) {
+// upstream basis, resolves its endpoint within the probe timeout. A dynamic
+// key is fetched in that time even when it matches, so a reload picks up a
+// rotated key. It takes no lock; the returned upstream is private until
+// applied.
+func (d *Daemon) loadResolved(ctx context.Context, u config.Upstream, h config.Health, stateDir string, basis *Upstream) (*Upstream, error) {
 	up, err := LoadUpstream(u, h)
-	if err == nil && (basis == nil || up.Source != basis.Source) {
-		rctx, cancel := context.WithTimeout(ctx, probeTimeout(h))
-		err = up.Resolve(rctx)
-		cancel()
+	if err != nil {
+		return nil, err
 	}
-	return up, err
+	unchanged := basis != nil && up.Source == basis.Source
+	if unchanged && up.Location == nil {
+		return up, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout(h))
+	defer cancel()
+	if up.Location != nil {
+		// A running upstream keeps its key when the fetch fails, so only a
+		// new one falls back on the cache.
+		if err := d.acquireKey(ctx, up, stateDir, !unchanged); err != nil {
+			return nil, err
+		}
+	}
+	if err := up.Resolve(ctx); err != nil {
+		return nil, err
+	}
+	return up, nil
+}
+
+// keyRefreshInterval spaces the fetches of a dynamic key while its upstream
+// fails its probes, so a dead server does not turn into a stream of requests
+// to the key's URL.
+const keyRefreshInterval = 5 * time.Minute
+
+// errNoKey marks a dynamic upstream with neither a fetched nor a cached key.
+// It does not stop the daemon: the upstream stays down and is retried every
+// health round.
+var errNoKey = errors.New("no usable cached key either")
+
+// acquireKey fetches the dynamic key of an upstream that is not running yet
+// and caches it. If the fetch fails and useCache is set, the last good key
+// cached for the same URL is used instead. It takes no lock.
+func (d *Daemon) acquireKey(ctx context.Context, up *Upstream, stateDir string, useCache bool) error {
+	d.mu.Lock()
+	d.fetched[up.Name] = time.Now()
+	d.mu.Unlock()
+	k, err := fetchKey(ctx, up.Location)
+	if err == nil {
+		up.setKey(k)
+		d.cacheKey(stateDir, up.Name, up.Location, k)
+		return nil
+	}
+	err = fmt.Errorf("upstream %s: %w", up.Name, err)
+	if !useCache {
+		return err
+	}
+	cached, cacheErr := loadCachedKey(stateDir, up.Name, up.Location)
+	if cacheErr != nil {
+		return fmt.Errorf("%w; %w", err, errNoKey)
+	}
+	up.setKey(cached)
+	d.log.Warn("dynamic key fetch failed, using the cached key", "upstream", up.Name, "err", err)
+	return nil
+}
+
+// fetchDue reports whether a running dynamic upstream may fetch its key
+// again, and if so counts this as its fetch.
+func (d *Daemon) fetchDue(name string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if time.Since(d.fetched[name]) < keyRefreshInterval {
+		return false
+	}
+	d.fetched[name] = time.Now()
+	return true
+}
+
+// cacheKey keeps k as the upstream's last good key; a failure only costs the
+// fallback, so it is logged.
+func (d *Daemon) cacheKey(stateDir, name string, loc *proxy.Location, k dynamicKey) {
+	if err := saveCachedKey(stateDir, name, loc, k); err != nil {
+		d.log.Warn("could not cache the dynamic key", "upstream", name, "err", err)
+	}
+}
+
+// forgetKey deletes the cached key of an upstream that no longer has a
+// dynamic key. Callers hold d.mu.
+func (d *Daemon) forgetKey(stateDir, name string) {
+	delete(d.fetched, name)
+	if err := removeCachedKey(stateDir, name); err != nil {
+		d.log.Warn("could not delete the cached dynamic key", "upstream", name, "err", err)
+	}
+}
+
+// applyServer points a running upstream at a fetched key, if it is set and
+// differs from the running one, and at resolved, and logs what changed.
+// Callers hold d.mu.
+func (d *Daemon) applyServer(u *Upstream, k *dynamicKey, resolved string) error {
+	newKey := k != nil && k.text != u.keyText
+	changed, err := u.setServer(k, resolved)
+	switch {
+	case err != nil:
+		return err
+	case newKey:
+		d.log.Info("upstream key changed", "upstream", u.Name, "key", u.Key.String(), "endpoint", u.Resolved)
+	case changed:
+		d.log.Info("upstream endpoint changed", "upstream", u.Name, "endpoint", resolved)
+	}
+	return nil
 }
 
 // failure keys an error that is retried every health round.
@@ -504,7 +621,7 @@ func (d *Daemon) reopenMissing(ctx context.Context) {
 	var wg sync.WaitGroup
 	for i, u := range cfg.Upstreams {
 		if missing[u.Name] {
-			wg.Go(func() { loads[i], errs[i] = loadResolved(ctx, u, cfg.Health, nil) })
+			wg.Go(func() { loads[i], errs[i] = d.loadResolved(ctx, u, cfg.Health, cfg.StateDir, nil) })
 		}
 	}
 	wg.Wait()
@@ -647,7 +764,7 @@ func (d *Daemon) probeAll(ctx context.Context) {
 	d.reopenMissing(ctx)
 	var wg sync.WaitGroup
 	d.mu.Lock()
-	h := d.cfg.Health
+	h, stateDir := d.cfg.Health, d.cfg.StateDir
 	timeout := probeTimeout(h)
 	for _, u := range d.ups {
 		iface, source, endpoint, proxied := u.InterfaceName(), u.Addr.Addr(), u.Endpoint, u.Key != nil
@@ -665,8 +782,9 @@ func (d *Daemon) probeAll(ctx context.Context) {
 			}
 			d.mu.Unlock()
 			if err != nil {
-				// A failing upstream may simply have moved; providers change IPs.
-				d.refreshEndpoint(ctx, u, endpoint, timeout)
+				// A failing upstream may simply have moved; providers change
+				// IPs, and rotate dynamic keys.
+				d.refreshEndpoint(ctx, u, endpoint, stateDir, timeout)
 			}
 		})
 	}
@@ -757,9 +875,20 @@ func (d *Daemon) watchFailed(err error) {
 
 // refreshEndpoint re-resolves an upstream's endpoint without holding d.mu, so
 // slow DNS never blocks Status or Reconcile, and applies the answer only if a
-// reload has not replaced or removed u meanwhile.
-func (d *Daemon) refreshEndpoint(ctx context.Context, u *Upstream, endpoint string, timeout time.Duration) {
+// reload has not replaced or removed u meanwhile. A dynamic key is fetched
+// again first, at most every keyRefreshInterval; if that fails, the running
+// key stays. u.Location never changes, so reading it needs no lock.
+func (d *Daemon) refreshEndpoint(ctx context.Context, u *Upstream, endpoint, stateDir string, timeout time.Duration) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
+	var fetched *dynamicKey
+	var fetchErr error
+	if u.Location != nil && d.fetchDue(u.Name) {
+		k, err := fetchKey(ctx, u.Location)
+		if err == nil {
+			fetched, endpoint = &k, k.key.Server()
+		}
+		fetchErr = err
+	}
 	resolved, err := resolveEndpoint(ctx, endpoint)
 	cancel()
 	d.mu.Lock()
@@ -767,14 +896,22 @@ func (d *Daemon) refreshEndpoint(ctx context.Context, u *Upstream, endpoint stri
 	if !slices.Contains(d.ups, u) {
 		return
 	}
-	changed := false
-	if err == nil {
-		changed, err = u.SetEndpoint(resolved)
+	if fetchErr != nil {
+		d.log.Warn("dynamic key fetch failed, keeping the running key", "upstream", u.Name, "err", fetchErr)
 	}
 	if err != nil {
 		d.log.Warn("re-resolve endpoint", "upstream", u.Name, "err", err)
-	} else if changed {
-		d.log.Info("upstream endpoint changed", "upstream", u.Name, "endpoint", resolved)
+		return
+	}
+	before := u.keyText
+	if err := d.applyServer(u, fetched, resolved); err != nil {
+		d.log.Warn("re-resolve endpoint", "upstream", u.Name, "err", err)
+		return
+	}
+	if u.keyText != before {
+		// Local and small, so written under d.mu: the upstream cannot be
+		// removed between applying the key and caching it.
+		d.cacheKey(stateDir, u.Name, u.Location, *fetched)
 	}
 }
 
