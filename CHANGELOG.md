@@ -6,6 +6,8 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `health.probe` accepts a list of `ip:port` targets; a probe round succeeds if any target
+  answers, and latency is the fastest answer (#51).
 - `tags` on upstreams and `tag` in profile tiers, so several countries can form one tier picked by
   latency. A matcher with several fields requires all of them; warnings and `config check` print
   matchers in the config's own spelling, such as `{geo: NL, tag: eu}` (#27).

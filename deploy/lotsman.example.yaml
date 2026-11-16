@@ -42,7 +42,10 @@ profiles:
 
 health:
   interval: 15s
-  probe: 1.1.1.1:443   # a TCP port reachable through every upstream
+  # A TCP port reachable through every upstream, or a list of them. An upstream
+  # is healthy when any target answers, so one blocked destination takes none down.
+  probe: 1.1.1.1:443
+  # probe: [1.1.1.1:443, 8.8.8.8:443]
   down_after: 3
   up_after: 2
 
