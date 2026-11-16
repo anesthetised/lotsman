@@ -5,6 +5,11 @@ All notable changes to Lotsman are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- CI and `just lint` run `go mod verify`, staticcheck and govulncheck for the host and the Linux
+  integration build; the tools are pinned with `tool` directives in `go.mod`. The toolchain is
+  raised to go1.27.4 for GO-2026-6859 (#54).
+
 ### Fixed
 - Resolve provider endpoints outside the daemon lock at startup, on reload and when a failing
   upstream re-resolves, so slow or dead DNS no longer stalls status, metrics, reconciliation or

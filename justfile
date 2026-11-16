@@ -8,10 +8,18 @@ test-integration:
     docker build -q -f deploy/Dockerfile.test -t lotsman-test . >/dev/null
     docker run --rm --privileged lotsman-test
 
-# Formatting and cross-platform vet, including the Linux integration build.
+# Formatting, vet, module integrity, staticcheck and govulncheck for the host
+# and the Linux integration build. CI runs this too.
 lint:
-    gofmt -l .
+    test -z "$(gofmt -l .)"
+    go vet ./...
     GOOS=linux go vet -tags integration ./...
+    go mod verify
+    go tool staticcheck ./...
+    # `go tool` would build staticcheck for GOOS=linux and fail to exec it, so build it for the host first.
+    GOOS=linux "$(go tool -n staticcheck)" -tags integration ./...
+    go tool govulncheck ./...
+    GOOS=linux "$(go tool -n govulncheck)" -tags integration ./...
 
 # Static Linux binary. `just build arm64` for another architecture.
 build arch="amd64":
