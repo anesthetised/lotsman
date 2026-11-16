@@ -131,16 +131,13 @@ func (u *Upstream) Resolve(ctx context.Context) error {
 	return nil
 }
 
-// RefreshEndpoint re-resolves a hostname endpoint and, if the provider moved
-// to another address, points the running device at it. Returns whether the
-// endpoint changed. Literal IP endpoints never change.
-func (u *Upstream) RefreshEndpoint(ctx context.Context) (bool, error) {
-	if _, err := netip.ParseAddrPort(u.Endpoint); err == nil {
+// SetEndpoint points the running device at a freshly resolved endpoint if the
+// provider moved to another address, and returns whether it changed. The
+// caller resolves u.Endpoint first; it is fixed at load, so that needs no
+// lock. Literal IP endpoints resolve to themselves and never change.
+func (u *Upstream) SetEndpoint(resolved string) (bool, error) {
+	if resolved == u.Conf.Peers[0].Endpoint {
 		return false, nil
-	}
-	resolved, err := resolveEndpoint(ctx, u.Endpoint)
-	if err != nil || resolved == u.Conf.Peers[0].Endpoint {
-		return false, err
 	}
 	peer := u.Conf.Peers[0]
 	if err := u.Device.Configure("public_key=" + peer.PublicKey.Hex() + "\nupdate_only=true\nendpoint=" + resolved + "\n"); err != nil {

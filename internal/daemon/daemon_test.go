@@ -157,11 +157,19 @@ func TestRefreshEndpoint(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if changed, err := u.RefreshEndpoint(context.Background()); err != nil || changed {
+	// As the daemon does: resolve without the lock, then apply.
+	refresh := func() (bool, error) {
+		resolved, err := resolveEndpoint(context.Background(), u.Endpoint)
+		if err != nil {
+			return false, err
+		}
+		return u.SetEndpoint(resolved)
+	}
+	if changed, err := refresh(); err != nil || changed {
 		t.Errorf("unchanged DNS: changed=%v err=%v", changed, err)
 	}
 	dns.set("vpn.provider.test", "192.0.2.2")
-	if changed, err := u.RefreshEndpoint(context.Background()); err != nil || !changed {
+	if changed, err := refresh(); err != nil || !changed {
 		t.Fatalf("changed DNS: changed=%v err=%v", changed, err)
 	}
 	peers, _ := u.Device.Peers()
@@ -175,7 +183,7 @@ func TestRefreshEndpoint(t *testing.T) {
 	// A literal IP endpoint is never re-resolved.
 	dns.set("vpn.provider.test", "192.0.2.3")
 	u.Endpoint = "192.0.2.2:51820"
-	if changed, err := u.RefreshEndpoint(context.Background()); err != nil || changed {
+	if changed, err := refresh(); err != nil || changed {
 		t.Errorf("literal endpoint: changed=%v err=%v", changed, err)
 	}
 }

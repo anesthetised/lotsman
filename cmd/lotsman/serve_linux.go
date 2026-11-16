@@ -61,6 +61,13 @@ func handleHUP(ctx context.Context, d *daemon.Daemon, configPath string, log *sl
 	hup := make(chan os.Signal, 1)
 	signal.Notify(hup, syscall.SIGHUP)
 	defer signal.Stop(hup)
+	// A signal during startup waits in hup: Reload and Reconcile need a
+	// started daemon.
+	select {
+	case <-ctx.Done():
+		return
+	case <-d.Ready():
+	}
 	for {
 		select {
 		case <-ctx.Done():
