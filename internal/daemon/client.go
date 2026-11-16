@@ -18,8 +18,11 @@ var clientJunk = awgconf.Params{
 var everything = netip.MustParsePrefix("0.0.0.0/0")
 
 // ClientConfig renders what a user imports into the Amnezia app for one peer.
+// It sets the shared parameters of the listener's AWG level and no client-local
+// AWG 3 key: content padding would cost client MTU, and the timings and
+// cookies are better left at the client's WireGuard defaults.
 func ClientConfig(cfg *config.Config, id Identity, peer store.Peer, mtu int) *awgconf.Config {
-	params := id.Params
+	params := id.Shared(cfg.AWG)
 	params.Jc, params.Jmin, params.Jmax, params.I = clientJunk.Jc, clientJunk.Jmin, clientJunk.Jmax, clientJunk.I
 	return &awgconf.Config{
 		Interface: awgconf.Interface{

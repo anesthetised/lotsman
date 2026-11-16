@@ -52,8 +52,11 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 - **Plain WireGuard stays supported.** With no obfuscation parameters amneziawg-go defaults to the
   stock message types 1–4, zero padding and no junk, i.e. it is WireGuard on the wire. A provider
   that hands out a plain WireGuard config works as an upstream unchanged; `TestPlainWireGuardInterop`
-  proves it against an untouched `wireguard-go`. The downstream side is AmneziaWG 2.0 only, because
-  obfuscation parameters are per device, not per peer.
+  proves it against an untouched `wireguard-go`. The downstream speaks one configurable generation
+  (`awg`, default 3), because obfuscation parameters, including the header protection key and
+  random trailers, are per device, not per peer. Client configs carry only the shared AWG 3 keys;
+  client-local ones (content padding, timings, cookies) stay at their defaults, so the client MTU
+  is unchanged.
 
 ## Downstream socket binding
 

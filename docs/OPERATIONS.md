@@ -85,6 +85,7 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | Key | Meaning |
 |---|---|
 | `listen` | Numeric UDP address and family the downstream device binds to; `0.0.0.0` is IPv4-only and `[::]` is IPv6-only. |
+| `awg` | AmneziaWG generation of the listener, for all clients: `3` (default; header protection and random trailers, Amnezia app 5.0.1.5 or later) or `2` (AWG 2.0). Restart only. Changing it invalidates issued client configs; re-show them with `user show`. |
 | `endpoint` | Nonempty host and numeric UDP port (1–65535) written into client configs; hostname, IPv4, and bracketed IPv6 forms are supported. |
 | `subnet` | Canonical IPv4 network prefix, /24 or larger; the first host address is the gateway. |
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
@@ -280,8 +281,11 @@ it stops while preserving the firewall and routing state.
 
 ## Identity and secrets
 
-`state_dir/identity.json` holds the server key and the S1–S4/H1–H4 parameters every client config
-embeds. Deleting it invalidates every issued config. `state_dir/lotsman.db` holds client private
+`state_dir/identity.json` holds the server key, the S1–S4/H1–H4 parameters and the AWG 3 header
+protection key every client config embeds. The file serves both `awg` levels; the level only
+selects what is used. An identity written before AWG 3 support is upgraded on first load: the key
+is derived from the server key, S1–S4 below 12 are raised to 12, and the file is replaced
+atomically, so configs issued before must be re-shown. Deleting it invalidates every issued config. `state_dir/lotsman.db` holds client private
 keys so configs can be re-shown; treat both files like the server key (mode 0600, root only).
 
 ## Troubleshooting
