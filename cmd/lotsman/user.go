@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"syscall"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/mdp/qrterminal/v3"
@@ -172,17 +172,22 @@ func printClientConfig(e *env, peer store.Peer, qr bool) error {
 }
 
 // nudgeDaemon asks a running daemon to reconcile now instead of on its next
-// tick. Failure is fine: the tick will pick the change up.
+// tick; the daemon does not reload its config for it. A missing pid file means
+// no daemon. Any other failure is reported and harmless: the tick will pick
+// the change up.
 func nudgeDaemon(e *env) {
 	data, err := os.ReadFile(pidPath(e.cfg.StateDir))
 	if err != nil {
 		return
 	}
-	pid, err := strconv.Atoi(string(data))
-	if err != nil {
-		return
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err == nil && pid <= 0 {
+		err = errors.New("not a process id")
 	}
-	if p, err := os.FindProcess(pid); err == nil {
-		p.Signal(syscall.SIGHUP)
+	if err == nil {
+		err = signalDaemon(pid)
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "lotsman: daemon not nudged, the change applies on its next tick: %v\n", err)
 	}
 }

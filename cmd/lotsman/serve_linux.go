@@ -32,6 +32,13 @@ func serve(ctx context.Context, configPath string) error {
 		Version: version, Config: e.cfg, Identity: e.id, Store: e.store,
 		Dataplane: linux.New(), NewTUN: tunnel.CreateTUN, Probe: health.ProbeOnInterface, Log: log,
 	})
+	// Subscribe before the pid file appears: SIGUSR1 kills a process that has
+	// not subscribed yet, and `user add` signals as soon as it finds the file.
+	hup, usr1 := make(chan os.Signal, 1), make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	signal.Notify(usr1, syscall.SIGUSR1)
+	defer signal.Stop(hup)
+	defer signal.Stop(usr1)
 	if err := writePID(e.cfg.StateDir); err != nil {
 		return err
 	}
@@ -39,7 +46,7 @@ func serve(ctx context.Context, configPath string) error {
 
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	go handleHUP(ctx, d, configPath, log)
+	go handleSignals(ctx, d, configPath, hup, usr1, log)
 	go publishStatus(ctx, d, e.cfg.StateDir, e.cfg.Health.Interval, log)
 	if e.cfg.Metrics.Listen != "" {
 		go serveMetrics(ctx, e.cfg.Metrics.Listen, metrics.Handler(daemon.Families, d.Metrics), log)
@@ -54,15 +61,13 @@ func serve(ctx context.Context, configPath string) error {
 	return nil
 }
 
-// handleHUP re-reads the config on SIGHUP and applies it live; a broken
-// config is logged and ignored, but the user database is still reconciled
-// so `user add` keeps working.
-func handleHUP(ctx context.Context, d *daemon.Daemon, configPath string, log *slog.Logger) {
-	hup := make(chan os.Signal, 1)
-	signal.Notify(hup, syscall.SIGHUP)
-	defer signal.Stop(hup)
-	// A signal during startup waits in hup: Reload and Reconcile need a
-	// started daemon.
+// handleSignals serves the two control signals. SIGHUP re-reads the config
+// and applies it live; a broken config is logged and ignored, but the user
+// database is still reconciled. SIGUSR1, sent by `user add` and `user rm`,
+// only reconciles, so a half-edited config file is never applied by accident.
+func handleSignals(ctx context.Context, d *daemon.Daemon, configPath string, hup, usr1 <-chan os.Signal, log *slog.Logger) {
+	// A signal during startup waits in its channel: Reload and Reconcile need
+	// a started daemon.
 	select {
 	case <-ctx.Done():
 		return
@@ -80,6 +85,10 @@ func handleHUP(ctx context.Context, d *daemon.Daemon, configPath string, log *sl
 			}
 			if err := d.Reconcile(); err != nil {
 				log.Error("reconcile after SIGHUP", "err", err)
+			}
+		case <-usr1:
+			if err := d.Reconcile(); err != nil {
+				log.Error("reconcile after SIGUSR1", "err", err)
 			}
 		}
 	}
