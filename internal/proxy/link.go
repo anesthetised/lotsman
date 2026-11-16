@@ -11,7 +11,7 @@ import (
 
 // Spec is what a proxy upstream's stack runs with.
 type Spec struct {
-	Key      string         `json:"key"`       // the access key as ParseConfig reads it: a static key or a dynamic key's response; a secret
+	Key      string         `json:"key"`       // the access key as ParseSpecKey reads it: a static key or a dynamic key's response; a secret
 	Server   netip.AddrPort `json:"server"`    // the key's server, resolved
 	MaxFlows int            `json:"max_flows"` // Options.MaxFlows
 }
@@ -43,11 +43,18 @@ type Runner func(t tun.Device, spec Spec, log *slog.Logger, exited func(error)) 
 // panic in it takes the whole process down. It calls exited, if set, when
 // the stack stops because reading the TUN failed; Up cannot start it again.
 // A helper process exits then, so its runner restarts it.
+//
+// A VLESS key also sends Xray's log, which is one per process, to log: in a
+// helper that is the only stack; in this process the last VLESS stack
+// started gets the log of all.
 func InProcess(t tun.Device, spec Spec, log *slog.Logger, exited func(error)) (Link, error) {
-	key, err := ParseConfig(spec.Key)
+	key, err := ParseSpecKey(spec.Key)
 	if err != nil {
 		t.Close()
 		return nil, err
+	}
+	if _, ok := key.(*vlessKey); ok {
+		LogXray(log)
 	}
 	d, err := key.Dialers(spec.Server)
 	if err != nil {
@@ -89,7 +96,7 @@ func (l *localLink) SetServer(key string, addr netip.AddrPort) error {
 	k := l.key
 	if key != l.text {
 		var err error
-		if k, err = ParseConfig(key); err != nil {
+		if k, err = ParseSpecKey(key); err != nil {
 			return err
 		}
 	}

@@ -37,11 +37,14 @@ type Metrics struct {
 	Listen string `yaml:"listen"`
 }
 
-// Upstream kinds. An AWG upstream is an AmneziaWG (or WireGuard) tunnel;
-// an Outline upstream is a Shadowsocks proxy behind a userspace stack.
+// Upstream kinds. An AWG upstream is an AmneziaWG (or WireGuard) tunnel.
+// The others are proxy upstreams, a proxy behind a userspace stack: an
+// Outline upstream is a Shadowsocks proxy, a VLESS upstream a VLESS server
+// with REALITY and XTLS Vision.
 const (
 	KindAWG     = "awg"
 	KindOutline = "outline"
+	KindVLESS   = "vless"
 )
 
 // ProxyAddress is the address of every proxy upstream's TUN: the source of
@@ -53,7 +56,7 @@ var ProxyAddress = netip.MustParsePrefix("192.0.0.8/32")
 
 type Upstream struct {
 	Name     string   `yaml:"name"`
-	Kind     string   `yaml:"kind"` // KindAWG (the default) or KindOutline
+	Kind     string   `yaml:"kind"` // KindAWG (the default), KindOutline or KindVLESS
 	Conf     string   `yaml:"conf"` // the provider's AmneziaWG config, or a file with the access key
 	Geo      string   `yaml:"geo"`
 	Provider string   `yaml:"provider"`
@@ -64,7 +67,7 @@ type Upstream struct {
 }
 
 // Proxy reports whether the upstream runs on the userspace proxy stack.
-func (u Upstream) Proxy() bool { return u.Kind == KindOutline }
+func (u Upstream) Proxy() bool { return u.Kind == KindOutline || u.Kind == KindVLESS }
 
 func (u Upstream) HasTag(tag string) bool {
 	return slices.Contains(u.Tags, tag)
@@ -301,15 +304,15 @@ func (c *Config) Validate() error {
 		switch u.Kind {
 		case "", KindAWG:
 			if u.MaxFlows != 0 {
-				return fmt.Errorf("upstream %q: max_flows applies to kind %s only", u.Name, KindOutline)
+				return fmt.Errorf("upstream %q: max_flows applies to proxy upstreams only (kind %s or %s)", u.Name, KindOutline, KindVLESS)
 			}
-		case KindOutline:
+		case KindOutline, KindVLESS:
 			proxies = true
 			if u.MaxFlows < 0 {
 				return fmt.Errorf("upstream %q: max_flows must not be negative", u.Name)
 			}
 		default:
-			return fmt.Errorf("upstream %q: kind must be %s or %s, got %q", u.Name, KindAWG, KindOutline, u.Kind)
+			return fmt.Errorf("upstream %q: kind must be %s, %s or %s, got %q", u.Name, KindAWG, KindOutline, KindVLESS, u.Kind)
 		}
 		if u.Conf == "" {
 			return fmt.Errorf("upstream %q: conf path is required", u.Name)
@@ -360,11 +363,11 @@ func (c *Config) Validate() error {
 	}
 	if proxies {
 		if len(h.DNS) == 0 {
-			return fmt.Errorf("health.dns: at least one resolver is required for %s upstreams", KindOutline)
+			return fmt.Errorf("health.dns: at least one resolver is required for proxy upstreams (kind %s or %s)", KindOutline, KindVLESS)
 		}
 		// Clients must never get the address every proxy TUN carries.
 		if c.Subnet.Contains(ProxyAddress.Addr()) {
-			return fmt.Errorf("subnet: %s holds %s, the address of %s upstreams; choose another subnet", c.Subnet, ProxyAddress.Addr(), KindOutline)
+			return fmt.Errorf("subnet: %s holds %s, the address of proxy upstreams; choose another subnet", c.Subnet, ProxyAddress.Addr())
 		}
 	}
 	for i, t := range h.DNS {

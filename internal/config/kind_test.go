@@ -28,6 +28,13 @@ func TestUpstreamKinds(t *testing.T) {
 	if ol.Kind != KindOutline || !ol.Proxy() || ol.MaxFlows != 100 {
 		t.Errorf("outline upstream = %+v", ol)
 	}
+	vl, err := Parse([]byte(strings.Replace(withOutline, "kind: outline", "kind: vless", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u := vl.Upstreams[1]; u.Kind != KindVLESS || !u.Proxy() || u.MaxFlows != 100 {
+		t.Errorf("vless upstream = %+v", u)
+	}
 	if want := (DNSTargets{netip.MustParseAddrPort("1.1.1.1:53")}); !slices.Equal(cfg.Health.DNS, want) {
 		t.Errorf("health.dns default = %v, want %v", cfg.Health.DNS, want)
 	}
@@ -43,13 +50,14 @@ func TestUpstreamKinds(t *testing.T) {
 
 func TestUpstreamKindErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ config, want string }{
-		"unknown kind":              {strings.Replace(withOutline, "kind: outline", "kind: vless", 1), `kind must be awg or outline, got "vless"`},
-		"max_flows on awg":          {strings.Replace(withOutline, "nl.conf}", "nl.conf, max_flows: 5}", 1), "max_flows applies to kind outline only"},
+		"unknown kind":              {strings.Replace(withOutline, "kind: outline", "kind: trojan", 1), `kind must be awg, outline or vless, got "trojan"`},
+		"max_flows on awg":          {strings.Replace(withOutline, "nl.conf}", "nl.conf, max_flows: 5}", 1), "max_flows applies to proxy upstreams only"},
 		"negative max_flows":        {strings.Replace(withOutline, "max_flows: 100", "max_flows: -1", 1), "max_flows must not be negative"},
 		"no dns targets":            {withOutline + "health: {dns: []}\n", "health.dns: at least one resolver"},
 		"bad dns target":            {withOutline + "health: {dns: [1.1.1.1]}\n", "health.dns[0]:"},
 		"dns mapping":               {withOutline + "health: {dns: {a: 1}}\n", "health.dns:"},
-		"subnet with proxy address": {withOutline + "subnet: 192.0.0.0/24\n", "192.0.0.8, the address of outline upstreams"},
+		"subnet with proxy address": {withOutline + "subnet: 192.0.0.0/24\n", "192.0.0.8, the address of proxy upstreams"},
+		"vless without dns":         {strings.Replace(withOutline, "kind: outline", "kind: vless", 1) + "health: {dns: []}\n", "health.dns: at least one resolver"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Parse([]byte(tc.config)); err == nil || !strings.Contains(err.Error(), tc.want) {
