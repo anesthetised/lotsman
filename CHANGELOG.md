@@ -36,6 +36,10 @@ All notable changes to Lotsman are documented here. The format follows
   raised to go1.27.4 for GO-2026-6859 (#54).
 
 ### Fixed
+- The first data packet of every AmneziaWG device (each upstream, and `lm0` towards clients) went
+  out without its S4 transport padding and was dropped by the peer, which delayed an upstream's
+  first health probe by a round. The runtime reads S4 before it blocks on the TUN, so the TUN's
+  first read now waits for the first configuration (#84).
 - Firewall rules removed by another tool (`nft flush ruleset`, a ufw or firewalld reload, a Docker
   or ufw forward chain added later) are reinstalled in the next health round and every routed
   client is admitted again, instead of everyone staying blocked until a restart; each repair is
