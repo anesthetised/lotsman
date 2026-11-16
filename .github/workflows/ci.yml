@@ -31,7 +31,7 @@ jobs:
       - run: go test -c -tags integration -o /tmp/dataplane.test ./internal/dataplane/linux
       - run: go test -c -tags integration -o /tmp/e2e.test ./cmd/lotsman
       - run: sudo /tmp/dataplane.test -test.v
-      - run: sudo /tmp/e2e.test -test.v -test.run TestEndToEnd
+      - run: sudo /tmp/e2e.test -test.v -test.run 'TestEndToEnd|TestFirewallFlushRepaired'
 
   build:
     needs: [unit, integration]

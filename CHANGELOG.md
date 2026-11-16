@@ -41,9 +41,12 @@ All notable changes to Lotsman are documented here. The format follows
   first health probe by a round. The runtime reads S4 before it blocks on the TUN, so the TUN's
   first read now waits for the first configuration (#84).
 - Firewall rules removed by another tool (`nft flush ruleset`, a ufw or firewalld reload, a Docker
-  or ufw forward chain added later) are reinstalled in the next health round and every routed
-  client is admitted again, instead of everyone staying blocked until a restart; each repair is
-  logged as an error and counted in `lotsman_firewall_repairs_total` (#47).
+  or ufw forward chain added later) are reinstalled and every routed client is admitted again,
+  instead of everyone staying blocked until a restart; each repair is logged as an error and
+  counted in `lotsman_firewall_repairs_total` (#47). Lotsman follows nftables change
+  notifications, so the repair comes about 100 ms after the change instead of at the next health
+  round, which closes the window in which the host forwarded clients without Lotsman's drop and
+  NAT; the health round stays as the fallback (#81).
 - Drop everything VPN clients send to the host itself (SSH, Docker bridges, services bound to
   `0.0.0.0`) except a ping to the gateway, the `metrics.listen` endpoint and replies to
   connections the host opened; forwarded traffic is unchanged (#46).

@@ -1,6 +1,8 @@
 package fake
 
 import (
+	"context"
+	"errors"
 	"net/netip"
 	"testing"
 
@@ -90,5 +92,35 @@ func TestFakeVerify(t *testing.T) {
 	f.Unroute(peer)
 	if f.IsAllowed(peer) {
 		t.Error("peer admitted after Unroute")
+	}
+}
+
+// Watch receives what Notify, FlushFirewall and a repairing Verify report,
+// and is closed once its context is done.
+func TestFakeWatch(t *testing.T) {
+	f := New()
+	ctx, cancel := context.WithCancel(context.Background())
+	changes := f.Watch(ctx)
+	want := errors.New("watch failed")
+	f.Notify(want)
+	if got := <-changes; got != want {
+		t.Errorf("Notify(err) delivered %v", got)
+	}
+	f.FlushFirewall()
+	f.Notify(nil) // coalesced with the flush
+	if got := <-changes; got != nil {
+		t.Errorf("FlushFirewall delivered %v", got)
+	}
+	f.Verify()
+	if got := <-changes; got != nil {
+		t.Errorf("repairing Verify delivered %v", got)
+	}
+	f.Verify() // intact: nothing to report
+	cancel()
+	if _, ok := <-changes; ok {
+		t.Error("a value after an intact Verify, or Watch not closed")
+	}
+	if got := f.Verifies(); got != 2 {
+		t.Errorf("Verifies = %d, want 2", got)
 	}
 }

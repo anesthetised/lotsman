@@ -2,7 +2,10 @@
 // interface are forwarded through the upstream chosen for each peer.
 package dataplane
 
-import "net/netip"
+import (
+	"context"
+	"net/netip"
+)
 
 type Interface struct {
 	Name string
@@ -41,6 +44,14 @@ type Dataplane interface {
 	// also when err reports that a later step of the repair failed. It is
 	// cheap enough to call every health round between Setup and Teardown.
 	Verify() (repaired bool, err error)
+	// Watch reports, until ctx is done, changes made by anyone (Lotsman
+	// included) that may have removed part of the firewall, so the caller can
+	// Verify at once instead of at the next health round. A nil value means
+	// "may have changed"; values are coalesced while the caller is busy. A
+	// non-nil error means watching failed and changes may have been missed;
+	// Watch retries on its own. The channel is closed once ctx is done and
+	// everything Watch started has stopped.
+	Watch(ctx context.Context) <-chan error
 	// Teardown disables downstream ingress before removing resources created
 	// by Setup and Route, including after a failed Setup. If disabling ingress
 	// fails, it preserves routing/firewall protection and returns an error.
