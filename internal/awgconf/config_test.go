@@ -278,8 +278,17 @@ func TestKeys(t *testing.T) {
 	if err != nil || parsed != priv {
 		t.Errorf("base64 round trip failed: %v", err)
 	}
-	if priv.Public() != priv.Public() || priv.Public() == priv {
+	pub := priv.Public()
+	if again := priv.Public(); pub != again || pub == priv {
 		t.Error("public key derivation is not deterministic or equals private key")
+	}
+	// RFC 7748 section 6.1, Alice's key pair.
+	alice, err := ParseHexKey("77076d0a7318a57d3c16c17251b26645df4c2f87ebc0992ab177fba51db92c2a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := alice.Public().Hex(), "8520f0098930a754748b7ddcb43ef75a0dbf3a0d26381af4eba4a98eaa9b4e6a"; got != want {
+		t.Errorf("public key = %s, want %s", got, want)
 	}
 	if fromHex, err := ParseHexKey(priv.Hex()); err != nil || fromHex != priv {
 		t.Errorf("hex round trip failed: %v", err)

@@ -65,8 +65,11 @@ The authors take no position and no responsibility.
 ```bash
 just test              # unit tests, any platform
 just test-integration  # Linux kernel tests in a privileged Docker container
-just lint
+just lint              # gofmt, vet, go mod verify, staticcheck, govulncheck (host and Linux)
 ```
+
+`staticcheck` and `govulncheck` are pinned as `tool` dependencies in `go.mod`, so there is
+nothing to install; `just lint` runs them with `go tool`. CI runs the same recipe.
 
 Code, comments and commits are in English; commits follow Conventional Commits. Releases are
 cut from tags; their notes come from [CHANGELOG.md](CHANGELOG.md), so add an entry under
