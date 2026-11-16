@@ -292,22 +292,54 @@ func ours(r netlink.Rule) bool {
 	if ones, bits := r.Src.Mask.Size(); bits != 32 || ones != 32 {
 		return false
 	}
-	want := netlink.NewRule()
-	want.Family, want.Src, want.Table, want.Priority = netlink.FAMILY_V4, r.Src, r.Table, r.Priority
+	// Selectors we install: family, src, table, priority, mark/mask, oifname.
+	if r.Family != netlink.FAMILY_V4 {
+		return false
+	}
 	switch r.Priority {
 	case pinRulePriority:
-		mask := uint32(0xffffffff)
-		want.Mark, want.Mask = uint32(r.Table), &mask
+		if r.Mark != uint32(r.Table) || r.Mask == nil || *r.Mask != 0xffffffff || r.OifName != "" {
+			return false
+		}
 	case probeRulePriority:
+		if r.Mark != 0 || r.Mask != nil {
+			return false
+		}
 		if r.OifName != "" && !strings.HasPrefix(r.OifName, upstreamPrefix) {
 			return false
 		}
-		want.OifName = r.OifName
 	case peerRulePriority:
+		if r.Mark != 0 || r.Mask != nil || r.OifName != "" {
+			return false
+		}
 	default:
 		return false
 	}
-	return reflect.DeepEqual(r, *want)
+	return noOtherSelectors(r)
+}
+
+// noOtherSelectors reports whether r sets none of the selectors Lotsman never
+// uses. The fields are listed one by one, not compared as a whole rule, so a
+// field a newer netlink adds with a non-zero default cannot make our own rules
+// look foreign. The "unset" value of the int fields is whatever
+// netlink.NewRule defaults them to (-1 in v1.3.1).
+func noOtherSelectors(r netlink.Rule) bool {
+	unset := netlink.NewRule()
+	return r.Dst == nil &&
+		r.IifName == "" &&
+		r.Tos == 0 &&
+		r.TunID == 0 &&
+		r.Goto == unset.Goto &&
+		r.Flow == unset.Flow &&
+		r.SuppressIfgroup == unset.SuppressIfgroup &&
+		r.SuppressPrefixlen == unset.SuppressPrefixlen &&
+		!r.Invert &&
+		r.Dport == nil &&
+		r.Sport == nil &&
+		r.IPProto == 0 &&
+		r.UIDRange == nil &&
+		r.Protocol == 0 &&
+		r.Type == 0
 }
 
 // ownRules lists our rules that point at the tables this instance allocated.
