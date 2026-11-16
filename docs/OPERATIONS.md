@@ -125,7 +125,12 @@ the UDP size of S1–S3-padded handshake packets.
 AmneziaWG 2.0 and 3.x provider exports load as they are. `HeaderProtectionKey` (base64, 32 bytes)
 and `RandomTrailers` must match the provider's server; header protection requires S1–S4 of at least
 12, and an all-zero key disables it. Flags take `on`/`off`, `true`/`false` or `1`/`0`. The upper
-bound of `ContentPaddingAddition` lowers the client MTU like `S4` does. AmneziaWG 1.5 configs
+bound of `ContentPaddingAddition` lowers the client MTU like `S4` does. Timings in seconds
+(`RekeyAfterTime`, `RekeyTimeout`, `RejectAfterTime`, `KeepaliveTimeout`, `MaxHandshakeAttempts`)
+and `[Peer] PersistentKeepalive` take a single value or a range `a-b`; the runtime picks from the
+range each time it uses it, and 0 means its default (keepalive off). Lotsman adds no bounds beyond
+the runtime's, except that `RejectAfterTime` may not exceed 3074457345 s, past which the runtime's
+key timer overflows. AmneziaWG 1.5 configs
 (`J1`–`J3`, `Itime`) are refused; ask the provider for a 2.0 or newer config.
 
 Providers may assign the same tunnel IP. Health probes bind to the selected

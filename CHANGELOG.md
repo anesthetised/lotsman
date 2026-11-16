@@ -21,6 +21,10 @@ All notable changes to Lotsman are documented here. The format follows
 - `-log-level` flag and `LOTSMAN_LOG_LEVEL` (`debug`, `info`, `warn`, `error`; default `info`)
   set the daemon's log level; at `debug` the AmneziaWG device logs become visible. An invalid
   value is rejected before any command runs (#56).
+- `[Peer] PersistentKeepalive` in provider configs accepts a range `a-b` besides a single value,
+  as AmneziaWG 3.x does. Timings take no Lotsman bounds beyond the runtime's (0 selects its
+  default); only a `RejectAfterTime` above 3074457345 s is rejected, because the runtime's key
+  timer (three times that) overflows and wipes every session's keys at once (#76).
 
 ### Changed
 - New identities draw S3 and S4 from 12 upward; existing identity files are upgraded on load

@@ -76,7 +76,7 @@ func TestParseProviderConfig(t *testing.T) {
 			PresharedKey:        psk,
 			Endpoint:            "vpn.example.org:51820",
 			AllowedIPs:          []netip.Prefix{mustPrefix(t, "0.0.0.0/0"), mustPrefix(t, "::/0")},
-			PersistentKeepalive: 25,
+			PersistentKeepalive: Range{25, 25},
 		}},
 	}
 	if diff := cmp.Diff(want, cfg, cmpopts.EquateComparable(netip.Prefix{}, netip.Addr{})); diff != "" {
@@ -442,5 +442,88 @@ func TestParseFlag(t *testing.T) {
 func TestAWG3UnsetRendersNothing(t *testing.T) {
 	if got, want := (Params{}).UAPI(), "s1=0\ns2=0\ns3=0\ns4=0\n"; got != want {
 		t.Errorf("UAPI = %q, want %q", got, want)
+	}
+}
+
+func TestPersistentKeepalive(t *testing.T) {
+	peer := "[Interface]\nPrivateKey = " + privB64 + "\n\n[Peer]\nPublicKey = " + pubB64 + "\n"
+	for _, tc := range []struct {
+		in       string
+		want     Range
+		wantUAPI string // the persistent_keepalive_interval line, empty when off
+	}{
+		{"25", Range{25, 25}, "persistent_keepalive_interval=25\n"},
+		{"20-30", Range{20, 30}, "persistent_keepalive_interval=20-30\n"},
+		{" 20 - 30 ", Range{20, 30}, "persistent_keepalive_interval=20-30\n"},
+		{"0", Range{}, ""},
+		{"0-5", Range{0, 5}, "persistent_keepalive_interval=0-5\n"},
+		{"70000", Range{70000, 70000}, "persistent_keepalive_interval=70000\n"},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			cfg, err := Parse(strings.NewReader(peer + "PersistentKeepalive = " + tc.in + "\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := cfg.Peers[0].PersistentKeepalive; got != tc.want {
+				t.Fatalf("PersistentKeepalive = %v, want %v", got, tc.want)
+			}
+			if got := cfg.Peers[0].UAPI(); !strings.HasSuffix(got, "replace_allowed_ips=true\n"+tc.wantUAPI) {
+				t.Errorf("UAPI = %q, want it to end with %q", got, tc.wantUAPI)
+			}
+			again, err := Parse(strings.NewReader(cfg.String()))
+			if err != nil {
+				t.Fatalf("re-parse of rendered config: %v\n%s", err, cfg.String())
+			}
+			if again.Peers[0].PersistentKeepalive != tc.want {
+				t.Errorf("round trip = %v, want %v", again.Peers[0].PersistentKeepalive, tc.want)
+			}
+		})
+	}
+
+	for _, tc := range []struct{ name, value, wantError string }{
+		{"inverted", "30-20", "persistentkeepalive: range \"30-20\": lower bound above upper"},
+		{"negative", "-5", "persistentkeepalive: range"},
+		{"above uint32", "4294967296", "persistentkeepalive: range"},
+		{"three parts", "1-2-3", "persistentkeepalive: range"},
+		{"empty", "", "persistentkeepalive: range"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse(strings.NewReader(peer + "PersistentKeepalive = " + tc.value + "\n"))
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("Parse error = %v, want %q", err, tc.wantError)
+			}
+		})
+	}
+}
+
+// Lotsman adds no policy bounds to the 3.x timings: zero means "runtime default",
+// and a range that includes zero works there (the timer is skipped for that pick).
+func TestAWG3TimingsAccepted(t *testing.T) {
+	iface := "[Interface]\nPrivateKey = " + privB64 + "\n"
+	for _, line := range []string{
+		"RekeyTimeout = 0", "RekeyTimeout = 0-5", "MaxHandshakeAttempts = 0", "MaxHandshakeAttempts = 0-5",
+		"KeepaliveTimeout = 0-5", "RejectAfterTime = 0", "RekeyAfterTime = 0-4294967295",
+		"RejectAfterTime = 1-3074457345",
+	} {
+		t.Run(line, func(t *testing.T) {
+			if _, err := Parse(strings.NewReader(iface + line + "\n")); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// A RejectAfterTime whose triple overflows time.Duration makes the runtime wipe
+// every session's keys as soon as it derives them, so no handshake can complete.
+func TestRejectAfterTimeOverflow(t *testing.T) {
+	iface := "[Interface]\nPrivateKey = " + privB64 + "\n"
+	for _, value := range []string{"3074457346", "1-3074457346", "4294967295"} {
+		t.Run(value, func(t *testing.T) {
+			_, err := Parse(strings.NewReader(iface + "RejectAfterTime = " + value + "\n"))
+			want := "[Interface] RejectAfterTime must not exceed 3074457345 seconds"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Fatalf("Parse error = %v, want %q", err, want)
+			}
+		})
 	}
 }
