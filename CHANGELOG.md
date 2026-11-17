@@ -84,6 +84,9 @@ All notable changes to Lotsman are documented here. The format follows
 - CI and `just lint` run `go mod verify`, staticcheck and govulncheck for the host and the Linux
   integration build; the tools are pinned with `tool` directives in `go.mod`. The toolchain is
   raised to go1.27.4 for GO-2026-6859 (#54).
+- The downstream UDP socket gets 7 MiB send and receive buffers on Linux, as AWG's default bind
+  does (`SO_RCVBUF`/`SO_SNDBUF`, then the `FORCE` variants with `CAP_NET_ADMIN`). With the kernel
+  default (208 KiB) a client-to-gateway TCP flow lost datagrams to `UdpRcvbufErrors` (#102).
 
 ### Fixed
 - The first data packet of every AmneziaWG device (each upstream, and `lm0` towards clients) went

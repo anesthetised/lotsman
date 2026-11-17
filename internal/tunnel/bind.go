@@ -1,6 +1,7 @@
 package tunnel
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -33,10 +34,12 @@ func (b *addressBind) Open(port uint16) ([]conn.ReceiveFunc, uint16, error) {
 	if b.addr.Is4() {
 		network = "udp4"
 	}
-	socket, err := net.ListenUDP(network, net.UDPAddrFromAddrPort(netip.AddrPortFrom(b.addr, port)))
+	lc := net.ListenConfig{Control: sizeSocketBuffers}
+	pc, err := lc.ListenPacket(context.Background(), network, netip.AddrPortFrom(b.addr, port).String())
 	if err != nil {
 		return nil, 0, err
 	}
+	socket := pc.(*net.UDPConn)
 	b.socket = socket
 	// Capture this socket so a receiver from an earlier Open remains closed
 	// after reopening; it must never start reading the new socket.

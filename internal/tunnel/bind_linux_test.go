@@ -20,6 +20,7 @@ import (
 
 	"github.com/amnezia-vpn/amneziawg-go/v3/conn"
 	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
+	"golang.org/x/sys/unix"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
 )
@@ -268,6 +269,38 @@ func TestAddressBindLifecycleAndSend(t *testing.T) {
 				t.Fatalf("send after Close = %v", err)
 			}
 		})
+	}
+}
+
+func TestAddressBindSocketBuffers(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("SO_RCVBUFFORCE/SO_SNDBUFFORCE need CAP_NET_ADMIN; run as root")
+	}
+	bind := newAddressBind(netip.MustParseAddr("127.0.0.1"))
+	defer bind.Close()
+	if _, _, err := bind.Open(0); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := bind.(*addressBind).socket.SyscallConn()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, opt := range []struct {
+		name string
+		id   int
+	}{{"SO_RCVBUF", unix.SO_RCVBUF}, {"SO_SNDBUF", unix.SO_SNDBUF}} {
+		var got int
+		var sockErr error
+		if err := raw.Control(func(fd uintptr) { got, sockErr = unix.GetsockoptInt(int(fd), unix.SOL_SOCKET, opt.id) }); err != nil {
+			t.Fatal(err)
+		}
+		if sockErr != nil {
+			t.Fatal(sockErr)
+		}
+		// The kernel reports double the requested size.
+		if got < 2*socketBufferSize {
+			t.Errorf("%s = %d, want at least %d", opt.name, got, 2*socketBufferSize)
+		}
 	}
 }
 
