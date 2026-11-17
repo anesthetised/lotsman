@@ -1,6 +1,6 @@
 # Architecture
 
-Lotsman is a self-hosted AmneziaWG 2.0 gateway. Users connect with the official Amnezia client;
+Lotsman is a self-hosted AmneziaWG gateway. Users connect with the official Amnezia client;
 Lotsman terminates their tunnel and forwards traffic into one of several upstreams, AmneziaWG tunnels,
 Outline (Shadowsocks) servers or VLESS + REALITY servers (the operator's own provider subscriptions),
 chosen by the user's profile preference and live health.
@@ -387,12 +387,12 @@ fully-encrypted look; a profile can fail over between the two. VLESS is the stac
 ## Open items
 
 - [x] The official Amnezia client (macOS) connects to a Lotsman downstream device on a real host
-      and exits through a RedShield upstream (2026-09-17).
+      and exits through a provider AmneziaWG upstream (2026-09-17).
 - [x] Throughput measured (below).
 
 ## Throughput (2026-09-17)
 
-Host: Selectel VPS, 2 vCPU Xeon E5-2630 v4 @ 2.2 GHz, Debian 13, one RedShield upstream (LT).
+Host: VPS, 2 vCPU Xeon E5-2630 v4 @ 2.2 GHz, Debian 13, one AmneziaWG provider upstream.
 Client: macOS with the Amnezia app over a residential line. `iperf3 -P 4`, 8 s; HTTPS via Cloudflare
 speed endpoints, 50 MB.
 
@@ -401,10 +401,10 @@ speed endpoints, 50 MB.
 | A. Client → host directly, no VPN (`iperf3`) | 78 Mbit/s | 331 Mbit/s |
 | B. Client → host through the Lotsman tunnel, one encapsulation (`iperf3` to `lm0`) | 46 Mbit/s | 133 Mbit/s |
 | C. Client → internet through the whole chain (HTTPS) | 11 Mbit/s | 66 Mbit/s |
-| Host → internet through the RedShield upstream only (HTTPS, source bound to the tunnel address) | 17 Mbit/s | 82 Mbit/s |
+| Host → internet through the provider upstream only (HTTPS, source bound to the tunnel address) | 17 Mbit/s | 82 Mbit/s |
 | Host → internet directly (HTTPS) | 594 Mbit/s | — |
 
-Reading: the provider leg is the bottleneck (17 Mbit/s down through RedShield against 594 direct
+Reading: the provider leg is the bottleneck (17 Mbit/s down through the provider against 594 direct
 from the same host); Lotsman adds no measurable limit on top of it. The daemon peaked at 4 % of one
 core during the tests, so userspace double encryption is far from being the constraint at these
 rates. Leg A shows the residential line itself caps downloads below 80 Mbit/s. Client MTU in this

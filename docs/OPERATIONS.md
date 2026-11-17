@@ -402,10 +402,14 @@ it (a bug in gVisor, the Outline SDK or Xray, or malicious input) takes down tha
 gateway:
 
 ```
-$ ps -o pid,ppid,user,args --ppid "$(pidof -s lotsman)"
+$ ps -o pid,ppid,user,args --ppid "$(systemctl show -p MainPID --value lotsman)"
     PID    PPID USER     COMMAND
    4242    4200 65534    lotsman proxy-helper
 ```
+
+A helper is the daemon's binary re-executed from `/proc/self/exe`, so its process name (`comm`) is
+`exe`: `ps -C lotsman` misses it, and `pidof lotsman` can return a helper's pid next to the
+daemon's. Take the daemon's pid from systemd as above.
 
 There is one per proxy upstream; the daemon logs `proxy helper started upstream=<name> pid=<pid>`
 for each. A root daemon runs them as uid/gid 65534 without capabilities: they hold only the
@@ -529,7 +533,12 @@ scrape_configs:
 ## How failover behaves
 
 - An upstream is *down* after `down_after` consecutive failed probes and *up* again after `up_after`
-  successes. Defaults: 45 s to declare dead, 30 s to trust it again. With several `health.probe`
+  successes. A round starts `interval` after the previous one ends, and a probe that gets no
+  answer waits its timeout (half the interval) first. Down therefore takes
+  `(down_after − 1) × (interval + timeout) + timeout`, plus up to one `interval` until the next
+  round: 53–68 s at the defaults (15 s, 3, 2) when the path drops packets, 30–45 s when it refuses
+  connections at once. Up again takes up to `interval + timeout` until a round passes, plus
+  `(up_after − 1) × interval`: 15–38 s at the defaults. With several `health.probe`
   targets a round tries all of them at once and passes if any answers, reporting the fastest, so
   one blocked or rate-limited destination does not take an upstream down. `probe` applies on reload.
 - A client stays on its upstream while it is healthy, even if a sibling in the same tier becomes
