@@ -1,5 +1,5 @@
 [Unit]
-Description=Lotsman AmneziaWG 2.0 gateway
+Description=Lotsman AmneziaWG gateway
 Documentation=https://github.com/anesthetised/lotsman
 After=network-online.target
 Wants=network-online.target

@@ -87,6 +87,8 @@ All notable changes to Lotsman are documented here. The format follows
 - The downstream UDP socket gets 7 MiB send and receive buffers on Linux, as AWG's default bind
   does (`SO_RCVBUF`/`SO_SNDBUF`, then the `FORCE` variants with `CAP_NET_ADMIN`). With the kernel
   default (208 KiB) a client-to-gateway TCP flow lost datagrams to `UdpRcvbufErrors` (#102).
+- The systemd unit's description is `Lotsman AmneziaWG gateway`, without the protocol version, which
+  is no longer fixed at 2.0 (`awg: 3` is the default) (#101).
 
 ### Fixed
 - The first data packet of every AmneziaWG device (each upstream, and `lm0` towards clients) went

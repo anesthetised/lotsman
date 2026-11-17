@@ -1,4 +1,4 @@
-// Command lotsman is the AmneziaWG 2.0 gateway daemon and its admin CLI.
+// Command lotsman is the AmneziaWG gateway daemon and its admin CLI.
 package main
 
 import (
