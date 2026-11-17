@@ -71,8 +71,10 @@ and sends every buffer supplied by AWG even though its receive batch size is one
 Wildcards are family-specific, mapped IPv4 addresses are normalized, and native
 IPv6 zones are retained. Binding failures propagate instead of widening exposure.
 It omits default-bind batching, offloads and sticky-source caching; throughput
-equivalence has not been measured. A concrete listen address fixes reply source;
-wildcard replies follow host routing.
+equivalence has not been measured. On Linux the socket gets StdNetBind's 7 MiB
+send and receive buffers (`SO_RCVBUF`/`SO_SNDBUF`, then the `FORCE` variants past
+`rmem_max`/`wmem_max`); a failure to set them is ignored. A concrete listen
+address fixes reply source; wildcard replies follow host routing.
 
 ## MTU
 

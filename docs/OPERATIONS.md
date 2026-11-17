@@ -105,6 +105,9 @@ longer also exposes IPv6. A listen change requires a restart.
 
 Downstream uses a simple UDP socket without AWG's batching/GSO/GRO optimizations;
 upstream devices retain their existing bind. Throughput impact is unmeasured.
+On Linux its send and receive buffers are 7 MiB, as in AWG's default bind, set
+beyond `rmem_max`/`wmem_max` when the daemon has `CAP_NET_ADMIN`; without it they
+are capped by those sysctls.
 Wildcard replies use host routing to choose their source; use a concrete listen
 address when replies must originate from one fixed local IP.
 
