@@ -19,7 +19,10 @@ func vlessLink(query string) string {
 	return "vless://" + testUUID + "@vpn.example.org:443?" + query + "#My%20server"
 }
 
-const baseQuery = "security=reality&pbk=" + testPBK + "&sni=www.example.com&flow=xtls-rprx-vision"
+const (
+	baseQuery = "security=reality&pbk=" + testPBK + "&sni=www.example.com&flow=xtls-rprx-vision"
+	grpcQuery = "security=reality&pbk=" + testPBK + "&sni=www.example.com&type=grpc"
+)
 
 func TestParseVLESS(t *testing.T) {
 	pqv := base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{7}, 1952))
@@ -40,6 +43,40 @@ func TestParseVLESS(t *testing.T) {
 			}
 			if got := k.String(); got != "vless reality xtls-rprx-vision, sni www.example.com, fp chrome" {
 				t.Errorf("String = %q", got)
+			}
+			if k.network != "tcp" {
+				t.Errorf("network %q", k.network)
+			}
+		}},
+		{"grpc as a provider exports it", "vless://" + testUUID + "@192.0.2.1:443?type=grpc&security=reality&encryption=none&sni=www.example.com" +
+			"&fp=firefox&pbk=" + testPBK + "&sid=6ba85179e30d4fc2&alpn=h2&serviceName=my-service#x",
+			func(t *testing.T, k *vlessKey) {
+				if k.network != "grpc" || k.flow != "" || k.serviceName != "my-service" || k.multiMode || k.authority != "" || k.fingerprint != "firefox" {
+					t.Errorf("parsed %+v", k)
+				}
+				if got := k.String(); got != "vless reality grpc, sni www.example.com, fp firefox" {
+					t.Errorf("String = %q", got)
+				}
+			}},
+		{"grpc multi, custom path, authority", vlessLink(strings.Replace(grpcQuery, "type=grpc", "type=GRPC", 1) +
+			"&mode=multi&serviceName=" + url.QueryEscape("/a b/c/tun") + "&authority=cdn.example.net&alpn=h2,http/1.1"),
+			func(t *testing.T, k *vlessKey) {
+				if k.network != "grpc" || !k.multiMode || k.serviceName != "/a b/c/tun" || k.authority != "cdn.example.net" {
+					t.Errorf("parsed %+v", k)
+				}
+				// The service name may be a path secret.
+				if got := k.String(); got != "vless reality grpc multi, sni www.example.com, fp chrome" {
+					t.Errorf("String = %q", got)
+				}
+			}},
+		{"grpc with xray's defaults", vlessLink(grpcQuery + "&mode=gun&flow=&serviceName="), func(t *testing.T, k *vlessKey) {
+			if k.network != "grpc" || k.multiMode || k.serviceName != "" || k.flow != "" || len(k.spiderY) != 10 {
+				t.Errorf("parsed %+v", k)
+			}
+		}},
+		{"alpn on tcp, ignored", vlessLink(baseQuery + "&alpn=h2"), func(t *testing.T, k *vlessKey) {
+			if k.network != "tcp" || k.flow != flowVision {
+				t.Errorf("parsed %+v", k)
 			}
 		}},
 		{"panel export", "vless://" + testUUID + "@192.0.2.1:8443/?type=tcp&encryption=none&security=reality&pbk=" + testPBK +
@@ -110,7 +147,17 @@ func TestParseVLESSErrorsHideTheSecret(t *testing.T) {
 		{"path", "vless://" + testUUID + "@host:443/hunter2secret?" + baseQuery, "want vless://uuid@host:port"},
 		{"no security", vlessLink(strings.Replace(baseQuery, "security=reality&", "", 1)), "security is missing"},
 		{"tls", vlessLink(strings.Replace(baseQuery, "security=reality", "security=tls", 1)), "only security=reality"},
-		{"grpc", vlessLink(baseQuery + "&type=grpc"), "only type=tcp"},
+		{"websocket", vlessLink(baseQuery + "&type=ws"), "only type=tcp (raw) and type=grpc"},
+		{"grpc with vision", vlessLink(baseQuery + "&type=grpc"), "flow must be empty for type=grpc"},
+		{"grpc with another flow", vlessLink(grpcQuery + "&flow=hunter2secret"), "flow must be empty"},
+		{"grpc unknown mode", vlessLink(grpcQuery + "&mode=hunter2secret"), "mode: want gun or multi"},
+		{"grpc gun lite", vlessLink(grpcQuery + "&mode=guna"), "mode: want gun or multi"},
+		{"grpc without sni", vlessLink(strings.Replace(grpcQuery, "&sni=www.example.com", "", 1)), "sni is missing"},
+		{"grpc without pbk", vlessLink(strings.Replace(grpcQuery, "pbk="+testPBK+"&", "", 1)), "pbk is missing"},
+		{"grpc over tls", vlessLink(strings.Replace(grpcQuery, "security=reality", "security=tls", 1)), "only security=reality"},
+		{"service name on tcp", vlessLink(baseQuery + "&serviceName=hunter2secret"), "serviceName applies to type=grpc only"},
+		{"mode on tcp", vlessLink(baseQuery + "&mode=multi"), "mode applies to type=grpc only"},
+		{"authority on tcp", vlessLink(baseQuery + "&authority=hunter2secret"), "authority applies to type=grpc only"},
 		{"http header", vlessLink(baseQuery + "&headerType=http"), "only headerType=none"},
 		{"mlkem encryption", vlessLink(baseQuery + "&encryption=mlkem768x25519plus.native.0rtt." + testPBK), "only encryption=none"},
 		{"no flow", vlessLink(strings.Replace(baseQuery, "&flow=xtls-rprx-vision", "", 1)), "flow is missing"},
@@ -129,7 +176,8 @@ func TestParseVLESSErrorsHideTheSecret(t *testing.T) {
 		{"malformed spx", vlessLink(baseQuery + "&spx=/%25zz"), "spx: malformed"},
 		{"short pqv", vlessLink(baseQuery + "&pqv=" + testPBK), "pqv: want"},
 		{"twice", vlessLink(baseQuery + "&pbk=" + testPBK), "pbk given more than once"},
-		{"unknown parameter", vlessLink(baseQuery + "&serviceName=hunter2secret"), "serviceName is not supported"},
+		{"unknown parameter", vlessLink(baseQuery + "&path=hunter2secret"), "path is not supported"},
+		{"unknown grpc parameter", vlessLink(grpcQuery + "&seed=hunter2secret"), "seed is not supported"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := ParseVLESS(tc.link)
@@ -154,6 +202,7 @@ func FuzzParseVLESS(f *testing.F) {
 	f.Add(baseQuery + "&spx=/a?p=1-2&c=3&r=-")
 	f.Add(baseQuery + "&spx=/%zz")
 	f.Add(baseQuery + "&sid=0&fp=random")
+	f.Add(grpcQuery + "&mode=multi&serviceName=/a/b|c&authority=x")
 	f.Fuzz(func(t *testing.T, query string) {
 		k, err := ParseVLESS(vlessLink(query))
 		if err != nil {
@@ -162,6 +211,10 @@ func FuzzParseVLESS(f *testing.F) {
 		v := k.(*vlessKey)
 		if len(v.spiderY) != 10 || !strings.HasPrefix(v.spiderX, "/") || len(v.shortID) != 8 || len(v.publicKey) != 32 {
 			t.Fatalf("key %+v", v)
+		}
+		// Vision runs over TCP only.
+		if (v.network == "grpc") != (v.flow == "") {
+			t.Fatalf("network %q with flow %q", v.network, v.flow)
 		}
 	})
 }
@@ -181,18 +234,20 @@ func TestVLESSIsNotAnOutlineKey(t *testing.T) {
 }
 
 func TestVLESSDialers(t *testing.T) {
-	k, err := ParseVLESS(vlessLink(baseQuery))
-	if err != nil {
-		t.Fatal(err)
-	}
-	d, err := k.Dialers(netip.MustParseAddrPort("192.0.2.1:443"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if d.Streams == nil || d.Packets == nil || d.Closer == nil {
-		t.Fatalf("dialers %+v", d)
-	}
-	if err := d.Closer.Close(); err != nil {
-		t.Fatal(err)
+	for _, query := range []string{baseQuery, grpcQuery + "&mode=multi&serviceName=x"} {
+		k, err := ParseVLESS(vlessLink(query))
+		if err != nil {
+			t.Fatal(err)
+		}
+		d, err := k.Dialers(netip.MustParseAddrPort("192.0.2.1:443"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Streams == nil || d.Packets == nil || d.Closer == nil {
+			t.Fatalf("dialers %+v", d)
+		}
+		if err := d.Closer.Close(); err != nil {
+			t.Fatal(err)
+		}
 	}
 }

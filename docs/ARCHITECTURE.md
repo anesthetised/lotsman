@@ -390,7 +390,28 @@ fully-encrypted look; a profile can fail over between the two. VLESS is the stac
   without synchronization; the race detector reports it in the in-process test server every run
   (the client side is not affected in our tests). Test files that run that server carry a `!race`
   build constraint until it is fixed upstream; the report is drafted, and filing it waits for the
-  owner.
+  owner. The gRPC test server runs no Vision, so its tests run under the race detector.
+
+**Addendum: VLESS over gRPC (2026-11-18, #122).** Providers also hand out VLESS + REALITY over gRPC,
+which Vision cannot run over, so such links carry no flow. `type=grpc` selects Xray's
+`transport/internet/grpc` (importing it registers the dialer) with the same REALITY settings;
+`serviceName`, `authority` and `mode` (`gun`, or `multi` for `multiMode`) map to its `Config`, and
+the keepalive, window and user-agent fields keep Xray's client defaults (zero), as a share link
+cannot set them. They are checked as `infra/conf` does (`GRPCConfig.Build` accepts any service name
+and authority; `StreamConfig.Build` allows REALITY over RAW, XHTTP and gRPC). `alpn` is accepted
+and ignored: Xray's REALITY settings have no ALPN, the ClientHello offers the fingerprint's.
+
+- Every flow of an upstream is a stream in one HTTP/2 connection, which Xray keeps in a
+  process-global map keyed by the outbound's stream settings and never closes; an instance replaced
+  on reload or a server move leaves its connection to grpc-go, which closes it after 30 minutes
+  without streams. Without keepalive pings a connection that stalls without a reset is noticed by
+  the probes, not by gRPC.
+- UDP: without Vision, Xray sends UDP to ports 53 and 443 as plain VLESS UDP and to other ports as
+  XUDP; each socket of the dialer is one destination, so both work.
+- Cost: the static linux/amd64 binary grows from 23.6 MB to 30.3 MB (+6.7 MB, +28%): Xray's gRPC
+  package links grpc-go's HTTP/2 client and server, of which the core packages had linked only a
+  few. One new module, `google.golang.org/genproto/googleapis/rpc` (Apache-2.0, gRPC's status
+  protos).
 
 ## Open items
 

@@ -315,8 +315,8 @@ used for Outline upstreams.
 
 ### VLESS upstreams
 
-A VLESS server with REALITY and XTLS Vision, the Xray setup that panels such as 3x-ui and Marzban
-create, is an upstream like an Outline one: the same userspace stack in a helper process, the same
+A VLESS server with REALITY, with XTLS Vision over TCP or without a flow over gRPC, the Xray setups
+that panels such as 3x-ui and Marzban create, is an upstream like an Outline one: the same userspace stack in a helper process, the same
 health checks, `max_flows`, metrics and consequences as listed above. Put the server's share link,
 one `vless://…` line, into a file and point `conf` at it:
 
@@ -331,11 +331,13 @@ sudo install -m 0600 /dev/stdin /etc/lotsman/upstreams/vl-nl.key <<< 'vless://�
 
 The link carries the user ID, a password in effect: keep the file 0600 and root-only. Lotsman never
 logs it, and neither error messages nor `config check` quote any part of the link (`config check`
-shows the flow, `sni` and fingerprint). Links are static only; for a new link, replace the file and
-reload, which restarts the upstream. A link looks like
+shows the flow or `grpc`, `sni` and fingerprint, never the gRPC `serviceName` or `authority`). Links
+are static only; for a new link, replace the file and reload, which restarts the upstream. A link
+looks like one of
 
 ```
 vless://<uuid>@<host>:<port>?security=reality&pbk=<key>&sni=<site>&flow=xtls-rprx-vision&type=tcp&fp=chrome&sid=<hex>&spx=%2F#name
+vless://<uuid>@<host>:<port>?type=grpc&security=reality&encryption=none&sni=<site>&fp=firefox&pbk=<key>&sid=<hex>&alpn=h2&serviceName=<name>#name
 ```
 
 | Part | Meaning |
@@ -343,9 +345,13 @@ vless://<uuid>@<host>:<port>?security=reality&pbk=<key>&sni=<site>&flow=xtls-rpr
 | `uuid` | Required: the user ID, a UUID, or 1–30 characters that Xray maps to one. |
 | `host:port` | Required: the server. A hostname is resolved like an AmneziaWG endpoint (IPv4, at start, on reload and when probes fail); the Xray instance itself never resolves names. |
 | `security` | Required, `reality`. TLS, no security and the other Xray securities are refused. |
-| `type` | `tcp` (the default) or `raw`, Xray's newer name for it; `headerType`, if present, `none`. xhttp, gRPC, WebSocket and the other transports are refused. |
+| `type` | `tcp` (the default) or `raw`, Xray's newer name for it, or `grpc`; in any case, as Xray reads it. `headerType`, if present, `none`. xhttp, WebSocket and the other transports are refused. |
 | `encryption` | `none` or absent; VLESS encryption (`mlkem768x25519plus…`) is refused. |
-| `flow` | Required: `xtls-rprx-vision` or `xtls-rprx-vision-udp443` (see QUIC below). |
+| `flow` | For `tcp` required: `xtls-rprx-vision` or `xtls-rprx-vision-udp443` (see QUIC below). For `grpc` empty or absent: Vision runs over TCP only. |
+| `serviceName` | `grpc` only: the server's gRPC service name (its `grpcSettings.serviceName`), or Xray's custom path `/<service>/<stream>`; empty is allowed, as in Xray. |
+| `mode` | `grpc` only: `gun` (the default) or `multi`, Xray's `multiMode`, which must match the server's choice. `guna` and other modes are refused. |
+| `authority` | `grpc` only: the HTTP/2 `:authority`; by default the server's address, as in Xray. |
+| `alpn` | Accepted and ignored, as Xray does under REALITY: the ClientHello offers the ALPN of the fingerprint (`fp`). |
 | `sni` | Required: the site the server impersonates. |
 | `pbk` | Required: the server's REALITY public key, 32 bytes in unpadded base64url. |
 | `sid` | The REALITY short ID: up to 16 hex digits, an even number of them; empty by default. |
@@ -355,7 +361,8 @@ vless://<uuid>@<host>:<port>?security=reality&pbk=<key>&sni=<site>&flow=xtls-rpr
 
 The `#name` part is ignored. Any other parameter must be absent or empty (panels export empty
 `host=` and `path=`); one with a value is refused by name. Lotsman checks and normalizes the
-REALITY fields exactly as Xray's own config loader does, so a link Xray rejects is rejected here.
+REALITY and gRPC fields exactly as Xray's own config loader does, so a link Xray rejects is rejected
+here.
 
 How it differs from an Outline upstream:
 
@@ -368,8 +375,15 @@ How it differs from an Outline upstream:
   connection ends. The rare protocol that waits for the client's end of stream before answering
   hangs.
 - UDP travels inside a TCP connection to the server (XUDP), one per UDP flow: blocking the server's
-  TCP port blocks UDP too, and the server needs no UDP port.
-- QUIC: `xtls-rprx-vision` refuses UDP to port 443, as every Xray client does. Browsers then fall
+  TCP port blocks UDP too, and the server needs no UDP port. Over gRPC each UDP flow is a stream
+  instead, carried as plain VLESS UDP to ports 53 and 443 and as XUDP to the others, as Xray does
+  without Vision.
+- Over gRPC every flow of the upstream is a stream in one HTTP/2 connection to the server; a reload
+  or a moved server opens a new one. Xray's client defaults apply: no keepalive pings and Chrome's
+  user agent. A connection that stalls without being reset stalls every flow until the probes take
+  the upstream down. Each Xray instance's connection outlives it until gRPC closes it after 30
+  minutes without streams.
+- QUIC over TCP: `xtls-rprx-vision` refuses UDP to port 443, as every Xray client does. Browsers then fall
   back to HTTPS over TCP, whose TLS Vision passes through without the telltale TLS-in-TLS record
   pattern. `xtls-rprx-vision-udp443` (client side only; the server's flow stays
   `xtls-rprx-vision`) carries QUIC as UDP inside the connection instead, where Vision cannot
@@ -401,8 +415,10 @@ go get github.com/xtls/xray-core@676eaf66f8f0                         # becomes 
 go mod tidy
 ```
 
-Then compare Xray's `infra/conf/transport_security.go` (`REALITYConfig.Build`, the client branch)
-and `infra/conf/vless.go` with `internal/proxy/vless.go`, which replicates their checks; watch for
+Then compare Xray's `infra/conf/transport_security.go` (`REALITYConfig.Build`, the client branch),
+`infra/conf/transport_method.go` (`GRPCConfig.Build`), `infra/conf/transport_internet.go`
+(`StreamConfig.Build`, the transports REALITY allows) and `infra/conf/vless.go` with
+`internal/proxy/vless.go`, which replicates their checks; watch for
 a gVisor bump, which amneziawg-go and the proxy stack share; and run the full test suite including
 the Linux one (`just test`, `just lint`, `just test-integration`). Update the version named in this
 section and in ARCHITECTURE.md.
@@ -710,7 +726,8 @@ through the server, both carried over TCP. Run with `-log-level debug` and look 
 server or its port being unreachable. `received real certificate` means the server did not
 recognize the client and passed it on to its `sni` site, as it does with strangers: a wrong `pbk`
 or `sid` (or an `sni` the server does not serve), or something between the gateway and the server
-answering in its place. A wrong user ID passes REALITY and then fails with the connection closed.
+answering in its place. A wrong user ID passes REALITY and then fails with the connection closed;
+over gRPC, so does a wrong `serviceName` or `mode`.
 Check the link with an Xray client on another machine.
 
 **An Outline or VLESS upstream keeps restarting.** `lotsman_proxy_restarts_total` rising and `proxy helper

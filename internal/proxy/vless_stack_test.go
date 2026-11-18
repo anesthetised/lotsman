@@ -1,136 +1,27 @@
 //go:build !race
 
-// The tests here run Xray's VLESS server, which races (see vlesstest), so
-// they are left out of race-detector builds.
+// The tests here run Xray's VLESS Vision server, which races (see
+// vlesstest), so they are left out of race-detector builds.
 
 package proxy
 
 import (
-	"bytes"
-	"context"
 	"errors"
 	"io"
 	"log/slog"
-	"net"
-	"net/netip"
 	"net/url"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
-	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
-	"gvisor.dev/gvisor/pkg/tcpip/adapters/gonet"
-
-	"github.com/anesthetised/lotsman/internal/proxy/proxytest"
 	"github.com/anesthetised/lotsman/internal/proxy/vlesstest"
 )
 
-type vlessFlow struct {
-	server *vlesstest.Server
-	stack  *Stack
-	client *netstack.Net
-}
-
-// helloTarget says hello and ends the stream.
-var helloTarget = netip.MustParseAddrPort("198.51.100.7:443")
-
-// newVLESSServer starts a server whose echo, hello and DNS targets are the
-// test targets, redirected to loopback.
+// newVLESSServer starts a Vision server whose echo, hello and DNS targets
+// are the test targets, redirected to loopback.
 func newVLESSServer(t *testing.T) *vlesstest.Server {
 	t.Helper()
-	listen := func(handle func(net.Conn)) string {
-		ln, err := net.Listen("tcp4", "127.0.0.1:0")
-		if err != nil {
-			t.Fatal(err)
-		}
-		proxytest.Serve(t, ln, handle)
-		return ln.Addr().String()
-	}
-	return vlesstest.NewServer(t, map[string]string{
-		echoTarget.String():  listen(proxytest.Echo),
-		helloTarget.String(): listen(func(c net.Conn) { io.WriteString(c, "hello") }),
-		dnsTarget.String():   proxytest.DNS(t).String(),
-	}, nil)
-}
-
-// hello reads what helloTarget says: the target's end of stream must reach
-// the client as a clean one.
-func (f *vlessFlow) hello(t *testing.T) {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	c, err := f.client.DialContextTCPAddrPort(ctx, helloTarget)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	defer c.Close()
-	c.SetDeadline(time.Now().Add(10 * time.Second))
-	if got, err := io.ReadAll(c); err != nil || string(got) != "hello" {
-		t.Fatalf("hello = %q, %v", got, err)
-	}
-}
-
-// newVLESSFlow runs a Stack in front of server, configured from link as the
-// daemon would, and reached by a userspace client.
-func newVLESSFlow(t *testing.T, server *vlesstest.Server, link string) *vlessFlow {
-	t.Helper()
-	key, err := ParseSpecKey(link)
-	if err != nil {
-		t.Fatal(err)
-	}
-	d, err := key.Dialers(server.Addr())
-	if err != nil {
-		t.Fatal(err)
-	}
-	dev, client, err := netstack.CreateNetTUN([]netip.Addr{netip.MustParseAddr("10.0.0.2")}, nil, 1420)
-	if err != nil {
-		t.Fatal(err)
-	}
-	s, err := New(dev, d, Options{}, slog.New(slog.DiscardHandler))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { s.Close() })
-	return &vlessFlow{server: server, stack: s, client: client}
-}
-
-func (f *vlessFlow) dial(t *testing.T) *gonet.TCPConn {
-	t.Helper()
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	c, err := f.client.DialContextTCPAddrPort(ctx, echoTarget)
-	if err != nil {
-		t.Fatalf("dial: %v", err)
-	}
-	t.Cleanup(func() { c.Close() })
-	c.SetDeadline(time.Now().Add(20 * time.Second))
-	return c
-}
-
-// echo sends msg and reads it back. It does not half-close: VLESS carries
-// no half-close to the target, which then never ends its echo.
-func (f *vlessFlow) echo(t *testing.T, msg string) {
-	t.Helper()
-	c := f.dial(t)
-	go io.WriteString(c, msg)
-	got := make([]byte, len(msg))
-	if _, err := io.ReadFull(c, got); err != nil || string(got) != msg {
-		t.Fatalf("echo of %d bytes: %v", len(msg), err)
-	}
-}
-
-func (f *vlessFlow) dns(t *testing.T, id uint16) {
-	t.Helper()
-	c, err := f.client.DialUDPAddrPort(netip.AddrPort{}, dnsTarget)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	c.SetDeadline(time.Now().Add(10 * time.Second))
-	if err := proxytest.ExchangeDNS(c, id); err != nil {
-		t.Fatalf("dns exchange %d: %v", id, err)
-	}
+	return vlesstest.NewServer(t, vlessTargets(t), nil)
 }
 
 // Two VLESS upstreams in one process carry TCP and UDP independently.
@@ -247,21 +138,4 @@ func TestVLESSLogsXray(t *testing.T) {
 	if strings.Contains(logs.String(), s.ID()) {
 		t.Error("the log shows the user ID")
 	}
-}
-
-type syncLog struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
-}
-
-func (l *syncLog) Write(p []byte) (int, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.buf.Write(p)
-}
-
-func (l *syncLog) String() string {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.buf.String()
 }

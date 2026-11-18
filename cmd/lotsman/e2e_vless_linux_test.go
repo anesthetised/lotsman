@@ -20,11 +20,12 @@ import (
 	"github.com/anesthetised/lotsman/internal/proxy/vlesstest"
 )
 
-// newVLESS starts an in-process Xray VLESS + REALITY server whose "internet"
-// mirrors the fake providers': 198.51.100.1 answers TCP :443 with "vl",
-// echoes on :445 with a "vl:" prefix, and resolves DNS on :53 over UDP and
-// TCP. The upstream's helper is a child process; the server runs here.
-func newVLESS(t *testing.T) *vlesstest.Server {
+// newVLESS starts an in-process Xray VLESS + REALITY server, with Vision
+// over TCP or, if grpc, over gRPC, whose "internet" mirrors the fake
+// providers': 198.51.100.1 answers TCP :443 with "vl", echoes on :445 with a
+// "vl:" prefix, and resolves DNS on :53 over UDP and TCP. The upstream's
+// helper is a child process; the server runs here.
+func newVLESS(t *testing.T, grpc bool) *vlesstest.Server {
 	t.Helper()
 	listen := func(handle func(net.Conn)) string {
 		ln, err := net.Listen("tcp4", "127.0.0.1:0")
@@ -34,7 +35,7 @@ func newVLESS(t *testing.T) *vlesstest.Server {
 		proxytest.Serve(t, ln, handle)
 		return ln.Addr().String()
 	}
-	server := vlesstest.NewServer(t, map[string]string{
+	redirect := map[string]string{
 		netip.AddrPortFrom(internet, 443).String(): listen(func(c net.Conn) { c.Write([]byte("vl")) }),
 		netip.AddrPortFrom(internet, 445).String(): listen(func(c net.Conn) {
 			buf := make([]byte, 64)
@@ -47,7 +48,11 @@ func newVLESS(t *testing.T) *vlesstest.Server {
 			}
 		}),
 		netip.AddrPortFrom(internet, 53).String(): proxytest.DNS(t).String(),
-	}, nil)
+	}
+	server := vlesstest.NewServer(t, redirect, nil)
+	if grpc {
+		server = vlesstest.NewGRPCServer(t, redirect, "e2e")
+	}
 	vlesstest.WaitReady(t, server)
 	return server
 }
@@ -56,13 +61,23 @@ func newVLESS(t *testing.T) *vlesstest.Server {
 // through VLESS, status and metrics, flow pinning, failover both ways and
 // fail-closed with both down.
 func TestEndToEndVLESS(t *testing.T) {
+	endToEndVLESS(t, false, "vless reality xtls-rprx-vision")
+}
+
+// TestEndToEndVLESSGRPC is TestEndToEndVLESS over gRPC, which carries every
+// flow over one connection to the server.
+func TestEndToEndVLESSGRPC(t *testing.T) {
+	endToEndVLESS(t, true, "vless reality grpc")
+}
+
+func endToEndVLESS(t *testing.T, grpc bool, transport string) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root: creates TUNs and programs the kernel")
 	}
 	dir := t.TempDir()
 	nl := newProvider(t, "nl", netip.MustParsePrefix("10.100.0.0/24"), 51001)
 	os.WriteFile(filepath.Join(dir, "nl.conf"), []byte(nl.conf), 0o600)
-	vl := newVLESS(t)
+	vl := newVLESS(t, grpc)
 	os.WriteFile(filepath.Join(dir, "vl.key"), []byte(vl.Link()+"\n"), 0o600)
 
 	cfgPath := filepath.Join(dir, "lotsman.yaml")
@@ -85,7 +100,7 @@ metrics: {listen: 127.0.0.1:19100}
 	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
 
 	out, err := capture(t, "-config", cfgPath, "config", "check")
-	if err != nil || !strings.Contains(out, "lm-up-vl  kind vless") || !strings.Contains(out, "vless reality xtls-rprx-vision") ||
+	if err != nil || !strings.Contains(out, "lm-up-vl  kind vless") || !strings.Contains(out, transport) ||
 		strings.Contains(out, vl.ID()) {
 		t.Fatalf("config check: %v\n%s", err, out)
 	}
