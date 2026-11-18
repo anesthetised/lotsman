@@ -17,7 +17,14 @@ sudo install -m 0755 dist/lotsman-linux-amd64 /usr/local/bin/lotsman
 sudo mkdir -p /etc/lotsman/upstreams
 sudo cp deploy/lotsman.example.yaml /etc/lotsman/lotsman.yaml
 sudo cp deploy/lotsman.service /etc/systemd/system/
+getent passwd lotsman-proxy >/dev/null || sudo useradd --system --user-group --no-create-home \
+  --shell /usr/sbin/nologin lotsman-proxy
 ```
+
+The last step creates the system user that proxy upstream helpers run as (see
+[Helper processes](#helper-processes)); it has no login shell and no home. Skip it if you have no
+`outline` or `vless` upstreams. Without it the helpers fall back to uid/gid 65534 (`nobody`) and
+the daemon logs a warning once.
 
 Put each provider config into `/etc/lotsman/upstreams/<name>.conf`, reference them in
 `lotsman.yaml`, then:
@@ -41,7 +48,12 @@ path=/usr/local/bin/lotsman
 path=/etc/systemd/system/lotsman.service
 path=/etc/lotsman
 path=/var/lib/lotsman
+user=lotsman-proxy
 ```
+
+Add `user=lotsman-proxy` only if your install created that user (the `useradd` above ran): the
+script removes each `user=` entry with `userdel`, so a user that existed before Lotsman is left
+alone. If `userdel` fails, the script says so and carries on.
 
 ### Docker
 
@@ -232,7 +244,7 @@ messages, UDP as one datagram per message, as outline-ss-server expects. The URL
 like a plain server (once, not per flow); the connection goes to that address, with the URL's host
 as TLS server name and HTTP `Host`, and the certificate is checked against the system roots (the
 helper process sees `SSL_CERT_FILE` and `SSL_CERT_DIR` if the daemon's environment sets them; such a
-file must be readable by uid 65534). The URL, whose path is a secret, is never logged or quoted;
+file must be readable by the helper user, `lotsman-proxy`). The URL, whose path is a secret, is never logged or quoted;
 `config check` and the log show `shadowsocks <cipher> over WebSocket` and the server as `host:port`.
 
 What is accepted is what the Outline client accepts for these keys: `transport` as an `ss://`
@@ -412,17 +424,22 @@ A helper is the daemon's binary re-executed from `/proc/self/exe`, so its proces
 daemon's. Take the daemon's pid from systemd as above.
 
 There is one per proxy upstream; the daemon logs `proxy helper started upstream=<name> pid=<pid>`
-for each. A root daemon runs them as uid/gid 65534 without capabilities: they hold only the
-upstream's TUN descriptor, open outbound connections to the server and are not dumpable, so other
-processes of that user cannot read the key from their memory. The unit's `CapabilityBoundingSet`
+for each. A root daemon runs them as the system user `lotsman-proxy` (uid and primary gid, no
+supplementary groups) without capabilities: they hold only the upstream's TUN descriptor, open
+outbound connections to the server and are not dumpable, so other processes of that user cannot read
+the key from their memory. The unit's `CapabilityBoundingSet`
 must include `CAP_SETUID` and `CAP_SETGID` for this (as `deploy/lotsman.service` does); without
 them every proxy upstream fails to start with `operation not permitted`. In Docker, the default
 capabilities include both. Helpers ignore SIGTERM and SIGINT and die with the daemon. Their logs
 appear in the daemon's log with the `upstream` attribute, at the daemon's log level.
 
-uid 65534 (`nobody`) is shared with other services on most hosts: they cannot read a helper's
-memory, but they can kill it (handled as a crash, below). A dedicated system user for the helpers
-would close that and is planned as a follow-up.
+The daemon looks the user up each time it starts a helper, so creating it takes effect at the next
+helper start, with no daemon restart; check with `ps` as above (the USER column) or
+`getent passwd lotsman-proxy`. If the user does not exist, the daemon logs `proxy helpers run as
+uid/gid 65534 (nobody)` once and falls back to that. Other services often run as `nobody` too: they
+cannot read a helper's memory, but they can kill it (handled as a crash, below), which is why the
+dedicated user is the recommended setup. A `lotsman-proxy` that resolves to uid or gid 0 is treated
+as missing. A file named by `SSL_CERT_FILE` (WebSocket keys) must be readable by that user.
 
 When a helper exits on its own, the log shows `proxy helper exited upstream=<name> status=…` (with
 `panic=…` and the stack trace lines as `proxy helper output` when it panicked), the upstream is down

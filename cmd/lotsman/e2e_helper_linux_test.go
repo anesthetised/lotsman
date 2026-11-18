@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"net/netip"
 	"os"
+	"os/exec"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -78,7 +80,30 @@ func procStatus(t *testing.T, pid int) map[string]string {
 	return out
 }
 
-// A proxy upstream runs in an unprivileged helper process. When the helper
+// proxyUser makes sure the dedicated helper user exists, creating it as the
+// install steps do and removing it afterwards, and returns it.
+func proxyUser(t *testing.T) *user.User {
+	t.Helper()
+	if _, err := user.Lookup(helper.ProxyUser); err != nil {
+		out, err := exec.Command("useradd", "--system", "--user-group", "--no-create-home",
+			"--shell", "/usr/sbin/nologin", helper.ProxyUser).CombinedOutput()
+		if err != nil {
+			t.Fatalf("useradd: %v: %s", err, out)
+		}
+		t.Cleanup(func() { exec.Command("userdel", helper.ProxyUser).Run() })
+	}
+	u, err := user.Lookup(helper.ProxyUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u.Uid == "65534" || u.Gid == "65534" {
+		t.Fatalf("%s is %s:%s: the test cannot tell it from the fallback", helper.ProxyUser, u.Uid, u.Gid)
+	}
+	return u
+}
+
+// A proxy upstream runs in an unprivileged helper process, as the dedicated
+// lotsman-proxy user and with no capabilities. When the helper
 // is killed or panics, the upstream is down at once, its clients fail over
 // to AWG, an AWG client's open connection is untouched, and the helper comes
 // back. Stopping the daemon leaves no helper behind.
@@ -86,6 +111,7 @@ func TestEndToEndProxyHelper(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root: creates TUNs and programs the kernel")
 	}
+	proxy := proxyUser(t)
 	dir := t.TempDir()
 	nl := newProvider(t, "nl", netip.MustParsePrefix("10.100.0.0/24"), 51001)
 	os.WriteFile(filepath.Join(dir, "nl.conf"), []byte(nl.conf), 0o600)
@@ -153,7 +179,9 @@ metrics: {listen: 127.0.0.1:19100}
 		t.Fatalf("helpers = %v, want one for ol", pids)
 	}
 	st := procStatus(t, pids[0])
-	for k, want := range map[string]string{"Uid": "65534 65534 65534 65534", "Gid": "65534 65534 65534 65534", "Groups": "",
+	// The dedicated user, not nobody; real, effective, saved and filesystem ids.
+	ids, gids := strings.TrimSpace(strings.Repeat(proxy.Uid+" ", 4)), strings.TrimSpace(strings.Repeat(proxy.Gid+" ", 4))
+	for k, want := range map[string]string{"Uid": ids, "Gid": gids, "Groups": "",
 		"CapInh": "0000000000000000", "CapPrm": "0000000000000000", "CapEff": "0000000000000000", "CapAmb": "0000000000000000"} {
 		if st[k] != want {
 			t.Errorf("helper %s = %q, want %q", k, st[k], want)

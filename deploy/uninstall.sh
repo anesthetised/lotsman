@@ -1,6 +1,6 @@
 #!/bin/sh
-# Removes everything a Lotsman install put on this host and restores the
-# sysctls it changed. Reads the manifest written at install time.
+# Removes everything a Lotsman install put on this host (files, packages and
+# system users) and restores the sysctls it changed. Reads the manifest written at install time.
 set -eu
 
 manifest=/etc/lotsman/INSTALLED
@@ -115,6 +115,11 @@ fi
 # Every path the install created, deepest first.
 sed -n 's/^path=//p' "$manifest" | awk '{print length, $0}' | sort -rn | cut -d' ' -f2- | while read -r p; do
 	rm -rf "$p"
+done
+# System users the install created (never one that already existed). The service
+# is stopped, so no helper still runs as them.
+sed -n 's/^user=//p' "$manifest" | while read -r u; do
+	userdel "$u" || echo "cannot remove user $u: remove it by hand" >&2
 done
 pkgs=$(sed -n 's/^package=//p' "$manifest" | tr '\n' ' ')
 if [ -n "$pkgs" ]; then
