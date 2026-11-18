@@ -99,9 +99,9 @@ change `go.mod`); #56 after #49; #53 after #46; #47 after #52 and #53; #51 after
 
 #76 (PR #82), #77 (PR #83, test only), #84 (PR #85: the first packet of every AWG device
 went out without S4 padding, an amneziawg-go ordering race; also the root cause of #42,
-closed), #81 (PR #88: firewall repair on nftables change events). The upstream report for
-the amneziawg-go race is drafted in PR #85 and not filed; filing it is outward-facing and
-needs the owner's go-ahead.
+closed), #81 (PR #88: firewall repair on nftables change events). The amneziawg-go race was
+fixed upstream in v3.1.20261116 (no report needed) and the first-read gate from PR #85 was
+removed in #105.
 
 ### Wave 3: proxy upstreams (#61, #86, #87)
 
@@ -122,9 +122,9 @@ gorilla/websocket), #86 VLESS + REALITY via xray-core v26.11.9 (PR #96). #42 clo
 duplicate of #84.
 
 Follow-ups: #97 (dedicated system user for helpers instead of uid 65534), #98 (helper IPC under
-`d.mu`, against the #44 locking rule). Drafted, not filed (outward-facing, need the owner's
-go-ahead): the amneziawg-go S4 padding race (PR #85) and the Xray server-side Vision data race
-(PR #96).
+`d.mu`, against the #44 locking rule). Drafted, not filed (outward-facing, needs the owner's
+go-ahead): the Xray server-side Vision data race (PR #96). The amneziawg-go S4 padding race
+(PR #85) was fixed upstream in v3.1.20261116 and the gate removed in #105.
 
 ### Manual and deferred
 

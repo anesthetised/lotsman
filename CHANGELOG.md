@@ -70,6 +70,13 @@ All notable changes to Lotsman are documented here. The format follows
   timer (three times that) overflows and wipes every session's keys at once (#76).
 
 ### Changed
+- amneziawg-go moves to `amneziawg-go/v3 v3.1.20261116`, which re-checks S4 when a packet reaches
+  encryption, so the first packet of a device configured after creation is padded without help.
+  Lotsman's TUN wrapper that held the first read until the first configuration is removed;
+  `TestFirstPacketCarriesTransportPadding` stays as the regression guard. The runtime also rejects
+  `jmin` above `jmax` and negative `<r>`, `<rc>`, `<rd>` and `<dz>` lengths, makes I1–I5 changes
+  during a handshake race-free and fixes a timer locking order; Lotsman's own validation, with its
+  clearer errors, runs first and is unchanged (#105).
 - Each Outline upstream's stack runs in its own helper process (`lotsman proxy-helper`, started by
   the daemon with the TUN descriptor; the key goes over a socket pair, never argv or environment),
   as uid/gid 65534 without capabilities. A crash, a kill, a helper that stops answering or a stack
@@ -98,8 +105,8 @@ All notable changes to Lotsman are documented here. The format follows
 ### Fixed
 - The first data packet of every AmneziaWG device (each upstream, and `lm0` towards clients) went
   out without its S4 transport padding and was dropped by the peer, which delayed an upstream's
-  first health probe by a round. The runtime reads S4 before it blocks on the TUN, so the TUN's
-  first read now waits for the first configuration (#84).
+  first health probe by a round. The runtime read S4 before it blocked on the TUN; fixed by the
+  runtime itself in amneziawg-go v3.1.20261116 (#84, #105).
 - Firewall rules removed by another tool (`nft flush ruleset`, a ufw or firewalld reload, a Docker
   or ufw forward chain added later) are reinstalled and every routed client is admitted again,
   instead of everyone staying blocked until a restart; each repair is logged as an error and
