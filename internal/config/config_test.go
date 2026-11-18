@@ -11,14 +11,14 @@ import (
 const minimal = `
 endpoint: vpn.example.org:51820
 upstreams:
-  - name: rs-nl
-    conf: /etc/lotsman/upstreams/rs-nl.conf
+  - name: ac-nl
+    conf: /etc/lotsman/upstreams/ac-nl.conf
     geo: NL
-    provider: redshield
-  - name: rs-de
-    conf: /etc/lotsman/upstreams/rs-de.conf
+    provider: acme
+  - name: ac-de
+    conf: /etc/lotsman/upstreams/ac-de.conf
     geo: DE
-    provider: redshield
+    provider: acme
 profiles:
   - name: nl
     prefer: [{geo: NL}]
@@ -155,7 +155,7 @@ func TestValidationErrors(t *testing.T) {
 		"subnet too small":       {"subnet", "subnet: 10.0.0.0/30\n", "subnet:"},
 		"empty dns":              {"dns", "dns: []\n", "dns:"},
 		"bad upstream name":      {"upstreams", "upstreams: [{name: 'Bad Name', conf: /x}]\n", "upstreams[0]: name"},
-		"upstream name too long": {"upstreams", "upstreams: [{name: redshield-nl, conf: /x}]\n", "upstreams[0]: name"},
+		"upstream name too long": {"upstreams", "upstreams: [{name: acmecorp-nl, conf: /x}]\n", "upstreams[0]: name"},
 		"duplicate upstream":     {"upstreams", "upstreams: [{name: a, conf: /x}, {name: a, conf: /y}]\n", "duplicate name"},
 		"upstream without conf":  {"upstreams", "upstreams: [{name: a}]\n", "conf path is required"},
 		"no profiles":            {"profiles", "profiles: []\n", "profiles: at least one"},
@@ -297,7 +297,7 @@ func TestMetricsListen(t *testing.T) {
 }
 
 func TestInterfaceName(t *testing.T) {
-	if got := (Upstream{Name: "rs-nl"}).InterfaceName(); got != "lm-up-rs-nl" || len(got) > 15 {
+	if got := (Upstream{Name: "ac-nl"}).InterfaceName(); got != "lm-up-ac-nl" || len(got) > 15 {
 		t.Errorf("InterfaceName = %q", got)
 	}
 }
