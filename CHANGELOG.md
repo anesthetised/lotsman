@@ -89,6 +89,11 @@ All notable changes to Lotsman are documented here. The format follows
   default (208 KiB) a client-to-gateway TCP flow lost datagrams to `UdpRcvbufErrors` (#102).
 - The systemd unit's description is `Lotsman AmneziaWG gateway`, without the protocol version, which
   is no longer fixed at 2.0 (`awg: 3` is the default) (#101).
+- Proxy upstream helpers run as the dedicated system user `lotsman-proxy` when it exists, instead
+  of uid/gid 65534, so other services running as `nobody` can no longer signal (kill) them; the
+  daemon falls back to 65534 with one warning when the user is missing. Create it at install
+  (`useradd --system --user-group --no-create-home --shell /usr/sbin/nologin lotsman-proxy`) and
+  record `user=lotsman-proxy` in `/etc/lotsman/INSTALLED` so `deploy/uninstall.sh` removes it (#97).
 
 ### Fixed
 - The first data packet of every AmneziaWG device (each upstream, and `lm0` towards clients) went

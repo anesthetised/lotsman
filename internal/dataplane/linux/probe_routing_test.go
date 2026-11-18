@@ -70,9 +70,14 @@ func TestProbeRoutesWithOverlappingAddresses(t *testing.T) {
 
 func runUninstall(t *testing.T, stubs map[string]string) ([]byte, error) {
 	t.Helper()
+	return runUninstallManifest(t, "", stubs)
+}
+
+func runUninstallManifest(t *testing.T, body string, stubs map[string]string) ([]byte, error) {
+	t.Helper()
 	dir := t.TempDir()
 	manifest := filepath.Join(dir, "INSTALLED")
-	if err := os.WriteFile(manifest, nil, 0o600); err != nil {
+	if err := os.WriteFile(manifest, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	// No package/path manifest entries and a stub systemctl keep the test to
@@ -121,6 +126,26 @@ func TestProbeUninstallOwnership(t *testing.T) {
 	}
 	if got := rulesAt(t, probeRulePriority); !reflect.DeepEqual(got, foreign) {
 		t.Errorf("uninstall rules = %v, want only foreign %v", got, foreign)
+	}
+}
+
+// Uninstall removes the system users the manifest records, and only those.
+func TestUninstallRemovesInstalledUsers(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "userdel.log")
+	stubs := map[string]string{"userdel": "#!/bin/sh\necho \"$@\" >> " + log + "\n"}
+	if out, err := runUninstallManifest(t, "ip_forward_before=\nuser=lotsman-proxy\npath=/nonexistent\n", stubs); err != nil {
+		t.Fatalf("uninstall: %v\n%s", err, out)
+	}
+	if got, _ := os.ReadFile(log); string(got) != "lotsman-proxy\n" {
+		t.Errorf("userdel calls = %q, want one for lotsman-proxy", got)
+	}
+	log2 := filepath.Join(t.TempDir(), "userdel.log")
+	stubs = map[string]string{"userdel": "#!/bin/sh\necho \"$@\" >> " + log2 + "\n"}
+	if out, err := runUninstallManifest(t, "path=/nonexistent\n", stubs); err != nil {
+		t.Fatalf("uninstall: %v\n%s", err, out)
+	}
+	if got, err := os.ReadFile(log2); err == nil {
+		t.Errorf("userdel ran without a manifest entry: %q", got)
 	}
 }
 

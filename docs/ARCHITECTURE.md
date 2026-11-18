@@ -297,13 +297,19 @@ binary (`lotsman proxy-helper`, hidden), one per upstream; Shadowsocks too, so t
   that forked exits (go.dev/issue/27505). Helpers ignore SIGINT, SIGTERM and SIGHUP, so stopping the
   service or Ctrl-C reaches them only through the daemon. `/proc/self/exe` is executed, so an
   upgrade that replaced the binary on disk still starts the daemon's own version.
-- Privileges: a root daemon starts helpers as uid and gid 65534 with no supplementary groups, so
+- Privileges: a root daemon starts helpers as the system user `lotsman-proxy` (its uid and primary
+  gid, looked up at each start; no supplementary groups), or as uid and gid 65534 with a warning
+  logged once when the user does not exist or resolves to root, so
   exec leaves them no capabilities (no file capabilities on the binary); they need only the
   inherited descriptor and outbound sockets. The environment is empty but for `SSL_CERT_FILE` and
   `SSL_CERT_DIR` when the daemon has them (TLS roots for wss:// keys), and the working directory `/`.
-  A helper makes itself non-dumpable, so other processes of uid 65534 cannot read its memory, which
-  holds the key. They can still signal it, i.e. kill it, which the daemon handles as a crash; a
-  dedicated system user would close that (a follow-up; uid 65534 for now). The systemd unit's bounding set gains `CAP_SETUID` and
+  A helper makes itself non-dumpable, so other processes of its user cannot read its memory, which
+  holds the key. The dedicated user (#97) also keeps other services from signalling it: with
+  uid 65534 they could kill it, which the daemon handles as a crash. The install creates the user
+  and records it in the manifest, so uninstall removes it. systemd's `DynamicUser=` does not fit:
+  it allocates a user for the service's own main process, the daemon, which must stay root to
+  program `/proc/sys`, nftables and routes, and it has no way to hand a second uid to a child the
+  daemon starts itself. The systemd unit's bounding set gains `CAP_SETUID` and
   `CAP_SETGID` for the switch. A non-root daemon starts helpers as its own user, inheriting its
   ambient capabilities.
 - Health is unchanged: probes still leave the daemon through the TUN, so they measure the helper end

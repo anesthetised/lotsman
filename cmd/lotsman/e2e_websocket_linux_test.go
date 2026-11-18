@@ -28,7 +28,7 @@ func TestEndToEndOutlineWebSocket(t *testing.T) {
 	ss, _ := newOutline(t)
 	front := ss.WebSocket(t, true)
 
-	// The helper runs as uid 65534 and must read the CA; t.TempDir is
+	// The helper runs as an unprivileged user and must read the CA; t.TempDir is
 	// private to root. Go reads SSL_CERT_FILE when it first loads the
 	// system roots, which a helper does in a fresh process.
 	caDir, err := os.MkdirTemp("", "lotsman-ca-")

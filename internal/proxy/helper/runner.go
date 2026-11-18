@@ -24,7 +24,7 @@ import (
 type Runner struct {
 	// Command returns a new helper command; Start adds the TUN and the
 	// control connection as fds 3 and 4, and stderr. In production it is
-	// Self.
+	// Self(log).
 	Command func() *exec.Cmd
 	// Zero values take the defaults.
 	StartTimeout   time.Duration // for a helper to answer open; default 10 s
