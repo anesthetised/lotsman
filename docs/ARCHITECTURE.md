@@ -28,12 +28,14 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 
 ## AmneziaWG implementation notes (verified 2026-09-17)
 
-- `github.com/amnezia-vpn/amneziawg-go/v3` is pinned to the tag **v3.1.20260828** (AWG 3.1,
-  updated 2026-11-16). It stores `device.headers.*` atomically and applies `IpcSet` header and
+- `github.com/amnezia-vpn/amneziawg-go/v3` is pinned to the tag **v3.1.20261116** (AWG 3.1,
+  updated 2026-11-18). It stores `device.headers.*` atomically and applies `IpcSet` header and
   padding changes under a lock, so the v0.2.19 data race (headers rewritten by any `IpcSet` while
-  the receive goroutine reads them) is gone. `ipackets` (I1–I5) is still written without
-  synchronisation, so Lotsman sets them only before `Up`. With no 3.x keys the runtime is AWG 2.0
-  on the wire; `TestAWG2RuntimeInterop` checks this against v0.2.19, a test-only dependency.
+  the receive goroutine reads them) is gone, and I1–I5 are atomic pointers, so changing them
+  during a handshake does not race either. The runtime also shifts a queued packet when S4
+  changes between the TUN read and encryption, so a device configured after creation pads even
+  its first packet (no TUN wrapper needed; `TestFirstPacketCarriesTransportPadding` guards it).
+  With no 3.x keys the runtime is AWG 2.0 on the wire; `TestAWG2RuntimeInterop` checks this against v0.2.19, a test-only dependency.
 - AWG 3.x keys, accepted on upstreams: `HeaderProtectionKey` and `RandomTrailers` must match the
   server; `ContentPaddingAddition`, `RekeyAfterTime`, `RekeyTimeout`, `RejectAfterTime`,
   `KeepaliveTimeout`, `MaxHandshakeAttempts` and `DisableCookies` are local. Header protection

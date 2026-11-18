@@ -19,7 +19,6 @@ import (
 type Device struct {
 	name string
 	dev  *device.Device
-	gate *configGate
 }
 
 // New starts a device on t. The caller owns t's creation (a real TUN on Linux,
@@ -41,8 +40,7 @@ func newWithBind(name string, t tun.Device, bind conn.Bind, log *slog.Logger) *D
 		Verbosef: func(format string, args ...any) { log.Debug(fmt.Sprintf(format, args...)) },
 		Errorf:   func(format string, args ...any) { log.Error(fmt.Sprintf(format, args...)) },
 	}
-	gate := newConfigGate(t)
-	return &Device{name: name, dev: device.NewDevice(gate, bind, logger), gate: gate}
+	return &Device{name: name, dev: device.NewDevice(t, bind, logger)}
 }
 
 // CreateTUN opens a kernel TUN interface with the given name and MTU.
@@ -57,7 +55,6 @@ func (d *Device) Configure(uapi string) error {
 	if err := d.dev.IpcSet(uapi); err != nil {
 		return fmt.Errorf("%s: %w", d.name, err)
 	}
-	d.gate.markConfigured()
 	return nil
 }
 
