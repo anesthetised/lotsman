@@ -111,7 +111,7 @@ subagents, merge on green CI.
 | Issue | Decision (2026-11-16) |
 |---|---|
 | #61 | Spike: go. One generic *proxy upstream* (`internal/proxy`: kernel TUN → gVisor channel endpoint → per-flow dial through a pluggable dialer); Shadowsocks is the first dialer. Own `ss://` parser instead of `x/configurl` (+2.5 MB, unstable API). Health for proxy upstreams is a DNS exchange over UDP and TCP. Per-upstream flow cap. |
-| #86 | VLESS + Reality + Vision through embedded xray-core (option A in the issue), as the second dialer, after #61 slice 2. First version: `vless://`, TCP transport, XUDP. Spike: go with conditions (gVisor raised to xray's version; pseudo-version pinning; replicate xray's config validation; the Vision data race to be reported upstream with the owner's go-ahead). |
+| #86 | VLESS + Reality + Vision through embedded xray-core (option A in the issue), as the second dialer, after #61 slice 2. First version: `vless://`, TCP transport, XUDP. Spike: go with conditions (gVisor raised to xray's version; pseudo-version pinning; replicate xray's config validation; the Vision data race reported upstream as XTLS/Xray-core#7443). |
 | #61, #86 | **Every proxy upstream runs in a child process** of the same binary (the daemon creates the TUN and passes its fd), so a panic in gVisor, the Outline SDK or xray takes down one upstream, not the gateway. Failover covers the restart. |
 | #87 | After #61 slice 2, because both change the probe code. |
 
@@ -121,10 +121,11 @@ failing), #91 helper process for every proxy upstream (PR #94), #61 slice 4 WebS
 gorilla/websocket), #86 VLESS + REALITY via xray-core v26.11.9 (PR #96). #42 closed as a
 duplicate of #84.
 
-Follow-ups: #97 (dedicated system user for helpers instead of uid 65534), #98 (helper IPC under
-`d.mu`, against the #44 locking rule). Drafted, not filed (outward-facing, needs the owner's
-go-ahead): the Xray server-side Vision data race (PR #96). The amneziawg-go S4 padding race
-(PR #85) was fixed upstream in v3.1.20261116 and the gate removed in #105.
+Follow-ups, done 2026-11-18: #97 (PR #107, dedicated helper user `lotsman-proxy`), #98 (PR #110,
+helper IPC off `d.mu`), #105 (PR #108, amneziawg-go v3.1.20261116; the S4 padding race from PR #85
+was fixed upstream and the gate removed), #106 (PR #109, default soft memory limit of 40% of RAM,
+from measurements on the test host). The Xray server-side Vision data race (PR #96) was reported
+upstream as XTLS/Xray-core#7443 with the owner's go-ahead.
 
 ### Manual and deferred
 
