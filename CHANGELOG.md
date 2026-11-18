@@ -119,6 +119,15 @@ All notable changes to Lotsman are documented here. The format follows
   created in one transaction, so an unreadable provider file or a full subnet changes nothing. A
   failure to write the config to stdout is reported with the `user show` command that prints it
   again (#115).
+- A second `lotsman serve` started next to a running one, in the same network namespace or on the
+  same `state_dir`, no longer disturbs it. It used to overwrite and then remove the running
+  daemon's pid file and, once its own startup failed on the busy `lm0`, delete `table inet
+  lotsman` (NAT and the fail-closed drop) until the running daemon's firewall watch reinstalled
+  it. `serve` now takes an exclusive
+  lock per network namespace (abstract Unix socket `@lotsman`) and per state directory (flock on
+  `state_dir/serve.lock`) before anything else and exits with `another lotsman serve is running
+  …` if either is held. A daemon whose startup fails before dataplane setup also no longer tears
+  down rules, routes or the firewall it never installed (#114).
 - The first data packet of every AmneziaWG device (each upstream, and `lm0` towards clients) went
   out without its S4 transport padding and was dropped by the peer, which delayed an upstream's
   first health probe by a round. The runtime read S4 before it blocked on the TUN; fixed by the

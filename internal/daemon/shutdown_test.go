@@ -111,3 +111,40 @@ func TestShutdownClosesDevicesAndRetriesCleanup(t *testing.T) {
 		}
 	}
 }
+
+// A start that fails before dataplane setup, such as on a TUN another
+// process holds, closes what it opened and leaves the dataplane alone: the
+// host's rules and firewall may belong to someone else.
+func TestFailedStartBeforeSetupLeavesDataplaneAlone(t *testing.T) {
+	for _, failing := range []string{DownstreamInterface, "lm-up-de"} {
+		t.Run(failing, func(t *testing.T) {
+			h := newHarness(t)
+			devices := map[string]*closingTUN{}
+			create := h.d.newTUN
+			busy := errors.New("device or resource busy")
+			h.d.newTUN = func(name string, mtu int) (tun.Device, error) {
+				if name == failing {
+					return nil, busy
+				}
+				raw, err := create(name, mtu)
+				if err != nil {
+					return nil, err
+				}
+				device := &closingTUN{Device: raw}
+				devices[name] = device
+				return device, nil
+			}
+			if err := h.d.Run(context.Background()); !errors.Is(err, busy) {
+				t.Fatalf("Run: %v", err)
+			}
+			if len(h.dp.Log) != 0 {
+				t.Errorf("dataplane touched: %v", h.dp.Log)
+			}
+			for name, device := range devices {
+				if !device.closed.Load() {
+					t.Errorf("device %s survived the failed start", name)
+				}
+			}
+		})
+	}
+}

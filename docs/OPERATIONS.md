@@ -104,7 +104,7 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `endpoint` | Nonempty host and numeric UDP port (1–65535) written into client configs; hostname, IPv4, and bracketed IPv6 forms are supported. |
 | `subnet` | Canonical IPv4 network prefix, /24 or larger; the first host address is the gateway. |
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
-| `state_dir` | Server identity, SQLite database, pid and status files, cached dynamic Outline keys. |
+| `state_dir` | Server identity, SQLite database, pid, status and `serve.lock` files, cached dynamic Outline keys. |
 | `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, `outline` or `vless`), `conf` path (the provider's AmneziaWG config, for `outline` a file with the access key or its `ssconf://` URL, for `vless` a file with the `vless://` link), free-form `geo` and `provider` labels, `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates), and for the proxy kinds `outline` and `vless` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams) and [VLESS upstreams](#vless-upstreams)). |
 | `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider, tag}` matchers (all given fields must match); empty = any upstream. Within a tier the lowest latency wins, so a tag such as `near` groups several countries into one tier. A matcher that matches no upstream, or only upstreams an earlier matcher already took, is ignored with a warning in `config check` and the reload log, so an upstream can be removed without editing every profile. A profile where no matcher matches any upstream is an error. |
 | `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline and VLESS upstream; default `1.1.1.1:53`), `down_after`, `up_after`, and the optional `transfer` block (off when absent; see [Throttled upstreams](#throttled-upstreams-transfer-probe)). |
@@ -761,6 +761,15 @@ anything else bound to `0.0.0.0` is unreachable through the tunnel, even if ufw 
 it: a drop in any nftables chain is final. Lotsman's accepts do not override other firewalls either,
 so on a host with ufw or firewalld the metrics port must still be opened for input on `lm0`.
 Clients that need DNS should use a resolver on the internet, not one on the gateway.
+
+**`another lotsman serve is running in this network namespace`** (or `is using state_dir`). Only
+one daemon may run per network namespace, since all of them would share `lm0`, the routing rules
+and `table inet lotsman`, and only one per state directory. A second `serve` checks both before it
+reads the state directory or touches the network, so it exits with this error and leaves the
+running daemon, its pid file and its clients alone. The locks are an abstract Unix socket
+`@lotsman` and a flock on `state_dir/serve.lock`; the kernel releases both when the daemon exits,
+crash included, so there is nothing to clean up. `ss -xap | grep @lotsman` shows which process
+holds the first: if it is not Lotsman, that process blocks it from starting.
 
 **Restart left rules behind.** Lotsman removes its rules, routes and nftables table on shutdown and
 recreates them on start, so a crash is harmless. It only removes rules and routes of the exact
