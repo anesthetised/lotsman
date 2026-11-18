@@ -98,6 +98,7 @@ type Daemon struct {
 	fetched        map[string]time.Time       // upstream → last dynamic key fetch, to space refetches on failed probes
 	wake           chan struct{}              // nudges Run to reprobe and reconcile now
 	ready          chan struct{}              // closed after the first reconcile
+	rounds         chan struct{}              // one pending token once a round has finished since Rounds was last read
 
 	transfers map[*Upstream]*transferState // throughput health while health.transfer is set
 
@@ -129,6 +130,7 @@ func New(d Deps) *Daemon {
 		transfers:      map[*Upstream]*transferState{},
 		wake:           make(chan struct{}, 1),
 		ready:          make(chan struct{}),
+		rounds:         make(chan struct{}, 1),
 		probes:         map[string]*[2]uint64{},
 		transferCounts: map[string]*[2]uint64{},
 		reroutes:       map[string]uint64{},
@@ -158,6 +160,12 @@ func Gateway(cfg *config.Config) netip.Prefix {
 
 // Ready is closed once the daemon has probed and reconciled for the first time.
 func (d *Daemon) Ready() <-chan struct{} { return d.ready }
+
+// Rounds receives a value after each health round that follows the first one
+// (Ready covers that), however it was triggered: the interval elapsing, a
+// reload or another wake-up. Notifications coalesce, so a slow reader sees
+// that something finished, not how many rounds. There is one reader.
+func (d *Daemon) Rounds() <-chan struct{} { return d.rounds }
 
 // Run brings everything up, then probes and reconciles until ctx is done.
 func (d *Daemon) Run(ctx context.Context) error {
@@ -189,6 +197,11 @@ func (d *Daemon) Run(ctx context.Context) error {
 		if first {
 			close(d.ready)
 			first = false
+		} else {
+			select {
+			case d.rounds <- struct{}{}:
+			default:
+			}
 		}
 		d.mu.Lock()
 		interval := d.cfg.Health.Interval

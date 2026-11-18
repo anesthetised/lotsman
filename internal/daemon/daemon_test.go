@@ -694,3 +694,33 @@ func TestReloadAppliesIncomingThresholdsToNewUpstreams(t *testing.T) {
 		})
 	}
 }
+
+// Rounds reports every round after the first. After a reload that shortens
+// health.interval, rounds follow at the new cadence at once; a loop that
+// slept the old hour would not report a second round within the test's time.
+func TestRoundsFollowReloadedInterval(t *testing.T) {
+	h := newHarness(t)
+	slow, err := config.Parse([]byte(strings.Replace(fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir), "interval: 30ms", "interval: 1h", 1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	h.d.cfg = slow
+	h.run(t)
+	<-h.d.Ready()
+	select {
+	case <-h.d.Rounds():
+		t.Fatal("the first round is reported by Ready, not by Rounds")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	if err := h.d.Reload(context.Background(), h.cfg); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		select {
+		case <-h.d.Rounds():
+		case <-time.After(5 * time.Second):
+			t.Fatalf("round %d after the reload did not follow the new 30ms interval", i+1)
+		}
+	}
+}

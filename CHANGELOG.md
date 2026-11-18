@@ -111,6 +111,10 @@ All notable changes to Lotsman are documented here. The format follows
   load; a 200 MiB limit about halves the peak for at most a 20% loss in the slowest case (#106).
 
 ### Fixed
+- `status.json` follows the daemon's health rounds instead of a timer started with the daemon, so
+  after a reload that shortens `health.interval` `upstream status` and `user list` no longer lag by
+  the old interval (#117). `serve` also waits for the status file to be removed before it releases
+  its instance locks.
 - `user rm NAME -profile ""` (an unset shell variable, say) removed every config of the user, or
   of the device with `-device`; an explicitly empty `-profile` is now rejected for all `user`
   commands, and omitting it still selects the whole device or user (#113).
