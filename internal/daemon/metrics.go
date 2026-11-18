@@ -16,7 +16,7 @@ var Families = []metrics.Family{
 	{Name: "lotsman_client_mtu", Type: "gauge", Help: "MTU written into client configs."},
 	{Name: "lotsman_upstream_info", Type: "gauge", Help: "The upstream's kind and interface; always 1."},
 	{Name: "lotsman_upstream_up", Type: "gauge", Help: "1 while the upstream passes its health probes."},
-	{Name: "lotsman_upstream_flows", Type: "gauge", Help: "TCP and UDP flows a proxy upstream carries now."},
+	{Name: "lotsman_upstream_flows", Type: "gauge", Help: "TCP and UDP flows a proxy upstream carried at the last health round."},
 	{Name: "lotsman_upstream_flows_refused_total", Type: "counter", Help: "Flows a proxy upstream refused at its max_flows limit."},
 	{Name: "lotsman_proxy_restarts_total", Type: "counter", Help: "Times a proxy upstream's helper process exited on its own, a crash included; each is restarted."},
 	{Name: "lotsman_upstream_probe_latency_seconds", Type: "gauge", Help: "Latency of the last successful probe."},
@@ -93,7 +93,7 @@ func (d *Daemon) Metrics() []metrics.Sample {
 		if t := d.transfers[u]; t != nil && t.ran {
 			out = append(out, sample("lotsman_upstream_transfer_seconds", t.last.Seconds(), up))
 		}
-		st := u.link.Stats()
+		st := u.link.Stats() // a proxy link's counters are the health round's: no helper request under d.mu
 		if p := st.Peer; p != nil {
 			out = append(out,
 				sample("lotsman_upstream_last_handshake_timestamp_seconds", unixOrZero(p.LastHandshake), up),

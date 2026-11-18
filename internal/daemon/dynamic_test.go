@@ -140,7 +140,7 @@ func (h *harness) serving(link link, resolved string) bool {
 	for _, u := range h.d.ups {
 		if u.Name == "ol" {
 			l, ok := u.link.(*proxyLink)
-			return ok && u.link == link && u.Resolved == resolved && l.key == u.keyText
+			return ok && u.link == link && u.Resolved == resolved && l.runningKey() == u.keyText
 		}
 	}
 	return false
