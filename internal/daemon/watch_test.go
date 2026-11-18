@@ -79,28 +79,29 @@ func (h *watchHarness) wantAllowed(t *testing.T, when string) {
 	})
 }
 
-// settled waits until the daemon has stopped calling Verify and returns the
-// number of calls.
-func (h *watchHarness) settled(t *testing.T) int {
+// awaitVerifies waits until Verify has been called want more times since the
+// count before, then until no further call follows, and returns the count. It
+// waits for the event rather than for quiet: a call still pending on a busy
+// runner is waited for, not mistaken for a quiet daemon.
+func (h *watchHarness) awaitVerifies(t *testing.T, before, want int) int {
 	t.Helper()
-	n := h.dp.Verifies()
-	for range 50 {
-		time.Sleep(5 * firewallSettle)
-		m := h.dp.Verifies()
-		if m == n {
-			return n
+	deadline := time.Now().Add(30 * time.Second)
+	for h.dp.Verifies() < before+want {
+		if time.Now().After(deadline) {
+			t.Fatalf("Verify called %d times, want %d more than %d", h.dp.Verifies(), want, before)
 		}
-		n = m
+		time.Sleep(10 * time.Millisecond)
 	}
-	t.Fatalf("Verify keeps being called: %d calls", n)
-	return 0
+	// Longer than a check's settle and its echo's.
+	time.Sleep(5 * firewallSettle)
+	return h.dp.Verifies()
 }
 
 // A firewall another tool removes is repaired as soon as the change is
 // reported, not at the next health round, an hour away here (issue #81).
 func TestFirewallRepairedOnChange(t *testing.T) {
 	h := newWatchHarness(t)
-	before := h.settled(t)
+	before := h.awaitVerifies(t, 0, 1)
 
 	h.dp.FlushFirewall()
 	h.wantAllowed(t, "after the flush")
@@ -109,7 +110,7 @@ func TestFirewallRepairedOnChange(t *testing.T) {
 	}
 	// The repair is itself reported as a change, which costs one more check
 	// that finds the firewall intact, and nothing after that.
-	if got := h.settled(t) - before; got != 2 {
+	if got := h.awaitVerifies(t, before, 2) - before; got != 2 {
 		t.Errorf("Verify called %d times for one flush, want 2 (the repair and its echo)", got)
 	}
 	if got := h.repairs(t); got != 1 {
@@ -121,7 +122,7 @@ func TestFirewallRepairedOnChange(t *testing.T) {
 // transactions, costs one repair and one check.
 func TestFirewallChangeBurstRepairsOnce(t *testing.T) {
 	h := newWatchHarness(t)
-	before := h.settled(t)
+	before := h.awaitVerifies(t, 0, 1)
 
 	start := time.Now()
 	h.dp.FlushFirewall()
@@ -132,7 +133,7 @@ func TestFirewallChangeBurstRepairsOnce(t *testing.T) {
 	burst := time.Since(start)
 	h.wantAllowed(t, "after the burst")
 	// The repair and its echo. Without settling it is about 10.
-	got := h.settled(t) - before
+	got := h.awaitVerifies(t, before, 2) - before
 	switch {
 	case burst >= firewallSettle/2:
 		t.Logf("a loaded runner stretched the burst to %s; %d Verify calls not checked", burst, got)
@@ -148,12 +149,11 @@ func TestFirewallChangeBurstRepairsOnce(t *testing.T) {
 // been missed; the health round remains the fallback.
 func TestFirewallWatchFailure(t *testing.T) {
 	h := newWatchHarness(t)
-	before := h.settled(t)
+	before := h.awaitVerifies(t, 0, 1)
 
 	for range 2 {
 		h.dp.Notify(errors.New("monitor overrun"))
-		eventually(t, "a check after the failure", func() bool { return h.dp.Verifies() > before })
-		before = h.settled(t)
+		before = h.awaitVerifies(t, before, 1)
 	}
 	if got := strings.Count(h.logs.String(), "level=ERROR msg=\"watching the firewall for changes failed"); got != 1 {
 		t.Errorf("watch failure logged %d times, want once:\n%s", got, h.logs)
