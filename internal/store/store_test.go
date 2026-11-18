@@ -408,3 +408,21 @@ func TestCorruptTimestampIsReported(t *testing.T) {
 		t.Error("ListPeers accepted a corrupt created_at")
 	}
 }
+
+func TestAddUserPeerIsAtomic(t *testing.T) {
+	s := open(t)
+	tiny := netip.MustParsePrefix("10.0.0.0/30") // .0 net, .1 gw, .2 usable, .3 broadcast
+	if _, err := s.AddUserPeer("alice", DefaultDevice, "nl", tiny); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddUserPeer("alice", "phone", "nl", tiny); !errors.Is(err, ErrSubnetFull) {
+		t.Fatalf("full subnet: %v", err)
+	}
+	if _, err := s.AddUserPeer("bob", DefaultDevice, "nl", tiny); !errors.Is(err, ErrSubnetFull) {
+		t.Fatalf("full subnet: %v", err)
+	}
+	users, err := s.ListUsers()
+	if err != nil || len(users) != 1 || users[0].Name != "alice" {
+		t.Errorf("a failed AddUserPeer left a user behind: %+v, %v", users, err)
+	}
+}

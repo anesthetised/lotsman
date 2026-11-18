@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/netip"
@@ -422,5 +423,162 @@ func TestUserCommandsWithoutDNS(t *testing.T) {
 	shown, err := capture(t, "-config", path, "user", "show", "alice", "-profile", "nl")
 	if err != nil || shown != added {
 		t.Errorf("user show: %v\n%s", err, shown)
+	}
+}
+
+// userState lists every user and peer; peers carry their keys and addresses,
+// so any partial write shows up as a difference.
+func userState(t *testing.T, cfg string) string {
+	t.Helper()
+	e, err := openEnv(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.store.Close()
+	users, err := e.store.ListUsers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	peers, err := e.store.ListPeers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return fmt.Sprintf("%+v\n%+v", users, peers)
+}
+
+// An empty -profile, typically an unset shell variable, must not widen
+// `user rm` to the whole device or the whole user.
+func TestUserRemoveRejectsEmptyProfile(t *testing.T) {
+	cfg := testConfig(t)
+	for _, add := range [][]string{
+		{"alice", "-profile", "nl"},
+		{"alice", "-profile", "auto"},
+		{"alice", "-profile", "nl", "-device", "phone"},
+		{"alice", "-profile", "auto", "-device", "phone"},
+	} {
+		if _, err := capture(t, append([]string{"-config", cfg, "user", "add"}, add...)...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before := userState(t, cfg)
+	for _, args := range [][]string{
+		{"alice", "-profile", ""},
+		{"alice", "-profile="},
+		{"alice", "-profile", "", "-device", "phone"},
+		{"alice", "-device", "phone", "-profile="},
+		{"alice", "-device", "default", "-profile", ""},
+	} {
+		_, err := capture(t, append([]string{"-config", cfg, "user", "rm"}, args...)...)
+		if err == nil || !strings.Contains(err.Error(), "-profile must not be empty") {
+			t.Errorf("user rm %q: err = %v", args, err)
+		}
+		if after := userState(t, cfg); after != before {
+			t.Fatalf("user rm %q changed the store:\nbefore %s\nafter  %s", args, before, after)
+		}
+	}
+	for _, cmd := range []string{"add", "show"} {
+		if _, err := capture(t, "-config", cfg, "user", cmd, "alice", "-profile", ""); err == nil {
+			t.Errorf("user %s accepted an empty profile", cmd)
+		}
+	}
+	// The documented forms still work when -profile is omitted.
+	if _, err := capture(t, "-config", cfg, "user", "rm", "alice", "-device", "phone"); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := capture(t, "-config", cfg, "user", "list"); strings.Contains(list, "phone") || strings.Count(list, "alice") != 2 {
+		t.Errorf("whole-device removal:\n%s", list)
+	}
+	if _, err := capture(t, "-config", cfg, "user", "rm", "alice"); err != nil {
+		t.Fatal(err)
+	}
+	if list, _ := capture(t, "-config", cfg, "user", "list"); strings.Contains(list, "alice") {
+		t.Errorf("whole-user removal:\n%s", list)
+	}
+}
+
+// A rejected `user add` must leave users and peers exactly as they were.
+func TestUserAddFailureLeavesNothingBehind(t *testing.T) {
+	t.Run("unreadable provider file", func(t *testing.T) {
+		cfg := testConfig(t)
+		if _, err := capture(t, "-config", cfg, "user", "add", "alice", "-profile", "nl"); err != nil {
+			t.Fatal(err)
+		}
+		before := userState(t, cfg)
+		if err := os.Remove(filepath.Join(filepath.Dir(cfg), "nl.conf")); err != nil {
+			t.Fatal(err)
+		}
+		for _, args := range [][]string{
+			{"alice", "-profile", "auto"}, // existing user
+			{"bob", "-profile", "nl"},     // new user
+		} {
+			out, err := capture(t, append([]string{"-config", cfg, "user", "add"}, args...)...)
+			if err == nil || out != "" {
+				t.Fatalf("user add %q: out %q, err %v", args, out, err)
+			}
+			if after := userState(t, cfg); after != before {
+				t.Errorf("user add %q changed the store:\nbefore %s\nafter  %s", args, before, after)
+			}
+		}
+	})
+
+	t.Run("address allocation fails", func(t *testing.T) {
+		cfg := testConfig(t)
+		data, err := os.ReadFile(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(cfg, append(data, "subnet: 10.77.0.0/24\n"...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := capture(t, "-config", cfg, "user", "add", "alice", "-profile", "nl"); err != nil {
+			t.Fatal(err)
+		}
+		// Fill the rest of the /24: .2-.254 are usable.
+		e, err := openEnv(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < 252; i++ {
+			if _, err := e.store.AddUserPeer("filler", fmt.Sprintf("d%d", i), "nl", e.cfg.Subnet); err != nil {
+				t.Fatal(err)
+			}
+		}
+		e.store.Close()
+		before := userState(t, cfg)
+		for _, args := range [][]string{
+			{"alice", "-profile", "auto"},
+			{"bob", "-profile", "nl"},
+		} {
+			out, err := capture(t, append([]string{"-config", cfg, "user", "add"}, args...)...)
+			if !errors.Is(err, store.ErrSubnetFull) || out != "" {
+				t.Fatalf("user add %q: out %q, err %v", args, out, err)
+			}
+			if after := userState(t, cfg); after != before {
+				t.Errorf("user add %q changed the store:\nbefore %s\nafter  %s", args, before, after)
+			}
+		}
+	})
+}
+
+// Once the peer is committed, a failed write of its config is reported with
+// the way to get the config again.
+func TestUserAddReportsStdoutFailure(t *testing.T) {
+	cfg := testConfig(t)
+	r, w, _ := os.Pipe()
+	r.Close() // writes to w now fail with EPIPE
+	old := os.Stdout
+	os.Stdout = w
+	err := run([]string{"-config", cfg, "user", "add", "alice", "-profile", "nl", "-device", "phone"})
+	os.Stdout = old
+	w.Close()
+	if err == nil || !strings.Contains(err.Error(), "`user show alice -profile nl -device phone`") {
+		t.Fatalf("err = %v, want the user show hint", err)
+	}
+	shown, err := capture(t, "-config", cfg, "user", "show", "alice", "-profile", "nl", "-device", "phone")
+	if err != nil {
+		t.Fatalf("the peer should have been committed: %v", err)
+	}
+	if _, err := awgconf.Parse(strings.NewReader(shown)); err != nil {
+		t.Errorf("user show is not a config: %v", err)
 	}
 }

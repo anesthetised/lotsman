@@ -464,6 +464,12 @@ lotsman user rm alice -device phone                  # every config of that devi
 lotsman user rm alice                                # everything
 ```
 
+`user rm` removes the wider set only when `-profile` is left out; an explicitly empty `-profile ""`
+(for instance an unset shell variable) is rejected. `user add` validates the profile and the
+upstream configs before it writes anything, and creates the user together with the first config in
+one step, so a rejected command leaves nothing behind. If it cannot write the config to stdout
+after saving it, it says so; print it again with `user show`.
+
 WireGuard binds one key to one endpoint, so a config must never be active on two devices at the
 same time — give each device its own with `-device`. A device has one config per profile; which
 config is active decides where the traffic exits. The config goes to stdout (redirect it to a

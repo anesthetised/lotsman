@@ -245,7 +245,18 @@ func (s *Store) ListUsers() ([]User, error) {
 
 // AddPeer generates a key pair and allocates the next free address in subnet.
 // The network address and the first host (the gateway) are never handed out.
+// The user must exist.
 func (s *Store) AddPeer(user, device, profile string, subnet netip.Prefix) (Peer, error) {
+	return s.addPeer(user, device, profile, subnet, false)
+}
+
+// AddUserPeer is AddPeer for a user that may not exist yet: the user and the
+// peer are created in one transaction, so a failed allocation leaves no user.
+func (s *Store) AddUserPeer(user, device, profile string, subnet netip.Prefix) (Peer, error) {
+	return s.addPeer(user, device, profile, subnet, true)
+}
+
+func (s *Store) addPeer(user, device, profile string, subnet netip.Prefix, createUser bool) (Peer, error) {
 	priv, err := awgconf.GeneratePrivateKey()
 	if err != nil {
 		return Peer{}, err
@@ -256,6 +267,12 @@ func (s *Store) AddPeer(user, device, profile string, subnet netip.Prefix) (Peer
 	}
 	defer tx.Rollback()
 
+	now := time.Now().UTC()
+	if createUser {
+		if _, err := tx.Exec(`INSERT INTO users (name, created_at) VALUES (?, ?) ON CONFLICT (name) DO NOTHING`, user, now.Format(time.RFC3339)); err != nil {
+			return Peer{}, err
+		}
+	}
 	var userID int64
 	if err := tx.QueryRow(`SELECT id FROM users WHERE name = ?`, user).Scan(&userID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -271,7 +288,6 @@ func (s *Store) AddPeer(user, device, profile string, subnet netip.Prefix) (Peer
 	if !ok {
 		return Peer{}, ErrSubnetFull
 	}
-	now := time.Now().UTC()
 	res, err := tx.Exec(`INSERT INTO peers (user_id, device, profile, private_key, public_key, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
 		userID, device, profile, priv.String(), priv.Public().String(), ip.String(), now.Format(time.RFC3339))
 	if err != nil {

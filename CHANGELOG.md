@@ -107,6 +107,14 @@ All notable changes to Lotsman are documented here. The format follows
   load; a 200 MiB limit about halves the peak for at most a 20% loss in the slowest case (#106).
 
 ### Fixed
+- `user rm NAME -profile ""` (an unset shell variable, say) removed every config of the user, or
+  of the device with `-device`; an explicitly empty `-profile` is now rejected for all `user`
+  commands, and omitting it still selects the whole device or user (#113).
+- `user add` no longer leaves a peer, or a new user, behind when it fails: the profile and the
+  upstream configs are checked before anything is written, and the user and its first config are
+  created in one transaction, so an unreadable provider file or a full subnet changes nothing. A
+  failure to write the config to stdout is reported with the `user show` command that prints it
+  again (#115).
 - The first data packet of every AmneziaWG device (each upstream, and `lm0` towards clients) went
   out without its S4 transport padding and was dropped by the peer, which delayed an upstream's
   first health probe by a round. The runtime read S4 before it blocked on the TUN; fixed by the

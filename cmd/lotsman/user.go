@@ -4,6 +4,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"strconv"
 	"strings"
@@ -29,20 +30,26 @@ func userAdd(configPath string, args []string) error {
 	if _, ok := e.cfg.Profile(profile); !ok {
 		return fmt.Errorf("profile %q is not in the config", profile)
 	}
-	if _, err := e.store.CreateUser(name); err != nil && !errors.Is(err, store.ErrExists) {
+	// Everything that can fail without touching the store runs first, so a
+	// rejected command leaves neither a user nor a peer behind.
+	m, err := e.clientMTU()
+	if err != nil {
 		return err
 	}
-	peer, err := e.store.AddPeer(name, device, profile, e.cfg.Subnet)
+	peer, err := e.store.AddUserPeer(name, device, profile, e.cfg.Subnet)
 	if errors.Is(err, store.ErrExists) {
 		return fmt.Errorf("%s/%s already has profile %s; use `user show`", name, device, profile)
 	}
 	if err != nil {
 		return err
 	}
-	if err := printClientConfig(e, peer, a.qr); err != nil {
-		return err
-	}
+	// The peer is committed: the daemon must learn about it even when the
+	// config cannot be written.
+	werr := printClientConfig(e, peer, m, a.qr)
 	nudgeDaemon(e)
+	if werr != nil {
+		return fmt.Errorf("the peer was added but its config was not written (%w); print it again with `user show %s -profile %s -device %s`", werr, name, profile, device)
+	}
 	return nil
 }
 
@@ -60,7 +67,11 @@ func userShow(configPath string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("%s/%s/%s: %w", a.name, a.device, a.profile, err)
 	}
-	return printClientConfig(e, peer, a.qr)
+	m, err := e.clientMTU()
+	if err != nil {
+		return err
+	}
+	return printClientConfig(e, peer, m, a.qr)
 }
 
 func userList(configPath string) error {
@@ -145,11 +156,20 @@ func parseUserArgs(cmd string, args []string, profileRequired bool) (userArgs, e
 	if fs.NArg() > 0 {
 		return a, fmt.Errorf("%s: unexpected argument %q (flags go after NAME as -flag value)", cmd, fs.Arg(0))
 	}
+	var profileSet bool
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "device" {
+		switch f.Name {
+		case "device":
 			a.deviceSet = true
+		case "profile":
+			profileSet = true
 		}
 	})
+	// An empty value would pick the whole-user or whole-device form of
+	// `user rm`, e.g. from an unset shell variable: `-profile "$P"`.
+	if profileSet && a.profile == "" {
+		return a, fmt.Errorf("%s: -profile must not be empty", cmd)
+	}
 	if profileRequired && a.profile == "" {
 		return a, fmt.Errorf("%s: -profile is required", cmd)
 	}
@@ -158,13 +178,11 @@ func parseUserArgs(cmd string, args []string, profileRequired bool) (userArgs, e
 
 // printClientConfig writes the config to stdout so it can be redirected to a
 // file; the optional QR code goes to stderr so it never ends up in that file.
-func printClientConfig(e *env, peer store.Peer, qr bool) error {
-	m, err := e.clientMTU()
-	if err != nil {
+func printClientConfig(e *env, peer store.Peer, m int, qr bool) error {
+	conf := daemon.ClientConfig(e.cfg, e.id, peer, m).String()
+	if _, err := io.WriteString(os.Stdout, conf); err != nil {
 		return err
 	}
-	conf := daemon.ClientConfig(e.cfg, e.id, peer, m).String()
-	fmt.Print(conf)
 	if qr {
 		qrterminal.GenerateHalfBlock(conf, qrterminal.L, os.Stderr)
 	}
