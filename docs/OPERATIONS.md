@@ -634,6 +634,36 @@ health:
 - `health.transfer` applies on reload; removing it clears every degraded mark at once. A new
   `interval` takes effect after each upstream's next probe.
 
+## Memory limit
+
+The AmneziaWG runtime allocates its ~64 KiB message buffers from pools that are never capped, so
+the daemon's heap follows the traffic and stays high after it. On a 1 vCPU / 454 MiB VPS, four 15 s
+`iperf3` runs pushed the RSS to 240–280 MiB, which is close to what such a host has free.
+
+`lotsman serve` therefore sets a soft Go memory limit at startup when `GOMEMLIMIT` is unset or
+empty: 40% of the host's `MemTotal` (`/proc/meminfo`), or of the cgroup v2 `memory.max` of the
+process when that is a number below it (a container or a unit with `MemoryMax=`). The log shows it
+once: `memory limit set limit_mib=… percent_of_memory=40`. If the memory cannot be read, no limit is
+set. A limit is soft: the GC works harder near it, but nothing is killed or refused. Helper
+processes are not affected.
+
+Measured on that host, a 200 MiB limit against none: upload and single-stream download as fast or
+faster, four-stream download about 20% slower (336–352 against 424–458 Mbit/s), and half the peak
+RSS (112–138 against 240–280 MiB). At 150 MiB the loss grows to up to 20% on most runs, and at
+100 MiB or below the GC costs 35–40% of the throughput on one core, which is why the default is a
+share of RAM and not a small constant.
+
+To use another value, set `GOMEMLIMIT` (it always wins; `off` removes the limit) with a drop-in
+(`systemctl edit lotsman`):
+
+```ini
+[Service]
+Environment=GOMEMLIMIT=300MiB
+```
+
+then `systemctl restart lotsman`. The default does not follow later changes of RAM or `MemoryMax=`;
+it is computed at start.
+
 ## Identity and secrets
 
 `state_dir/identity.json` holds the server key, the S1–S4/H1–H4 parameters and the AWG 3 header
