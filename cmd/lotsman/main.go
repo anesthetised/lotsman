@@ -158,6 +158,11 @@ func openEnv(configPath string) (*env, error) {
 	if err != nil {
 		return nil, err
 	}
+	return openState(cfg)
+}
+
+// openState loads the identity and opens the store of an already loaded config.
+func openState(cfg *config.Config) (*env, error) {
 	id, err := daemon.LoadOrCreateIdentity(cfg.StateDir)
 	if err != nil {
 		return nil, err

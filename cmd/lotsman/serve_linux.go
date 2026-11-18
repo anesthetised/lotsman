@@ -27,7 +27,19 @@ import (
 func serve(ctx context.Context, configPath string, level slog.Level) error {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	limitMemory(log)
-	e, err := openEnv(configPath)
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	// A second serve must fail before it changes anything the running one
+	// owns: its pid file, identity, database (a newer binary would migrate
+	// it), interfaces, rules or firewall.
+	unlock, err := lockInstance(cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	e, err := openState(cfg)
 	if err != nil {
 		return err
 	}

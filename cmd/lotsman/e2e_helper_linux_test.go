@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/netip"
 	"os"
@@ -33,6 +34,14 @@ func TestMain(m *testing.M) {
 			panic("test-induced panic")
 		}()
 		os.Exit(helper.Main())
+	}
+	// Another lotsman process, such as a second serve (see runLotsman).
+	if os.Getenv("LOTSMAN_TEST_RUN") == "1" {
+		if err := run(os.Args[1:]); err != nil {
+			fmt.Fprintln(os.Stderr, "lotsman:", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
 	}
 	os.Exit(m.Run())
 }

@@ -90,6 +90,7 @@ type Daemon struct {
 	devicePeers    map[awgconf.Key]store.Peer // added peers, retained until device and route cleanup succeed
 	aliveFailed    map[string]string          // upstream → last SetAlive error; the kernel is stale until it succeeds
 	dpStale        bool                       // d.ups is not yet pushed to the dataplane; retried every round
+	dpSetUp        bool                       // dataplane Setup was called, so stop must tear it down
 	notUp          map[*Upstream]bool         // opened upstreams whose device still has to come up
 	reauthorize    bool                       // the firewall was reinstalled; routed peers must be routed again
 	stopped        bool                       // stop has run; a late link exit changes nothing
@@ -270,6 +271,8 @@ func (d *Daemon) setup(ups []*Upstream, noKey map[string]error) error {
 		d.ups = append(d.ups, up)
 	}
 	metricsAddr, _ := netip.ParseAddrPort(d.cfg.Metrics.Listen) // validated by config; zero when unset
+	// Set before Setup: a failed Setup may have changed the host too.
+	d.dpSetUp = true
 	if err := d.dp.Setup(dataplane.Interface{Name: d.down.Name(), Addr: Gateway(d.cfg)}, d.interfaces(), d.clientMTU(), metricsAddr); err != nil {
 		return fmt.Errorf("dataplane setup: %w", err)
 	}
@@ -339,9 +342,14 @@ func (d *Daemon) teardown() []link {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.stopped = true
-	err := d.dp.Teardown() // disables ingress before removing forwarding protection
-	if err != nil {
-		d.log.Error("dataplane teardown", "err", err)
+	// A start that failed before dataplane setup changed no rule, route or
+	// firewall, so it removes none: the host's may not be its own.
+	var err error
+	if d.dpSetUp {
+		err = d.dp.Teardown() // disables ingress before removing forwarding protection
+		if err != nil {
+			d.log.Error("dataplane teardown", "err", err)
+		}
 	}
 	if d.down != nil {
 		d.down.Close()
