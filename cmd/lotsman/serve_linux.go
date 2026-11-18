@@ -68,7 +68,17 @@ func serve(ctx context.Context, configPath string, level slog.Level) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go handleSignals(ctx, d, configPath, hup, usr1, log)
-	go publishStatus(ctx, d, e.cfg.StateDir, e.cfg.Health.Interval, log)
+	// serve returns only after the publisher has removed the status file, so
+	// the locks are not released while it can still delete a successor's.
+	published := make(chan struct{})
+	go func() {
+		defer close(published)
+		publishStatus(ctx, d, e.cfg.StateDir, log)
+	}()
+	defer func() {
+		stop()
+		<-published
+	}()
 	if e.cfg.Metrics.Listen != "" {
 		go serveMetrics(ctx, e.cfg.Metrics.Listen, metrics.Handler(daemon.Families, d.Metrics), log)
 	}
@@ -129,16 +139,24 @@ func handleSignals(ctx context.Context, d *daemon.Daemon, configPath string, hup
 	}
 }
 
+// statusSource is what publishStatus reads: the daemon, or a fake in tests.
+type statusSource interface {
+	Ready() <-chan struct{}
+	Rounds() <-chan struct{}
+	Status() daemon.Status
+	ClientMTU() int
+}
+
 // publishStatus writes the status file as soon as the daemon is ready and
-// then after every health round.
-func publishStatus(ctx context.Context, d *daemon.Daemon, stateDir string, interval time.Duration, log *slog.Logger) {
+// then after every health round. It follows the daemon's rounds instead of
+// keeping a ticker, so a reload that changes health.interval changes the
+// cadence at once.
+func publishStatus(ctx context.Context, d statusSource, stateDir string, log *slog.Logger) {
 	select {
 	case <-ctx.Done():
 		return
 	case <-d.Ready():
 	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 	for {
 		st := d.Status()
 		s := statusFile{UpdatedAt: time.Now(), ClientMTU: d.ClientMTU(), Upstreams: st.Upstreams, Peers: st.Peers}
@@ -149,7 +167,7 @@ func publishStatus(ctx context.Context, d *daemon.Daemon, stateDir string, inter
 		case <-ctx.Done():
 			os.Remove(statusPath(stateDir))
 			return
-		case <-ticker.C:
+		case <-d.Rounds():
 		}
 	}
 }

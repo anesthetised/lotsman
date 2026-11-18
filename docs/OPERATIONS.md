@@ -491,7 +491,8 @@ nft list table inet lotsman
 
 Health transitions and every routing decision are logged. `status.json` in the state directory is
 what `upstream status` and the live columns of `user list` read; the daemon writes it right after
-its first reconcile and then every health interval.
+its first reconcile and then after every health round, so a reload that changes `health.interval`
+changes the refresh rate at once.
 
 The daemon logs at `info` by default. For more detail, pass `-log-level debug` before `serve` or set
 `LOTSMAN_LOG_LEVEL=debug` (`debug`, `info`, `warn`, `error`; the flag wins). `debug` also shows the
