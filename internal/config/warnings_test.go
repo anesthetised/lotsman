@@ -7,7 +7,7 @@ import (
 )
 
 // profilesConfig is minimal with its profiles replaced. The upstreams are
-// rs-nl (NL, redshield) and rs-de (DE, redshield).
+// ac-nl (NL, acme) and ac-de (DE, acme).
 func profilesConfig(profiles string) string {
 	return replaceTopLevelField(minimal, "profiles", "profiles:\n"+profiles)
 }
@@ -16,9 +16,9 @@ func profilesConfig(profiles string) string {
 // still has a DE tier; the emptied tier is only reported.
 func TestPreferTierEmptiedByUpstreamRemovalIsWarning(t *testing.T) {
 	input := profilesConfig("  - {name: eu, prefer: [{geo: NL}, {geo: DE}]}\n")
-	input = strings.Replace(input, "  - name: rs-nl\n    conf: /etc/lotsman/upstreams/rs-nl.conf\n    geo: NL\n    provider: redshield\n", "", 1)
-	if strings.Contains(input, "rs-nl") {
-		t.Fatal("test setup: rs-nl not removed")
+	input = strings.Replace(input, "  - name: ac-nl\n    conf: /etc/lotsman/upstreams/ac-nl.conf\n    geo: NL\n    provider: acme\n", "", 1)
+	if strings.Contains(input, "ac-nl") {
+		t.Fatal("test setup: ac-nl not removed")
 	}
 	cfg, err := Parse([]byte(input))
 	if err != nil {
@@ -47,19 +47,19 @@ func TestProfileWithEveryTierEmptyIsError(t *testing.T) {
 }
 
 func TestShadowedPreferEntryIsWarningNamingShadower(t *testing.T) {
-	// Every NL upstream is redshield, so prefer[1] has nothing left to take.
-	cfg, err := Parse([]byte(profilesConfig("  - {name: p, prefer: [{provider: redshield}, {geo: NL}]}\n")))
+	// Every NL upstream is acme, so prefer[1] has nothing left to take.
+	cfg, err := Parse([]byte(profilesConfig("  - {name: p, prefer: [{provider: acme}, {geo: NL}]}\n")))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
-	want := []string{`profile "p": prefer[1] {geo: NL} never applies: every upstream it matches is taken by prefer[0] {provider: redshield}`}
+	want := []string{`profile "p": prefer[1] {geo: NL} never applies: every upstream it matches is taken by prefer[0] {provider: acme}`}
 	if got := cfg.Warnings(); !slices.Equal(got, want) {
 		t.Errorf("Warnings = %q, want %q", got, want)
 	}
 }
 
 func TestShadowedPreferEntryNamesEveryShadower(t *testing.T) {
-	cfg, err := Parse([]byte(profilesConfig("  - {name: p, prefer: [{geo: NL}, {geo: DE}, {provider: redshield}]}\n")))
+	cfg, err := Parse([]byte(profilesConfig("  - {name: p, prefer: [{geo: NL}, {geo: DE}, {provider: acme}]}\n")))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
@@ -73,8 +73,8 @@ func TestNoWarningsWhenEveryTierApplies(t *testing.T) {
 	for _, prefer := range []string{
 		"[]",
 		"[{geo: NL}, {geo: DE}]",
-		"[{provider: redshield}]",
-		"[{geo: NL}, {provider: redshield}]",
+		"[{provider: acme}]",
+		"[{geo: NL}, {provider: acme}]",
 		"[{}]",
 	} {
 		cfg, err := Parse([]byte(profilesConfig("  - {name: p, prefer: " + prefer + "}\n")))

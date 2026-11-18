@@ -6,7 +6,8 @@ routes each user to a working upstream VPN provider.
 
 Users connect with the official Amnezia app to a single server you run. Lotsman terminates their
 tunnel and forwards traffic into one of several upstreams — AmneziaWG tunnels, Outline
-(Shadowsocks) servers or VLESS + REALITY (Xray) servers, your own subscriptions at providers like RedShield — choosing the upstream by the user's profile (geo, provider) and by
+(Shadowsocks) servers or VLESS + REALITY (Xray) servers, your own VPN subscriptions — choosing
+the upstream by the user's profile (geo, provider) and by
 live health. When an upstream dies, its users move to the next one without reconnecting.
 
 ```

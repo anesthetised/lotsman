@@ -21,15 +21,15 @@ state_dir: /var/lib/lotsman
 # labels; `tags` is a list of free-form groups (lowercase letters, digits, `-`).
 # Profiles match on all three.
 upstreams:
-  - name: rs-nl
-    conf: /etc/lotsman/upstreams/rs-nl.conf
+  - name: ac-nl
+    conf: /etc/lotsman/upstreams/ac-nl.conf
     geo: NL
-    provider: redshield
+    provider: acme
     tags: [near, eu]
-  - name: rs-de
-    conf: /etc/lotsman/upstreams/rs-de.conf
+  - name: ac-de
+    conf: /etc/lotsman/upstreams/ac-de.conf
     geo: DE
-    provider: redshield
+    provider: acme
     tags: [eu]
   # An Outline (Shadowsocks) server: `conf` is a file (mode 0600) holding the
   # ss:// access key. TCP and UDP pass, ICMP does not. `max_flows` caps the
