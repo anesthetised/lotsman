@@ -74,6 +74,13 @@ type Daemon struct {
 
 	transferRuns sync.WaitGroup // transfer probes in flight; Run waits for them
 
+	// applyMu serializes the changes to d.ups that open, close or bring up
+	// links: Reload, reopenMissing and stop. They release d.mu while a link
+	// waits for a helper, which may take seconds, so Status, Metrics and
+	// Reconcile still answer; applyMu keeps d.ups as they left it
+	// meanwhile. It is taken before d.mu.
+	applyMu sync.Mutex
+
 	mu             sync.Mutex
 	cfg            *config.Config
 	down           *tunnel.Device
@@ -217,7 +224,25 @@ func (d *Daemon) start(ctx context.Context) error {
 		}
 		ups = append(ups, up)
 	}
+	if err := d.setup(ups, noKey); err != nil {
+		return err
+	}
+	// A helper takes a moment to start, and the metrics endpoint already
+	// answers, so links come up without d.mu. Nothing else changes d.ups
+	// before Ready.
+	for _, u := range ups {
+		if err := u.link.Up(); err != nil {
+			return err
+		}
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.down.Up()
+}
 
+// setup is start's part under d.mu: it opens the downstream device and the
+// loaded upstreams' links (still down) and sets up the dataplane.
+func (d *Daemon) setup(ups []*Upstream, noKey map[string]error) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	for name, err := range noKey {
@@ -248,12 +273,7 @@ func (d *Daemon) start(ctx context.Context) error {
 	if err := d.dp.Setup(dataplane.Interface{Name: d.down.Name(), Addr: Gateway(d.cfg)}, d.interfaces(), d.clientMTU(), metricsAddr); err != nil {
 		return fmt.Errorf("dataplane setup: %w", err)
 	}
-	for _, u := range d.ups {
-		if err := u.link.Up(); err != nil {
-			return err
-		}
-	}
-	return d.down.Up()
+	return nil
 }
 
 // openDevice creates the TUN for a loaded and resolved upstream and starts
@@ -279,6 +299,7 @@ func (d *Daemon) linkExited(u *Upstream, err error) {
 		return // stopping, or replaced or removed by a reload
 	}
 	d.restarts[u.Name]++
+	u.exits++
 	d.notUp[u] = true
 	before := u.Tracker.State()
 	if u.Tracker.Fail() {
@@ -303,6 +324,18 @@ func (d *Daemon) interfaces() []dataplane.Interface {
 }
 
 func (d *Daemon) stop() {
+	// Waits for a reload that is opening or closing links.
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
+	for _, l := range d.teardown() {
+		// A helper may take seconds to exit; Status and Metrics still answer.
+		l.Close()
+	}
+}
+
+// teardown is stop's part under d.mu. It returns the upstreams' links,
+// which the caller closes without d.mu.
+func (d *Daemon) teardown() []link {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.stopped = true
@@ -320,9 +353,11 @@ func (d *Daemon) stop() {
 			d.log.Error("dataplane teardown after downstream close", "err", retryErr)
 		}
 	}
+	var links []link
 	for _, u := range d.ups {
-		u.link.Close()
+		links = append(links, u.link)
 	}
+	return links
 }
 
 // Reload applies a new configuration without dropping anyone's tunnel.
@@ -365,13 +400,39 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	}
 
 	// Restart-only settings never change live, so the check above still holds.
+	// Closing a link and bringing one up wait for its helper, so they run
+	// without d.mu; applyMu keeps other changes to d.ups out until this one
+	// is done.
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
 	d.mu.Lock()
-	defer d.mu.Unlock()
+	if d.stopped {
+		d.mu.Unlock()
+		return errors.New("reload rejected: the daemon is stopping")
+	}
 	current := map[string]*Upstream{}
 	for _, u := range d.ups {
 		current[u.Name] = u
 	}
-	var next []*Upstream
+	// What runs under each name once applied: a running upstream that stays,
+	// a new one still to open, or nil.
+	type entry struct {
+		up      *Upstream
+		open    bool // new: open it
+		replace bool // it replaces a running upstream of the same name
+	}
+	entries := make([]entry, len(cfg.Upstreams))
+	// Changes to running upstreams that stay, told to their links without d.mu.
+	type update struct {
+		u        *Upstream
+		name     string
+		maxFlows int
+		key      *dynamicKey // fetched again for this reload; nil for a static key
+		resolved string
+	}
+	var updates []update
+	var closing []link // links of dropped upstreams
+	var kept []*Upstream
 	var errs []error
 	for i, u := range cfg.Upstreams {
 		old, exists := current[u.Name]
@@ -393,20 +454,15 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 			// changed kind only comes with a file that loaded.
 			u.Kind = old.Kind
 			old.Upstream = u
-			if l, ok := old.link.(*proxyLink); ok {
-				if err := l.SetMaxFlows(u.MaxFlows); err != nil {
-					// A helper that failed is restarted with the new limit.
-					d.log.Warn("max_flows not applied to the running upstream", "upstream", u.Name, "err", err)
-				}
-			}
 			old.Tracker.SetThresholds(cfg.Health.DownAfter, cfg.Health.UpAfter)
+			w := update{u: old, name: u.Name, maxFlows: u.MaxFlows}
 			if unchanged && up.Location != nil {
 				// Fetched again for this reload: a rotated key applies now.
-				if err := d.applyServer(old, &dynamicKey{up.Key, up.keyText}, up.Resolved); err != nil {
-					errs = append(errs, fmt.Errorf("upstream %s: %w", u.Name, err))
-				}
+				w.key, w.resolved = &dynamicKey{up.Key, up.keyText}, up.Resolved
 			}
-			next = append(next, old)
+			updates = append(updates, w)
+			entries[i] = entry{up: old}
+			kept = append(kept, old)
 			continue
 		}
 		if err != nil {
@@ -415,39 +471,78 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 			continue
 		}
 		if exists {
-			// The interface name is reused, so the old device must go first.
-			d.dropUpstream(old)
+			// The interface name is reused, so the old link is closed before
+			// the new one opens.
+			closing = append(closing, d.dropUpstream(old))
 			d.log.Info("upstream replaced", "upstream", u.Name)
 			if old.Location != nil && up.Location == nil {
 				d.forgetKey(cfg.StateDir, u.Name)
 			}
 		}
-		if err := d.openDevice(up); err != nil {
-			errs = append(errs, err)
-			d.openFailed(u.Name, err)
-			continue
-		}
-		next = append(next, up)
-		d.notUp[up] = true
-		delete(d.failures, failure{"open", u.Name})
-		if !exists {
-			d.log.Info("upstream added", "upstream", u.Name)
-		}
+		entries[i] = entry{up: up, open: true, replace: exists}
 	}
 	for name, old := range current {
-		d.dropUpstream(old)
+		closing = append(closing, d.dropUpstream(old))
 		d.log.Info("upstream removed", "upstream", name)
 		if old.Location != nil {
 			d.forgetKey(cfg.StateDir, name)
 		}
 	}
-	d.ups = next
+	// Until the new upstreams open, they are out of service like ones that
+	// are not up yet; profiles and labels already match.
+	d.ups = kept
 	d.cfg = cfg
 	if cfg.Health.Transfer == nil {
 		d.stopTransfers()
 	}
+	d.mu.Unlock()
+
+	for _, l := range closing {
+		l.Close()
+	}
+	for _, w := range updates {
+		if l, ok := w.u.link.(*proxyLink); ok {
+			if err := l.SetMaxFlows(w.maxFlows); err != nil {
+				// A helper that failed is restarted with the new limit.
+				d.log.Warn("max_flows not applied to the running upstream", "upstream", w.name, "err", err)
+			}
+		}
+		if w.key != nil {
+			if err := d.applyServer(w.u, w.key, w.resolved, ""); err != nil {
+				errs = append(errs, fmt.Errorf("upstream %s: %w", w.name, err))
+			}
+		}
+	}
+
+	d.mu.Lock()
+	var next []*Upstream
+	for i, e := range entries {
+		name := cfg.Upstreams[i].Name
+		if e.up == nil {
+			continue
+		}
+		if e.open {
+			if err := d.openDevice(e.up); err != nil {
+				errs = append(errs, err)
+				d.openFailed(name, err)
+				continue
+			}
+			d.notUp[e.up] = true
+			delete(d.failures, failure{"open", name})
+			if !e.replace {
+				d.log.Info("upstream added", "upstream", name)
+			}
+		}
+		next = append(next, e.up)
+	}
+	d.ups = next
 	d.dpStale = true
+	d.mu.Unlock()
+
 	errs = append(errs, d.activate()...)
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
 	d.log.Info("configuration reloaded", "upstreams", len(d.ups), "profiles", len(cfg.Profiles), "client_mtu", d.clientMTU())
 	select {
 	case d.wake <- struct{}{}:
@@ -463,7 +558,9 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 
 // dropUpstream takes an upstream out of service. Failed peer cleanup stays
 // pending until Reconcile can unroute it, before selecting another upstream.
-func (d *Daemon) dropUpstream(u *Upstream) {
+// It returns u's link, which the caller closes without d.mu: a helper may
+// take seconds to exit. Callers hold d.mu.
+func (d *Daemon) dropUpstream(u *Upstream) link {
 	for ip, name := range d.assignments {
 		if name == u.Name {
 			if err := d.unroute(ip); err != nil {
@@ -475,7 +572,7 @@ func (d *Daemon) dropUpstream(u *Upstream) {
 	delete(d.notUp, u)
 	delete(d.failures, failure{"up", u.Name})
 	delete(d.transfers, u)
-	u.link.Close()
+	return u.link
 }
 
 // logWarnings reports configuration problems that do not stop it from loading.
@@ -583,18 +680,39 @@ func (d *Daemon) forgetKey(stateDir, name string) {
 }
 
 // applyServer points a running upstream at a fetched key, if it is set and
-// differs from the running one, and at resolved, and logs what changed.
-// Callers hold d.mu.
-func (d *Daemon) applyServer(u *Upstream, k *dynamicKey, resolved string) error {
-	newKey := k != nil && k.text != u.keyText
-	changed, err := u.setServer(k, resolved)
-	switch {
-	case err != nil:
+// differs from the running one, and at resolved, and logs what changed. A
+// new key is cached in cacheDir unless it is "". A helper link waits for
+// its helper's answer, so the link is told without d.mu, and u.serverMu
+// keeps the changes to one upstream in order. Nothing changes once a reload
+// has replaced or removed u. Callers hold neither lock.
+func (d *Daemon) applyServer(u *Upstream, k *dynamicKey, resolved, cacheDir string) error {
+	u.serverMu.Lock()
+	defer u.serverMu.Unlock()
+	d.mu.Lock()
+	running := slices.Contains(d.ups, u)
+	text, newKey, changed := u.nextServer(k, resolved)
+	d.mu.Unlock()
+	if !running || !changed {
+		return nil
+	}
+	if err := u.link.SetServer(text, resolved); err != nil {
 		return err
-	case newKey:
-		d.log.Info("upstream key changed", "upstream", u.Name, "key", u.Key.String(), "endpoint", u.Resolved)
-	case changed:
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if !slices.Contains(d.ups, u) {
+		return nil // removed meanwhile, its link closed
+	}
+	u.commitServer(k, newKey, resolved)
+	if !newKey {
 		d.log.Info("upstream endpoint changed", "upstream", u.Name, "endpoint", resolved)
+		return nil
+	}
+	d.log.Info("upstream key changed", "upstream", u.Name, "key", u.Key.String(), "endpoint", u.Resolved)
+	if cacheDir != "" {
+		// Local and small, so written under d.mu: the upstream cannot be
+		// removed between applying the key and caching it.
+		d.cacheKey(cacheDir, u.Name, u.Location, *k)
 	}
 	return nil
 }
@@ -619,13 +737,16 @@ func (d *Daemon) openFailed(name string, err error) {
 // the devices that are not up, as start does. Nothing comes up while the
 // dataplane is out of date. A failure leaves the work pending for the next
 // health round and is returned for Reload to report; it is logged once.
-// Callers hold d.mu.
+// Bringing up a helper waits for it to start, so links come up without d.mu.
+// Callers hold d.applyMu, not d.mu.
 func (d *Daemon) activate() []error {
+	d.mu.Lock()
 	fresh := d.dpStale
 	if fresh {
 		key := failure{"dataplane", ""}
 		if err := d.dp.SetUpstreams(d.interfaces(), d.clientMTU()); err != nil {
 			d.fail(key, "dataplane upstreams not applied, new upstreams stay down and will be retried every health round", err)
+			d.mu.Unlock()
 			return []error{fmt.Errorf("dataplane: %w", err)}
 		}
 		if _, failed := d.failures[key]; failed {
@@ -634,21 +755,43 @@ func (d *Daemon) activate() []error {
 		}
 		d.dpStale = false
 	}
+	type starting struct {
+		u     *Upstream
+		exits uint64 // u.exits before Up
+	}
+	var start []starting
 	var errs []error
 	for _, u := range d.ups {
 		if d.notUp[u] {
-			key := failure{"up", u.Name}
-			if err := u.link.Up(); err != nil {
-				d.fail(key, "upstream device not up, will retry every health round", err, "upstream", u.Name)
+			start = append(start, starting{u, u.exits})
+		} else if fresh {
+			// A new or replaced upstream starts unknown; nothing may stay pinned to it.
+			if err := d.applyAlive(u); err != nil {
 				errs = append(errs, err)
-				continue
 			}
-			delete(d.notUp, u)
-			delete(d.failures, key)
-		} else if !fresh {
+		}
+	}
+	d.mu.Unlock()
+
+	upErrs := make([]error, len(start))
+	for i, s := range start {
+		upErrs[i] = s.u.link.Up()
+	}
+
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	for i, s := range start {
+		u, key := s.u, failure{"up", s.u.Name}
+		if err := upErrs[i]; err != nil {
+			d.fail(key, "upstream device not up, will retry every health round", err, "upstream", u.Name)
+			errs = append(errs, err)
 			continue
 		}
-		// A new or replaced upstream starts unknown; nothing may stay pinned to it.
+		if u.exits != s.exits {
+			continue // it came up and stopped again; the next round brings it up
+		}
+		delete(d.notUp, u)
+		delete(d.failures, key)
 		if err := d.applyAlive(u); err != nil {
 			errs = append(errs, err)
 		}
@@ -692,8 +835,10 @@ func (d *Daemon) reopenMissing(ctx context.Context) {
 		return
 	}
 
+	// Bringing links up releases d.mu; applyMu keeps reloads out meanwhile.
+	d.applyMu.Lock()
+	defer d.applyMu.Unlock()
 	d.mu.Lock()
-	defer d.mu.Unlock()
 	if d.cfg == cfg { // otherwise a reload took over; the next round retries
 		for i, u := range cfg.Upstreams {
 			if !missing[u.Name] || slices.ContainsFunc(d.ups, func(r *Upstream) bool { return r.Name == u.Name }) {
@@ -720,6 +865,7 @@ func (d *Daemon) reopenMissing(ctx context.Context) {
 		}
 		slices.SortStableFunc(d.ups, func(a, b *Upstream) int { return order[a.Name] - order[b.Name] })
 	}
+	d.mu.Unlock()
 	d.activate() // failures are logged and retried next round
 }
 
@@ -836,7 +982,11 @@ func (d *Daemon) probeAll(ctx context.Context) {
 	h, stateDir := d.cfg.Health, d.cfg.StateDir
 	timeout := probeTimeout(h)
 	for _, u := range d.ups {
-		iface, source, endpoint, proxied := u.InterfaceName(), u.Addr.Addr(), u.Endpoint, u.Key != nil
+		if l, ok := u.link.(*proxyLink); ok {
+			// For Status and Metrics, which never wait for a helper.
+			wg.Go(l.refreshStats)
+		}
+		name, iface, source, endpoint, proxied := u.Name, u.InterfaceName(), u.Addr.Addr(), u.Endpoint, u.Key != nil
 		wg.Go(func() {
 			latency, err := d.probeUpstream(ctx, proxied, iface, source, h)
 			d.mu.Lock()
@@ -853,7 +1003,7 @@ func (d *Daemon) probeAll(ctx context.Context) {
 			if err != nil {
 				// A failing upstream may simply have moved; providers change
 				// IPs, and rotate dynamic keys.
-				d.refreshEndpoint(ctx, u, endpoint, stateDir, timeout)
+				d.refreshEndpoint(ctx, u, name, endpoint, stateDir, timeout)
 			}
 		})
 	}
@@ -948,11 +1098,12 @@ func (d *Daemon) watchFailed(err error) {
 // slow DNS never blocks Status or Reconcile, and applies the answer only if a
 // reload has not replaced or removed u meanwhile. A dynamic key is fetched
 // again first, at most every keyRefreshInterval; if that fails, the running
-// key stays. u.Location never changes, so reading it needs no lock.
-func (d *Daemon) refreshEndpoint(ctx context.Context, u *Upstream, endpoint, stateDir string, timeout time.Duration) {
+// key stays. u.Location never changes, so reading it needs no lock; name is
+// u.Name when the round started.
+func (d *Daemon) refreshEndpoint(ctx context.Context, u *Upstream, name, endpoint, stateDir string, timeout time.Duration) {
 	var fetched *dynamicKey
 	var fetchErr error
-	if u.Location != nil && d.fetchDue(u.Name) {
+	if u.Location != nil && d.fetchDue(name) {
 		fctx, cancel := context.WithTimeout(ctx, fetchTimeout(timeout))
 		k, err := fetchKey(fctx, u.Location)
 		cancel()
@@ -965,26 +1116,19 @@ func (d *Daemon) refreshEndpoint(ctx context.Context, u *Upstream, endpoint, sta
 	resolved, err := resolveEndpoint(ctx, endpoint)
 	cancel()
 	d.mu.Lock()
-	defer d.mu.Unlock()
-	if !slices.Contains(d.ups, u) {
+	running := slices.Contains(d.ups, u)
+	d.mu.Unlock()
+	if !running {
 		return
 	}
 	if fetchErr != nil {
-		d.log.Warn("dynamic key fetch failed, keeping the running key", "upstream", u.Name, "err", fetchErr)
+		d.log.Warn("dynamic key fetch failed, keeping the running key", "upstream", name, "err", fetchErr)
+	}
+	if err == nil {
+		err = d.applyServer(u, fetched, resolved, stateDir)
 	}
 	if err != nil {
-		d.log.Warn("re-resolve endpoint", "upstream", u.Name, "err", err)
-		return
-	}
-	before := u.keyText
-	if err := d.applyServer(u, fetched, resolved); err != nil {
-		d.log.Warn("re-resolve endpoint", "upstream", u.Name, "err", err)
-		return
-	}
-	if u.keyText != before {
-		// Local and small, so written under d.mu: the upstream cannot be
-		// removed between applying the key and caching it.
-		d.cacheKey(stateDir, u.Name, u.Location, *fetched)
+		d.log.Warn("re-resolve endpoint", "upstream", name, "err", err)
 	}
 }
 

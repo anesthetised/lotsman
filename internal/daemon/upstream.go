@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/amnezia-vpn/amneziawg-go/v3/tun"
 
@@ -39,6 +40,11 @@ type Upstream struct {
 	// which also detects a changed key.
 	keyText string
 	link    link // set by open
+	// exits counts the times link stopped on its own; d.mu guards it.
+	exits uint64
+	// serverMu keeps the server changes of a running upstream in order
+	// while its link is told without d.mu (Daemon.applyServer).
+	serverMu sync.Mutex
 }
 
 // link carries an upstream's traffic on its TUN: an AmneziaWG device or a
@@ -294,7 +300,7 @@ func (u *Upstream) open(t tun.Device, log *slog.Logger, run proxy.Runner, exited
 	if err != nil {
 		return fmt.Errorf("upstream %s: %w", u.Name, err)
 	}
-	u.link = &proxyLink{l, u.keyText}
+	u.link = &proxyLink{Link: l, key: u.keyText}
 	return nil
 }
 
@@ -303,29 +309,36 @@ func (u *Upstream) open(t tun.Device, log *slog.Logger, run proxy.Runner, exited
 // caller resolves u.Endpoint first. Literal IP endpoints resolve to
 // themselves and never change.
 func (u *Upstream) SetEndpoint(resolved string) (bool, error) {
-	return u.setServer(nil, resolved)
-}
-
-// setServer points the running link at resolved and, when k is set and
-// differs from the running key, at k; resolved is then k's server resolved.
-// New flows use them, open ones stay. It returns whether anything changed.
-func (u *Upstream) setServer(k *dynamicKey, resolved string) (bool, error) {
-	newKey := k != nil && k.text != u.keyText
-	if !newKey && resolved == u.Resolved {
+	text, _, changed := u.nextServer(nil, resolved)
+	if !changed {
 		return false, nil
-	}
-	text := u.keyText
-	if newKey {
-		text = k.text
 	}
 	if err := u.link.SetServer(text, resolved); err != nil {
 		return false, err
 	}
+	u.commitServer(nil, false, resolved)
+	return true, nil
+}
+
+// nextServer works out how to point the running link at resolved and, when
+// k is set and differs from the running key, at k; resolved is then k's
+// server resolved. It returns the key text to tell the link, whether k is a
+// new key, and whether anything changes. New flows use them, open ones stay.
+func (u *Upstream) nextServer(k *dynamicKey, resolved string) (text string, newKey, changed bool) {
+	newKey = k != nil && k.text != u.keyText
+	text = u.keyText
+	if newKey {
+		text = k.text
+	}
+	return text, newKey, newKey || resolved != u.Resolved
+}
+
+// commitServer records what nextServer worked out once the link took it.
+func (u *Upstream) commitServer(k *dynamicKey, newKey bool, resolved string) {
 	if newKey {
 		u.Key, u.keyText, u.Endpoint = k.key, k.text, k.key.Server()
 	}
 	u.setResolved(resolved)
-	return true, nil
 }
 
 // awgLink is an AmneziaWG device with one peer, the provider.
@@ -350,10 +363,15 @@ func (l *awgLink) Stats() linkStats {
 
 // proxyLink is a proxy stack, in this process or in a helper. In process it
 // carries traffic from the start: the TUN passes nothing before the
-// dataplane sets it up and routes to it. A helper starts at Up.
+// dataplane sets it up and routes to it. A helper starts at Up. A request
+// to a helper waits for its answer, so the daemon never makes one under
+// d.mu; Stats serves what the health round last fetched instead of asking.
 type proxyLink struct {
 	proxy.Link
-	key string // the key text it runs with
+
+	mu    sync.Mutex
+	key   string       // the key text it runs with
+	flows *proxy.Stats // the last answer to refreshStats; nil before one, or when it failed
 }
 
 // SetServer makes new flows reach the new address with the given key; open
@@ -366,17 +384,36 @@ func (l *proxyLink) SetServer(keyText, resolved string) error {
 	if err := l.Link.SetServer(keyText, addr); err != nil {
 		return err
 	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	l.key = keyText
 	return nil
 }
 
-// Stats has no flow counters while no helper runs.
+func (l *proxyLink) runningKey() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.key
+}
+
+// Stats returns the flow counters refreshStats fetched last, without asking
+// the stack.
 func (l *proxyLink) Stats() linkStats {
-	st, err := l.Link.Stats()
-	if err != nil {
-		return linkStats{}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return linkStats{Flows: l.flows}
+}
+
+// refreshStats asks the stack for its flow counters, which waits for a
+// helper's answer. There are none while no helper runs.
+func (l *proxyLink) refreshStats() {
+	var flows *proxy.Stats
+	if st, err := l.Link.Stats(); err == nil {
+		flows = &st
 	}
-	return linkStats{Flows: &st}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.flows = flows
 }
 
 // lookupNetIP is swapped in tests.

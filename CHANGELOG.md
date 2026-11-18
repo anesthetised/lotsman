@@ -132,6 +132,12 @@ All notable changes to Lotsman are documented here. The format follows
   reloads. Every endpoint lookup times out after the probe timeout (half the health interval, at
   least 1 s). SIGHUP is handled only once the daemon is ready, so a reload or `user add` during
   startup waits instead of racing it (#44).
+- Requests to a proxy upstream's helper process (starting it, changing its server, key or
+  `max_flows`, stopping it on reload or shutdown) no longer run under the daemon lock, so a stuck
+  or dying helper no longer stalls status, metrics, reconciliation or the other upstreams for up
+  to 10 s. `upstream status` and `/metrics` no longer ask the helper either: the flow counters
+  in `lotsman_upstream_flows` and `lotsman_upstream_flows_refused_total` are those of the last
+  health round (#98).
 - Keep a running upstream when its changed provider config fails to read, parse, validate or
   resolve on reload; only TUN creation happens after the old device is closed. `user add` and
   `user show` no longer resolve provider endpoints, so they work while DNS is down; `config check`

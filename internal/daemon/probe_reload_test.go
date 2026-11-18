@@ -115,7 +115,8 @@ func background(t *testing.T, r *stallingResolver, op func()) <-chan struct{} {
 	return done
 }
 
-// assertResponsive fails fast if Status, Reconcile or Metrics wait for DNS.
+// assertResponsive fails fast if Status, Reconcile or Metrics wait for DNS or
+// a helper.
 func assertResponsive(t *testing.T, h *harness) {
 	t.Helper()
 	done := make(chan struct{})
@@ -128,7 +129,7 @@ func assertResponsive(t *testing.T, h *harness) {
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
-		t.Fatal("Status, Reconcile or Metrics blocked behind an endpoint lookup")
+		t.Fatal("Status, Reconcile or Metrics blocked behind an endpoint lookup or a helper request")
 	}
 }
 

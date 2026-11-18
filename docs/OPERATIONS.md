@@ -517,7 +517,7 @@ the host can. Changing `metrics.listen` needs a restart.
 |---|---|---|
 | `lotsman_upstream_info` | `upstream`, `kind`, `interface` | always 1; `kind` is `awg`, `outline` or `vless` |
 | `lotsman_upstream_up` | `upstream` | 1 while probes pass |
-| `lotsman_upstream_flows` | `upstream` | Outline and VLESS only: TCP and UDP flows open now |
+| `lotsman_upstream_flows` | `upstream` | Outline and VLESS only: TCP and UDP flows open at the last health round |
 | `lotsman_upstream_flows_refused_total` | `upstream` | Outline and VLESS only: flows refused at `max_flows` |
 | `lotsman_proxy_restarts_total` | `upstream` | Outline and VLESS only: times its helper process exited on its own (crash, kill) and was restarted |
 | `lotsman_upstream_probe_latency_seconds` | `upstream` | last successful probe |

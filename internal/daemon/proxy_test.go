@@ -200,10 +200,16 @@ func TestProxyReloadAppliesMaxFlowsLive(t *testing.T) {
 	h, _ := newProxyHarness(t)
 	h.run(t)
 	eventually(t, "start", h.dp.Ready)
+	// What the stack runs with now, not what the health round cached.
 	stats := func() (link, *proxy.Stats) {
 		h.d.mu.Lock()
-		defer h.d.mu.Unlock()
-		return h.d.ups[1].link, h.d.ups[1].link.Stats().Flows
+		l := h.d.ups[1].link
+		h.d.mu.Unlock()
+		st, err := l.(*proxyLink).Link.Stats()
+		if err != nil {
+			t.Fatal(err)
+		}
+		return l, &st
 	}
 	before, st := stats()
 	if st.MaxFlows != proxy.DefaultMaxFlows {
