@@ -22,15 +22,19 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+      - uses: extractions/setup-just@v2
+      # The full suite in the privileged test image, every package serially: the same
+      # entry point as a local `just test-integration`. -v keeps each case in the log.
+      - run: just test-integration -v ./...
+      # The end-to-end tests once more on the runner's own network namespace.
       - run: sudo apt-get update && sudo apt-get install -y nftables
-      - run: go test -c -tags integration -o /tmp/dataplane.test ./internal/dataplane/linux
       - run: go test -c -tags integration -o /tmp/e2e.test ./cmd/lotsman
-      - run: sudo /tmp/dataplane.test -test.v
       - run: sudo /tmp/e2e.test -test.v -test.run 'TestEndToEnd|TestFirewallFlushRepaired'
 
   build:
