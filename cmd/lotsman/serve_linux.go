@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"syscall"
 	"time"
@@ -25,6 +26,7 @@ import (
 // device logs that tunnel maps to Debug.
 func serve(ctx context.Context, configPath string, level slog.Level) error {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	limitMemory(log)
 	e, err := openEnv(configPath)
 	if err != nil {
 		return err
@@ -66,6 +68,20 @@ func serve(ctx context.Context, configPath string, level slog.Level) error {
 	}
 	log.Info("lotsman stopped")
 	return nil
+}
+
+// limitMemory gives the Go runtime a soft memory limit when $GOMEMLIMIT is
+// unset, so the daemon's heap does not follow the traffic up to the host's
+// RAM. Helper processes do not call it. Failing to read the host's memory
+// only means no limit.
+func limitMemory(log *slog.Logger) {
+	limit, ok := readMemoryLimit(os.Getenv("GOMEMLIMIT"), "/proc", "/sys/fs/cgroup")
+	if !ok {
+		log.Debug("no default memory limit")
+		return
+	}
+	debug.SetMemoryLimit(limit)
+	log.Info("memory limit set", "limit_mib", limit>>20, "percent_of_memory", memoryLimitPercent)
 }
 
 // handleSignals serves the two control signals. SIGHUP re-reads the config

@@ -101,6 +101,10 @@ All notable changes to Lotsman are documented here. The format follows
   daemon falls back to 65534 with one warning when the user is missing. Create it at install
   (`useradd --system --user-group --no-create-home --shell /usr/sbin/nologin lotsman-proxy`) and
   record `user=lotsman-proxy` in `/etc/lotsman/INSTALLED` so `deploy/uninstall.sh` removes it (#97).
+- `lotsman serve` sets a soft Go memory limit of 40% of the host's RAM (or of the cgroup v2
+  `memory.max` when lower) when `GOMEMLIMIT` is unset; an explicit `GOMEMLIMIT` wins and helpers
+  are unaffected. amneziawg-go's unbounded buffer pools pushed a small VPS to 240–280 MiB RSS under
+  load; a 200 MiB limit about halves the peak for at most a 20% loss in the slowest case (#106).
 
 ### Fixed
 - The first data packet of every AmneziaWG device (each upstream, and `lm0` towards clients) went
