@@ -125,15 +125,24 @@ Follow-ups, done 2026-11-18: #97 (PR #107, dedicated helper user `lotsman-proxy`
 helper IPC off `d.mu`), #105 (PR #108, amneziawg-go v3.1.20261116; the S4 padding race from PR #85
 was fixed upstream and the gate removed), #106 (PR #109, default soft memory limit of 40% of RAM,
 from measurements on the test host). The Xray server-side Vision data race (PR #96) was reported
-upstream as XTLS/Xray-core#7443 with the owner's go-ahead.
+upstream as XTLS/Xray-core#7443 with the owner's go-ahead; the minimal fix (a mutex on the TLS
+filter fields) is XTLS/Xray-core#7445.
+
+### Wave 4: review findings (done 2026-11-18)
+
+Filed 2026-11-18 from a static review and temporary CLI tests; the user authorized all five.
+#114 (PR #120, P1: a second `serve` takes per-netns and per-state_dir locks first and tears down
+only what it set up), #113 and #115 (PR #118: an explicitly empty `-profile` is rejected; `user add`
+validates before it writes and creates user and peer in one transaction), #116 (PR #119: the
+required `integration` job runs `just test-integration`, the full suite), #117 (status published
+after every health round). An explicitly empty `-device ""` is still accepted; not filed.
+
+#55 is closed: the measurements led to #102 (PR #104, socket buffers) and #106 (PR #109).
 
 ### Manual and deferred
 
-- #48 and #60: the user imports a client config (`::/0` without an IPv6 address; an AWG 3
-  listener config, client 5.0.1.5 or newer) into the official Amnezia client.
-- #55 throughput: a benchmark, so it needs an agreed workload and a real client.
-  The user has a disposable test host for this; any remote command needs an
-  explicit request in that message.
+- #48: the user imports a client config (`::/0` without an IPv6 address) into the official
+  Amnezia client on a device with IPv6.
 
 ## First audit: approved follow-up slice (2026-10-16)
 
