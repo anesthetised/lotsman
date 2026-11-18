@@ -4,6 +4,7 @@ package proxy
 // vless_stack_test.go these run under the race detector too.
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/url"
@@ -59,15 +60,22 @@ func TestVLESSGRPCServerDownResetsClient(t *testing.T) {
 	f := newVLESSFlow(t, s, s.Link())
 	f.echo(t, "up")
 	s.Close()
-	c := f.dial(t)
 	start := time.Now()
-	io.WriteString(c, "x")
-	_, err := c.Read(make([]byte, 1))
-	if err == nil || errors.Is(err, io.EOF) {
-		t.Fatalf("read with the server down: %v, want a reset", err)
+	// The stack may refuse the handshake itself or reset the open flow;
+	// either is a reset, as long as it comes quickly.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	c, err := f.client.DialContextTCPAddrPort(ctx, echoTarget)
+	if err == nil {
+		defer c.Close()
+		c.SetDeadline(time.Now().Add(20 * time.Second))
+		io.WriteString(c, "x")
+		if _, err = c.Read(make([]byte, 1)); err == nil || errors.Is(err, io.EOF) {
+			t.Fatalf("read with the server down: %v, want a reset", err)
+		}
 	}
 	if d := time.Since(start); d > 10*time.Second {
-		t.Fatalf("reset took %v", d)
+		t.Fatalf("reset took %v (%v)", d, err)
 	}
 }
 
