@@ -3,10 +3,11 @@ test:
     go vet ./...
     go test -race ./...
 
+# CI runs this recipe. Arguments are `go test` flags and packages: `just test-integration -v ./internal/tunnel`.
 # Linux-only tests: policy routing, nftables, end-to-end tunnels. Runs in Docker so it works from macOS.
-test-integration:
+test-integration *args='./...':
     docker build -q -f deploy/Dockerfile.test -t lotsman-test . >/dev/null
-    docker run --rm --privileged lotsman-test
+    docker run --rm --privileged lotsman-test {{args}}
 
 # Formatting, vet, module integrity, staticcheck and govulncheck for the host
 # and the Linux integration build. CI runs this too.

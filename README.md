@@ -85,7 +85,7 @@ The authors take no position and no responsibility.
 
 ```bash
 just test              # unit tests, any platform
-just test-integration  # Linux kernel tests in a privileged Docker container
+just test-integration  # Linux kernel tests in a privileged Docker container; CI runs this
 just lint              # gofmt, vet, go mod verify, staticcheck, govulncheck (host and Linux)
 ```
 
