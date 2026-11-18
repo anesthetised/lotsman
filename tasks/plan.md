@@ -139,6 +139,19 @@ after every health round). An explicitly empty `-device ""` is still accepted; n
 
 #55 is closed: the measurements led to #102 (PR #104, socket buffers) and #106 (PR #109).
 
+### Wave 5: web panel (filed 2026-11-19, not yet authorized for implementation)
+
+Issues #127–#138, label `web-panel`; each issue carries the shared decisions (process,
+Connect API, auth, retention, conntrack privacy, frontend stack). Order:
+
+- Backend: #127 (control API) first. Then #128 (profiles in the store), #129 (rates),
+  #131 (conntrack), #132 (`lotsman web`). #130 (history) follows #129; #133 (passkeys) and
+  #134 (user links) follow #132.
+- Frontend: #135 (scaffold and the Solid 2.0 toolchain spike) can start once #127 has the
+  `.proto` contract. If the spike fails, stop and revisit the stack with the user. Then
+  #136 (operator console) and #137 (user page).
+- #138 (deployment docs) comes last and includes a manual check on the test gateway.
+
 ### Manual and deferred
 
 - #48: the user imports a client config (`::/0` without an IPv6 address) into the official
