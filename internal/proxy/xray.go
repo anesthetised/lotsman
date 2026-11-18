@@ -27,6 +27,7 @@ import (
 	"github.com/xtls/xray-core/proxy/vless/outbound"
 	xtransport "github.com/xtls/xray-core/transport"
 	"github.com/xtls/xray-core/transport/internet"
+	xgrpc "github.com/xtls/xray-core/transport/internet/grpc"
 	"github.com/xtls/xray-core/transport/internet/reality"
 	"github.com/xtls/xray-core/transport/internet/tcp"
 
@@ -56,6 +57,16 @@ var (
 
 func newXrayClient(k *vlessKey, server netip.AddrPort) (*xrayClient, error) {
 	idle := &policy.Second{Value: uint32(xrayIdle / time.Second)}
+	// Importing a transport's package registers its dialer. gRPC keeps
+	// Xray's client defaults: no keepalive pings and Chrome's user agent.
+	transport := &internet.TransportConfig{ProtocolName: "tcp", Settings: serial.ToTypedMessage(&tcp.Config{})}
+	if k.network == "grpc" {
+		transport = &internet.TransportConfig{ProtocolName: "grpc", Settings: serial.ToTypedMessage(&xgrpc.Config{
+			ServiceName: k.serviceName,
+			MultiMode:   k.multiMode,
+			Authority:   k.authority,
+		})}
+	}
 	config := &core.Config{
 		App: []*serial.TypedMessage{
 			serial.ToTypedMessage(&dispatcher.Config{}),
@@ -82,12 +93,9 @@ func newXrayClient(k *vlessKey, server netip.AddrPort) (*xrayClient, error) {
 			}),
 			SenderSettings: serial.ToTypedMessage(&proxyman.SenderConfig{
 				StreamSettings: &internet.StreamConfig{
-					ProtocolName: "tcp",
-					TransportSettings: []*internet.TransportConfig{{
-						ProtocolName: "tcp",
-						Settings:     serial.ToTypedMessage(&tcp.Config{}),
-					}},
-					SecurityType: serial.GetMessageType(&reality.Config{}),
+					ProtocolName:      transport.ProtocolName,
+					TransportSettings: []*internet.TransportConfig{transport},
+					SecurityType:      serial.GetMessageType(&reality.Config{}),
 					SecuritySettings: []*serial.TypedMessage{serial.ToTypedMessage(&reality.Config{
 						Fingerprint:   k.fingerprint,
 						ServerName:    k.serverName,
@@ -162,8 +170,9 @@ func (s *xrayStream) Close() error {
 
 // ListenPacket returns a socket for one UDP flow, carried as XUDP inside a
 // mux connection. Plain Vision refuses UDP to port 443 (QUIC); see
-// flowVisionUDP443. The flow lives until ctx is done or the socket is
-// closed.
+// flowVisionUDP443. Without Vision, as over gRPC, Xray sends UDP to ports
+// 53 and 443 as plain VLESS UDP instead of XUDP. The flow lives until ctx is
+// done or the socket is closed.
 func (c *xrayClient) ListenPacket(ctx context.Context) (net.PacketConn, error) {
 	ctx, cancel := context.WithCancel(ctx)
 	pc, err := core.DialUDP(ctx, c.inst)

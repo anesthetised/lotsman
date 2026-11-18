@@ -24,15 +24,17 @@ const (
 	flowVisionUDP443 = xvless.XRV + "-udp443"
 )
 
-// vlessKey is a parsed vless:// link: a VLESS server with REALITY and XTLS
-// Vision over TCP. Its REALITY fields are normalized as Xray's JSON loader
-// does (infra/conf/transport_security.go, REALITYConfig.Build, client side),
+// vlessKey is a parsed vless:// link: a VLESS server with REALITY, either
+// with XTLS Vision over TCP or without a flow over gRPC. Its REALITY fields
+// are normalized as Xray's JSON loader does
+// (infra/conf/transport_security.go, REALITYConfig.Build, client side),
 // because Xray's client trusts them: a config without spiderY, for one,
 // panics the process the first time the server presents a real certificate.
 type vlessKey struct {
 	server      string
-	id          string // the user ID, canonical; the secret
-	flow        string
+	id          string  // the user ID, canonical; the secret
+	network     string  // the transport: tcp or grpc
+	flow        string  // tcp only
 	serverName  string  // sni: the site REALITY impersonates
 	fingerprint string  // fp: the uTLS ClientHello, lower case
 	publicKey   []byte  // pbk: the server's X25519 key, 32 bytes
@@ -40,6 +42,11 @@ type vlessKey struct {
 	spiderX     string  // spx, without the spider's own parameters
 	spiderY     []int64 // the spider's ranges from spx, always 10 values
 	mldsa65     []byte  // pqv: the server's ML-DSA-65 key, optional
+
+	// gRPC only.
+	serviceName string // the service, or a /service/stream path
+	authority   string // the :authority header; empty for Xray's default
+	multiMode   bool   // mode=multi
 }
 
 // ParseSpecKey reads a key as Spec carries it: a vless:// link, or what
@@ -61,16 +68,24 @@ func isVLESS(s string) bool {
 
 // vlessParams are the query parameters a link may carry with a value; any
 // other must be absent or empty.
-var vlessParams = []string{"security", "type", "headerType", "encryption", "flow", "sni", "fp", "pbk", "sid", "spx", "pqv"}
+var vlessParams = []string{"security", "type", "headerType", "encryption", "flow", "sni", "fp", "pbk", "sid", "spx", "pqv",
+	"serviceName", "mode", "authority", "alpn"}
+
+// grpcParams are the parameters that apply to type=grpc only.
+var grpcParams = []string{"serviceName", "mode", "authority"}
 
 // ParseVLESS reads a vless:// share link (the format Xray clients and panels
 // export):
 //
 //	vless://<uuid>@<host>:<port>?security=reality&pbk=…&sni=…&flow=xtls-rprx-vision[&type=tcp][&fp=chrome][&sid=…][&spx=/][&pqv=…]#name
+//	vless://<uuid>@<host>:<port>?security=reality&pbk=…&sni=…&type=grpc[&serviceName=…][&mode=gun|multi][&authority=…][&fp=…][&sid=…][&spx=/][&pqv=…]#name
 //
-// Only REALITY over TCP with XTLS Vision is supported. The fragment, a
-// display name, is ignored, however it is written. No error quotes a value
-// from the link; an unsupported parameter is named.
+// Only REALITY is supported: over TCP with XTLS Vision, or over gRPC
+// without a flow, as Vision runs over TCP only. alpn is accepted and
+// ignored, as Xray does under REALITY, whose ClientHello carries the ALPN of
+// its uTLS fingerprint. The fragment, a display name, is ignored, however it
+// is written. No error quotes a value from the link; an unsupported
+// parameter is named.
 func ParseVLESS(s string) (Key, error) {
 	s = strings.TrimSpace(s)
 	if !isVLESS(s) {
@@ -120,10 +135,14 @@ func ParseVLESS(s string) (Key, error) {
 	default:
 		return nil, errors.New("vless key: only security=reality is supported")
 	}
-	switch q.Get("type") {
+	// Xray reads the transport's name in any case.
+	switch strings.ToLower(q.Get("type")) {
 	case "", "tcp", "raw":
+		k.network = "tcp"
+	case "grpc":
+		k.network = "grpc"
 	default:
-		return nil, errors.New("vless key: only type=tcp (raw) is supported")
+		return nil, errors.New("vless key: only type=tcp (raw) and type=grpc are supported")
 	}
 	switch q.Get("headerType") {
 	case "", "none":
@@ -135,12 +154,23 @@ func ParseVLESS(s string) (Key, error) {
 	default:
 		return nil, errors.New("vless key: only encryption=none is supported")
 	}
-	switch k.flow = q.Get("flow"); k.flow {
-	case flowVision, flowVisionUDP443:
-	case "":
-		return nil, fmt.Errorf("vless key: flow is missing; want %s or %s", flowVision, flowVisionUDP443)
-	default:
-		return nil, fmt.Errorf("vless key: unsupported flow; want %s or %s", flowVision, flowVisionUDP443)
+	if k.network == "grpc" {
+		if err := k.grpc(q); err != nil {
+			return nil, fmt.Errorf("vless key: %w", err)
+		}
+	} else {
+		for _, p := range grpcParams {
+			if q.Get(p) != "" {
+				return nil, fmt.Errorf("vless key: %s applies to type=grpc only", p)
+			}
+		}
+		switch k.flow = q.Get("flow"); k.flow {
+		case flowVision, flowVisionUDP443:
+		case "":
+			return nil, fmt.Errorf("vless key: flow is missing; want %s or %s", flowVision, flowVisionUDP443)
+		default:
+			return nil, fmt.Errorf("vless key: unsupported flow; want %s or %s", flowVision, flowVisionUDP443)
+		}
 	}
 	if k.serverName = q.Get("sni"); k.serverName == "" {
 		return nil, errors.New("vless key: sni is missing")
@@ -149,6 +179,25 @@ func ParseVLESS(s string) (Key, error) {
 		return nil, fmt.Errorf("vless key: %w", err)
 	}
 	return k, nil
+}
+
+// grpc reads the gRPC parameters. Xray's JSON loader takes any service
+// name, including none and the /service/stream form, and any authority, so
+// this does too; the link's mode is Xray's multiMode.
+func (k *vlessKey) grpc(q url.Values) error {
+	if q.Get("flow") != "" {
+		return errors.New("flow must be empty for type=grpc: XTLS Vision runs over type=tcp only")
+	}
+	switch q.Get("mode") {
+	case "", "gun":
+	case "multi":
+		k.multiMode = true
+	default:
+		return errors.New("mode: want gun or multi")
+	}
+	k.serviceName = q.Get("serviceName")
+	k.authority = q.Get("authority")
+	return nil
 }
 
 // reality checks and normalizes the REALITY parameters exactly as Xray's
@@ -228,8 +277,17 @@ func spider(spx string) (string, []int64, error) {
 
 func (k *vlessKey) Server() string { return k.server }
 
+// String names the transport, not the service name or authority, which a
+// server may use as a path secret.
 func (k *vlessKey) String() string {
-	return fmt.Sprintf("vless reality %s, sni %s, fp %s", k.flow, k.serverName, k.fingerprint)
+	via := k.flow
+	if k.network == "grpc" {
+		via = "grpc"
+		if k.multiMode {
+			via += " multi"
+		}
+	}
+	return fmt.Sprintf("vless reality %s, sni %s, fp %s", via, k.serverName, k.fingerprint)
 }
 
 // Dialers start an Xray instance that reaches the server at addr.

@@ -1,11 +1,13 @@
-// Package vlesstest provides an Xray VLESS + REALITY + XTLS Vision server on
-// loopback for tests of VLESS upstreams.
+// Package vlesstest provides Xray VLESS + REALITY servers on loopback for
+// tests of VLESS upstreams: with XTLS Vision over TCP, or without a flow over
+// gRPC.
 //
 // The server is Xray's own inbound, so tests show the client interoperates
 // with Xray, not with a reimplementation. Xray's Vision server shares state
 // between the two directions of a connection without synchronization, which
 // the race detector reports on every run (upstream, xray-core v26.11.9); test
-// files that run this server carry a "!race" build constraint.
+// files that run the Vision server carry a "!race" build constraint. The
+// gRPC server runs no Vision and is fit for race-detector builds.
 package vlesstest
 
 import (
@@ -44,6 +46,7 @@ import (
 	xvless "github.com/xtls/xray-core/proxy/vless"
 	"github.com/xtls/xray-core/proxy/vless/inbound"
 	"github.com/xtls/xray-core/transport/internet"
+	xgrpc "github.com/xtls/xray-core/transport/internet/grpc"
 	"github.com/xtls/xray-core/transport/internet/reality"
 
 	_ "github.com/xtls/xray-core/app/proxyman/inbound"
@@ -53,15 +56,17 @@ import (
 // ServerName is the camouflage site's name: the sni of every link.
 const ServerName = "camouflage.test"
 
-// Server is a VLESS + REALITY + Vision server on a loopback TCP port.
+// Server is a VLESS + REALITY server on a loopback TCP port.
 type Server struct {
-	addr      netip.AddrPort
-	id        string
-	publicKey []byte
-	shortID   []byte
-	cert      *x509.Certificate
-	site      string // the camouflage site's address
-	inst      *core.Instance
+	addr        netip.AddrPort
+	id          string
+	publicKey   []byte
+	shortID     []byte
+	cert        *x509.Certificate
+	site        string // the camouflage site's address
+	grpc        bool
+	serviceName string // gRPC only
+	inst        *core.Instance
 }
 
 // NewServer starts a server and its camouflage site. Targets found in
@@ -77,6 +82,18 @@ type Server struct {
 // it after starting its servers.
 func NewServer(t testing.TB, redirect map[string]string, onCert func(*x509.Certificate)) *Server {
 	t.Helper()
+	return newServer(t, redirect, onCert, false, "")
+}
+
+// NewGRPCServer is NewServer for VLESS + REALITY over gRPC without a flow.
+// It serves gRPC service serviceName in both of Xray's modes, gun and multi.
+func NewGRPCServer(t testing.TB, redirect map[string]string, serviceName string) *Server {
+	t.Helper()
+	return newServer(t, redirect, nil, true, serviceName)
+}
+
+func newServer(t testing.TB, redirect map[string]string, onCert func(*x509.Certificate), grpc bool, serviceName string) *Server {
+	t.Helper()
 	xlog.RegisterHandler(errorsOnly{})
 	key, err := ecdh.X25519().GenerateKey(rand.Reader)
 	if err != nil {
@@ -88,12 +105,34 @@ func NewServer(t testing.TB, redirect map[string]string, onCert func(*x509.Certi
 	}
 	port := freePort(t)
 	s := &Server{
-		addr:      netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), port),
-		id:        uuid.NewString(),
-		publicKey: key.PublicKey().Bytes(),
-		shortID:   []byte{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef},
-		cert:      cert,
-		site:      site,
+		addr:        netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), port),
+		id:          uuid.NewString(),
+		publicKey:   key.PublicKey().Bytes(),
+		shortID:     []byte{0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef},
+		cert:        cert,
+		site:        site,
+		grpc:        grpc,
+		serviceName: serviceName,
+	}
+	stream := &internet.StreamConfig{
+		ProtocolName: "tcp",
+		SecurityType: serial.GetMessageType(&reality.Config{}),
+		SecuritySettings: []*serial.TypedMessage{serial.ToTypedMessage(&reality.Config{
+			Dest:        site,
+			Type:        "tcp",
+			ServerNames: []string{ServerName},
+			PrivateKey:  key.Bytes(),
+			ShortIds:    [][]byte{s.shortID},
+		})},
+	}
+	flow := xvless.XRV
+	if grpc {
+		stream.ProtocolName = "grpc"
+		stream.TransportSettings = []*internet.TransportConfig{{
+			ProtocolName: "grpc",
+			Settings:     serial.ToTypedMessage(&xgrpc.Config{ServiceName: serviceName}),
+		}}
+		flow = ""
 	}
 	// Xray's freedom refuses private addresses unless allowed.
 	allow := []*freedom.FinalRuleConfig{{Action: freedom.RuleAction_Allow}}
@@ -129,24 +168,14 @@ func NewServer(t testing.TB, redirect map[string]string, onCert func(*x509.Certi
 		},
 		Inbound: []*core.InboundHandlerConfig{{
 			ReceiverSettings: serial.ToTypedMessage(&proxyman.ReceiverConfig{
-				PortList: &xnet.PortList{Range: []*xnet.PortRange{xnet.SinglePortRange(xnet.Port(port))}},
-				Listen:   xnet.NewIPOrDomain(xnet.LocalHostIP),
-				StreamSettings: &internet.StreamConfig{
-					ProtocolName: "tcp",
-					SecurityType: serial.GetMessageType(&reality.Config{}),
-					SecuritySettings: []*serial.TypedMessage{serial.ToTypedMessage(&reality.Config{
-						Dest:        site,
-						Type:        "tcp",
-						ServerNames: []string{ServerName},
-						PrivateKey:  key.Bytes(),
-						ShortIds:    [][]byte{s.shortID},
-					})},
-				},
+				PortList:       &xnet.PortList{Range: []*xnet.PortRange{xnet.SinglePortRange(xnet.Port(port))}},
+				Listen:         xnet.NewIPOrDomain(xnet.LocalHostIP),
+				StreamSettings: stream,
 			}),
 			ProxySettings: serial.ToTypedMessage(&inbound.Config{
 				Users: []*protocol.User{{Account: serial.ToTypedMessage(&xvless.Account{
 					Id:   s.id,
-					Flow: xvless.XRV,
+					Flow: flow,
 				})}},
 			}),
 		}},
@@ -185,6 +214,13 @@ func (s *Server) LinkWith(params url.Values) string {
 		"sid":        {hex.EncodeToString(s.shortID)},
 		"spx":        {"/"},
 		"flow":       {xvless.XRV},
+	}
+	if s.grpc {
+		q.Set("type", "grpc")
+		q.Set("serviceName", s.serviceName)
+		q.Set("mode", "gun")
+		q.Set("alpn", "h2")
+		q.Del("flow")
 	}
 	for k, v := range params {
 		if v[0] == "" {

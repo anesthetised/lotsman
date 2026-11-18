@@ -36,8 +36,8 @@ Amnezia app ──AWG──▶ Lotsman ──AWG──▶ provider NL ──▶ 
     (fetched over HTTPS and refreshed), including Outline's Shadowsocks-over-WebSocket keys
     (`transport:` configs). A userspace TCP/IP stack in an unprivileged helper process
     per upstream carries TCP and UDP through it; ICMP (ping) does not pass.
-  - `vless`: a VLESS server with REALITY and XTLS Vision (Xray), from its `vless://` share link,
-    TCP transport, UDP inside it (XUDP). It runs on the same stack, with Xray embedded.
+  - `vless`: a VLESS server with REALITY (Xray), from its `vless://` share link: XTLS Vision over
+    TCP, or gRPC without a flow; UDP inside it. It runs on the same stack, with Xray embedded.
 
   Clients use the Amnezia app whatever the upstream: 5.0.1.5 or later for the default `awg: 3`; set
   `awg: 2` for older apps and Android 7–8.
@@ -52,8 +52,8 @@ Amnezia app ──AWG──▶ Lotsman ──AWG──▶ provider NL ──▶ 
   upstreams also terminate every TCP connection in userspace.
 - Outline keys beyond plain Shadowsocks and Shadowsocks over WebSocket (other `$type`s of Outline's
   config language, such as TLS fragmentation or chained proxies).
-- VLESS over transports other than TCP (xhttp, gRPC, WebSocket), VLESS without REALITY, and VLESS
-  subscription URLs.
+- VLESS over transports other than TCP and gRPC (xhttp, WebSocket), VLESS without REALITY, and
+  VLESS subscription URLs.
 
 ## Quick start
 

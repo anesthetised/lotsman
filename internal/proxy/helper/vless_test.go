@@ -50,6 +50,10 @@ func TestRunnerVLESS(t *testing.T) {
 	if err := l.SetServer(link, netip.MustParseAddrPort("192.0.2.2:443")); err != nil {
 		t.Fatal(err)
 	}
+	// The child's Xray has the gRPC transport.
+	if err := l.SetServer(strings.Replace(link, "flow=xtls-rprx-vision", "type=grpc&serviceName=x", 1), netip.MustParseAddrPort("192.0.2.2:443")); err != nil {
+		t.Fatal(err)
+	}
 	if err := l.SetServer(strings.Replace(link, "flow=xtls-rprx-vision", "flow=none", 1), netip.MustParseAddrPort("192.0.2.2:443")); err == nil {
 		t.Error("the helper took a link it cannot use")
 	}

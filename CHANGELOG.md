@@ -6,6 +6,15 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- VLESS over gRPC: a `vless` upstream's link may use `type=grpc` with `security=reality` and no
+  `flow` (Vision runs over TCP only; a grpc link with a flow is refused). `serviceName` (also
+  Xray's `/<service>/<stream>` form), `mode` (`gun`, the default, or `multi`) and `authority` are
+  read and checked as Xray's loader does, and apply to grpc only; `alpn` is accepted and ignored on
+  either transport, as Xray does under REALITY. Every flow is a stream in one HTTP/2 connection to
+  the server; UDP goes to ports 53 and 443 as plain VLESS UDP and to others as XUDP. `config check`
+  shows `vless reality grpc` (`grpc multi`), never the service name. The binary grows by about
+  6.7 MB (grpc-go's HTTP/2 transport); new module `google.golang.org/genproto/googleapis/rpc`
+  (#122).
 - Outline Shadowsocks-over-WebSocket keys: an `outline` upstream's key file, or a dynamic key's
   response, may be an Outline `transport:` config (YAML or JSON) as the Outline client reads it:
   `tcpudp`, `shadowsocks`, `dial` and `websocket` (`wss://`, `ws://`) endpoints; other `$type`s are
