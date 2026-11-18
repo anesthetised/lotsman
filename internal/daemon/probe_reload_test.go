@@ -115,8 +115,11 @@ func background(t *testing.T, r *stallingResolver, op func()) <-chan struct{} {
 	return done
 }
 
-// assertResponsive fails fast if Status, Reconcile or Metrics wait for DNS or
-// a helper.
+// assertResponsive fails if Status, Reconcile or Metrics wait for DNS or a
+// helper. The stalled lookup or request waits until the test frees it, so a
+// generous timeout still catches that; a short one failed on loaded CI runners
+// where the calls were merely slow under -race. On failure it dumps every
+// goroutine, to show what they wait for.
 func assertResponsive(t *testing.T, h *harness) {
 	t.Helper()
 	done := make(chan struct{})
@@ -128,8 +131,9 @@ func assertResponsive(t *testing.T, h *harness) {
 	}()
 	select {
 	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("Status, Reconcile or Metrics blocked behind an endpoint lookup or a helper request")
+	case <-time.After(10 * time.Second):
+		buf := make([]byte, 1<<20)
+		t.Fatalf("Status, Reconcile or Metrics blocked behind an endpoint lookup or a helper request\n%s", buf[:runtime.Stack(buf, true)])
 	}
 }
 
@@ -163,7 +167,7 @@ func TestEndpointLookupDoesNotBlockDaemon(t *testing.T) {
 		}()
 		select {
 		case <-responsive:
-		case <-time.After(2 * time.Second):
+		case <-time.After(10 * time.Second): // see assertResponsive
 			t.Fatal("Status or Metrics blocked behind a startup endpoint lookup")
 		}
 		dns.unblock()
