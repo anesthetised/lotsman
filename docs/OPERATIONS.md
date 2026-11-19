@@ -132,6 +132,7 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, `outline` or `vless`), `conf` path (the provider's AmneziaWG config, for `outline` a file with the access key or its `ssconf://` URL, for `vless` a file with the `vless://` link), free-form `geo` and `provider` labels, `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates), and for the proxy kinds `outline` and `vless` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams) and [VLESS upstreams](#vless-upstreams)). |
 | `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline and VLESS upstream; default `1.1.1.1:53`), `down_after`, `up_after`, and the optional `transfer` block (off when absent; see [Throttled upstreams](#throttled-upstreams-transfer-probe)). |
 | `history` | `minute_retention` (default `168h`, 7 days; at least `1h`) and `hour_retention` (default `2160h`, 90 days; not shorter than `minute_retention`): how long the [history](#history) keeps samples of a minute and of an hour. Go durations, so hours (`168h`), not days. Applies on reload. |
+| `users` | `max_devices`: how many devices a user may have when adding one on their [page](#user-links), default 5; another profile on a device they have does not count. `0` turns adding off, another profile included. The operator's commands are not limited. |
 
 `listen` binds exactly the configured numeric address; hostnames and an omitted
 host are unsupported. An occupied port, unavailable family, or unassigned address
@@ -574,6 +575,43 @@ pid in `lotsman.pid` belongs to this same `lotsman` executable; otherwise it sig
 why on stderr, and the change applies on the next reconcile or start. After replacing the binary,
 restart the daemon. Run these commands as the daemon's user (normally root).
 
+### User links
+
+A user's link opens their own page in the [web panel](#web-panel), `<public_url>/u#<token>`.
+There they see their devices and the exits their profiles use, with their availability, download
+each config (text and QR code), add or remove their own devices and switch a device's profile (add
+the new profile, then remove the old one).
+
+```bash
+lotsman user link alice                  # print a new link; her previous one stops working
+lotsman user link alice -url https://vpn.example.com
+lotsman user link alice -revoke          # end her link; she keeps her configs
+```
+
+The link is printed once, to stdout. Whoever has it can download the user's configs, so treat it
+like a private key: send it over a channel you trust, and if it leaks, run `user link` again
+(rotation) or `-revoke`. Only a SHA-256 of the 256-bit token is stored, so a lost link cannot be
+shown again, only replaced. The address comes from `-url`, else from `public_url` in the
+[panel's config](#panel-configuration) (`$LOTSMAN_WEB_CONFIG` or `/etc/lotsman/web.yaml`); with
+neither, the command prints only the token and says how the address is built. `user rm` of the
+whole user also ends their link. The panel trusts a resolved link for 30 seconds, so a rotated or
+revoked link stops working within 30 seconds, and a live view it opened within a minute.
+
+Users are limited on their page, not in the CLI:
+
+- `users.max_devices` in `lotsman.yaml` (default 5) caps the devices a user can have when adding
+  one; another profile on an existing device does not count, so profile switches keep working. `0`
+  turns adding off, another profile included (`permission_denied`); users can still remove
+  devices. Reload with `systemctl reload lotsman`.
+- At most 10 additions at once, then one every 6 minutes, per user (`resource_exhausted` past it).
+- A client address (an IPv6 `/64`) whose links fail to resolve 10 times is refused for a while
+  (one more try every 6 seconds), so the panel does not pass guesses on to the daemon.
+
+The token is never logged, by the daemon or the panel. It is in the link's fragment, after `#`,
+which browsers never send, so your reverse proxy's access log sees only `/u`; the page sends the
+token to the panel in a header, which proxies do not log by default. A link cut off before the
+`#` part, or with a garbled token, shows "link missing or invalid" instead of the page.
+
 ## Watching it
 
 ```bash
@@ -632,6 +670,8 @@ group and restart. The unit provides `/run/lotsman` (`RuntimeDirectory=lotsman`)
   be read.
 - `HistoryService` (`Upstream`, `Peer`): the [history](#history) of an upstream or a `peer_id`.
   Errors: `invalid_argument` for a bad range or step, `not_found` for an unknown name.
+- `UserService` and `UserSelfService`: users, devices, configs and [links](#user-links), and a
+  user's own view, history included.
 
 Every other RPC returns `unimplemented`. Self-service RPCs act for the user named in the `Lotsman-User` request header,
 which only the [web panel](#web-panel) sets.
@@ -644,10 +684,10 @@ daemon over the [control socket](#control-socket). It runs as the unprivileged u
 `lotsman.db`; its own state, `web.db` (operator passkeys, sessions, enrollment tokens), lives in
 `/var/lib/lotsman-web`. It listens on loopback and needs a reverse proxy in front for TLS.
 
-Operators sign in with passkeys (see [Operators and passkeys](#operators-and-passkeys)). User
-links are not implemented yet, so the user page's calls answer `unauthenticated`. A binary built
-without the frontend (`go build`, `just build` without `just web-build`) serves a page saying so,
-and the panel logs a warning at start.
+Operators sign in with passkeys (see [Operators and passkeys](#operators-and-passkeys)). Users
+reach their page through their [link](#user-links). A binary built without the frontend
+(`go build`, `just build` without `just web-build`) serves a page saying so, and the panel logs a
+warning at start.
 
 Install, after the gateway itself:
 
@@ -775,8 +815,10 @@ The browser calls the same `lotsman.v1` API as the socket, under `/api/` (for ex
 operator), user (a user's link), or internal (`UserSelfService.ResolveLink`, which only the panel
 calls); an RPC without a scope is refused with `permission_denied`. Only POST is accepted, a
 request body is at most 64 KiB, and only the RPC protocol headers reach the daemon: cookies,
-credentials, forwarded addresses and every `Lotsman-*` header the browser sent are dropped. For
-self-service calls the panel sets `Lotsman-User` itself. When the daemon is down, or the panel's
+credentials, forwarded addresses and every `Lotsman-*` header the browser sent are dropped. A
+user's page sends its link's token as `Authorization: Bearer <token>`; the panel resolves it
+through the daemon and, for self-service calls, sets `Lotsman-User` itself. The `Authorization`
+header never reaches the daemon. When the daemon is down, or the panel's
 user is not in the `lotsman-web` group, calls answer `unavailable` and the panel logs
 `daemon unreachable` with the reason. The panel's own sign-in endpoints, under `/auth/`, are JSON
 over POST with the same `Origin` check, and never reach the daemon.

@@ -69,10 +69,11 @@ var Scopes = map[string]Scope{
 	lotsmanv1connect.UserSelfServicePeerHistoryProcedure:     User,
 }
 
-// Authenticator tells who sent a request: OperatorAuth in production.
+// Authenticator tells who sent a request: OperatorAuth with WithLinks in
+// production.
 type Authenticator interface {
 	// Operator returns nil when r comes from a signed-in operator.
 	Operator(r *http.Request) error
-	// User returns the user whose link r carries (#134).
+	// User returns the user whose link r carries.
 	User(r *http.Request) (string, error)
 }

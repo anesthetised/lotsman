@@ -364,8 +364,8 @@ func TestMigrateFromVersion4(t *testing.T) {
 	defer s.Close()
 	var version int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&version)
-	if version != len(migrations) || version != 5 {
-		t.Errorf("user_version = %d, want 5", version)
+	if version != len(migrations) {
+		t.Errorf("user_version = %d, want %d", version, len(migrations))
 	}
 	// The peers survive and the history tables work.
 	if ok, err := s.HasPeer(1); !ok || err != nil {

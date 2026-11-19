@@ -1,12 +1,15 @@
-// Placeholder user page behind the secret link `/u/<token>` (#137 builds the
+// Placeholder user page behind the secret link `/u#<token>` (#137 builds the
 // real one): mobile-first cards with the live speed, the user's devices and
 // the 7-day availability of the exits they use.
-// The panel resolves the token and scopes UserSelfService to that user, so
-// the page itself never sends the token anywhere (see web/README.md).
+// The token is in the fragment, so the browser never sends it with the page
+// (see link.ts). Every call sends it to the panel, and only there, as
+// `Authorization: Bearer` (see selfApi); the panel resolves it and scopes
+// UserSelfService to that user.
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { createMemo, Errored, For, Loading, Show } from "solid-js";
-import { api } from "../../api/client";
+import { selfApi } from "../../api/client";
+import { linkToken } from "../../api/link";
 import { createLive, num } from "../../api/live";
 import type { PeerStatus, UpstreamStatus } from "../../gen/lotsman/v1/status_pb";
 import type { DevicePeer } from "../../gen/lotsman/v1/user_pb";
@@ -20,24 +23,38 @@ import { stateLabel, stateLevel } from "../upstream";
 
 export default function UserPage() {
   const { t } = useI18n();
+  // Read once and kept in memory only; the address keeps it for bookmarks.
+  const token = linkToken(location.hash);
   return (
     <div class="min-h-screen">
       <SkipLink />
       <main id="main" class="mx-auto max-w-md space-y-4 px-4 py-6">
-        <Errored fallback={(error, reset) => <LiveError error={error()} retry={reset} />}>
-          <Loading fallback={<p class="text-muted">{t.common.connecting}</p>}>
-            <LiveUser />
-          </Loading>
-        </Errored>
+        <Show
+          when={token}
+          fallback={
+            <p role="alert" class="rounded-md border border-bad p-3">
+              {t.user.badLink}
+            </p>
+          }
+        >
+          {(token) => (
+            <Errored fallback={(error, reset) => <LiveError error={error()} retry={reset} />}>
+              <Loading fallback={<p class="text-muted">{t.common.connecting}</p>}>
+                <LiveUser token={token()} />
+              </Loading>
+            </Errored>
+          )}
+        </Show>
       </main>
     </div>
   );
 }
 
-function LiveUser() {
+function LiveUser(props: { token: string }) {
   const { t, fmt } = useI18n();
-  const user = createMemo(() => api.self.get({}));
-  const snapshot = createLive(() => api.self.watch({}));
+  const self = selfApi(props.token);
+  const user = createMemo(() => self.get({}));
+  const snapshot = createLive(() => self.watch({}));
   const trend = createMemo<number[]>((prev = []) => [...prev, num(snapshot().total?.downRate)].slice(-60));
   const peers = createMemo(() => new Map(snapshot().peers.map((p) => [p.peerId, p])));
   const upstreams = createMemo(() => new Map(snapshot().upstreams.map((u) => [u.name, u])));
@@ -100,7 +117,7 @@ function LiveUser() {
                   <span class="font-medium">{u().name}</span>
                   <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />
                 </div>
-                <Availability name={u().name} label={t.user.availabilityLabel(u().name)} load={api.self.upstreamHistory} />
+                <Availability name={u().name} label={t.user.availabilityLabel(u().name)} load={self.upstreamHistory} />
               </li>
             )}
           </For>

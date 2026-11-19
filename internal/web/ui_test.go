@@ -20,7 +20,7 @@ func get(h http.Handler, path string) *httptest.ResponseRecorder {
 
 func TestPlaceholderWithoutBuild(t *testing.T) {
 	h := uiPanel(t, fstest.MapFS{".gitkeep": {}})
-	for _, path := range []string{"/", "/u/abc", "/operator/users"} {
+	for _, path := range []string{"/", "/u", "/operator/users"} {
 		w := get(h, path)
 		if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), "just web-build") ||
 			!strings.HasPrefix(w.Header().Get("Content-Type"), "text/html") {
@@ -58,7 +58,7 @@ func TestSinglePageApp(t *testing.T) {
 		code              int
 	}{
 		{"/", "app", "no-cache", http.StatusOK},
-		{"/u/0123abcd", "app", "no-cache", http.StatusOK},
+		{"/u", "app", "no-cache", http.StatusOK}, // the user page; its token is in the fragment
 		{"/operator/profiles/eu", "app", "no-cache", http.StatusOK},
 		{"/assets", "app", "no-cache", http.StatusOK}, // a directory is no file
 		{"/index.html", "app", "no-cache", http.StatusOK},

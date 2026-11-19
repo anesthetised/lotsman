@@ -131,12 +131,24 @@ var migrations = []string{
 		up_bytes   INTEGER NOT NULL,
 		PRIMARY KEY (peer_id, ts)
 	) WITHOUT ROWID;`,
+	// User links (#134): only a token's SHA-256 is kept. Rotating revokes
+	// the old row and adds one, so a user has at most one live link.
+	`CREATE TABLE user_links (
+		id         INTEGER PRIMARY KEY,
+		user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		token_hash BLOB NOT NULL UNIQUE,
+		created_at TEXT NOT NULL,
+		revoked_at TEXT
+	);
+	CREATE INDEX user_links_user ON user_links (user_id);
+	CREATE UNIQUE INDEX user_links_live ON user_links (user_id) WHERE revoked_at IS NULL;`,
 }
 
 type User struct {
 	ID        int64
 	Name      string
 	CreatedAt time.Time
+	HasLink   bool // a live link to the user's page; see IssueLink
 }
 
 // Peer is one (user, device, profile) tunnel. The private key is kept so the
@@ -294,7 +306,25 @@ func (s *Store) DeleteUser(name string) error {
 }
 
 func (s *Store) ListUsers() ([]User, error) {
-	rows, err := s.db.Query(`SELECT id, name, created_at FROM users ORDER BY name`)
+	return s.queryUsers("")
+}
+
+// User returns the user of that name; ErrNotFound if there is none.
+func (s *Store) User(name string) (User, error) {
+	users, err := s.queryUsers(`WHERE u.name = ?`, name)
+	if err != nil {
+		return User{}, err
+	}
+	if len(users) == 0 {
+		return User{}, ErrNotFound
+	}
+	return users[0], nil
+}
+
+func (s *Store) queryUsers(where string, args ...any) ([]User, error) {
+	rows, err := s.db.Query(`SELECT u.id, u.name, u.created_at,
+		EXISTS (SELECT 1 FROM user_links l WHERE l.user_id = u.id AND l.revoked_at IS NULL)
+		FROM users u `+where+` ORDER BY u.name`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -303,7 +333,7 @@ func (s *Store) ListUsers() ([]User, error) {
 	for rows.Next() {
 		var u User
 		var created string
-		if err := rows.Scan(&u.ID, &u.Name, &created); err != nil {
+		if err := rows.Scan(&u.ID, &u.Name, &created, &u.HasLink); err != nil {
 			return nil, err
 		}
 		if u.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
@@ -408,8 +438,25 @@ func (s *Store) Peer(user, device, profile string) (Peer, error) {
 	return peers[0], nil
 }
 
+// PeerByID returns the peer with that row id; ErrNotFound if there is none.
+func (s *Store) PeerByID(id int64) (Peer, error) {
+	peers, err := s.queryPeers(`WHERE p.id = ?`, id)
+	if err != nil {
+		return Peer{}, err
+	}
+	if len(peers) == 0 {
+		return Peer{}, ErrNotFound
+	}
+	return peers[0], nil
+}
+
 func (s *Store) ListPeers() ([]Peer, error) {
 	return s.queryPeers("")
+}
+
+// UserPeers returns every peer of one user, by device and profile.
+func (s *Store) UserPeers(user string) ([]Peer, error) {
+	return s.queryPeers(`WHERE u.name = ?`, user)
 }
 
 func (s *Store) queryPeers(where string, args ...any) ([]Peer, error) {

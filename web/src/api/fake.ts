@@ -10,7 +10,7 @@ import { type StatusSnapshot, StatusService, type WatchStatusRequest } from "../
 import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
 import { Simulation } from "./simulation";
 
-/** The user every fake `/u/<token>` link resolves to. */
+/** The user every fake `/u#<token>` link resolves to. */
 export const FAKE_USER = "alice";
 
 const DAY = 86_400_000;

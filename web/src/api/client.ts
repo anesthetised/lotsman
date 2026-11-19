@@ -11,6 +11,7 @@ import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
 import { createAuth, redirectToSignIn } from "./auth";
 import { createFakeTransport } from "./fake";
 import { createFakeAuthServer } from "./fakeAuth";
+import { withLink } from "./link";
 import { onUnauthenticated } from "./unauthenticated";
 
 const fakeAuth = import.meta.env.VITE_FAKE_API ? createFakeAuthServer({ storage: sessionStorage }) : undefined;
@@ -22,8 +23,17 @@ const transport: Transport = fakeAuth
 export const api = {
   status: createClient(StatusService, transport),
   history: createClient(HistoryService, transport),
-  self: createClient(UserSelfService, transport),
 };
+
+/**
+ * The user page's client. Every call carries the link's token as
+ * `Authorization: Bearer <token>` (see link.ts); the panel resolves it to
+ * the user and never forwards the header. The fake ignores it.
+ */
+export function selfApi(token: string) {
+  const linked = fakeAuth ? transport : createConnectTransport({ baseUrl: "/api", interceptors: [withLink(token)] });
+  return createClient(UserSelfService, linked);
+}
 
 export const auth = createAuth({
   fetch: fakeAuth ? fakeAuth.fetch : (url, init) => fetch(url, init),

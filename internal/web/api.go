@@ -54,10 +54,13 @@ type api struct {
 	proxy  *httputil.ReverseProxy
 	errors *connecthttp.ErrorWriter
 	log    *slog.Logger
+	// recheck is how often a user's call that is still running, such as a
+	// Watch stream, checks that its link still resolves.
+	recheck time.Duration
 }
 
 func newAPI(scopes map[string]Scope, auth Authenticator, daemon http.RoundTripper, log *slog.Logger) *api {
-	a := &api{scopes: scopes, auth: auth, errors: connecthttp.NewErrorWriter(), log: log}
+	a := &api{scopes: scopes, auth: auth, errors: connecthttp.NewErrorWriter(), log: log, recheck: linkTTL}
 	a.proxy = &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
 			pr.Out.URL.Scheme, pr.Out.URL.Host, pr.Out.Host = "http", "lotsman", ""
@@ -95,7 +98,11 @@ func (a *api) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		a.fail(w, r, connect.NewError(connect.CodeUnauthenticated, err.Error()))
+		// An authenticator may pick the code, such as for a rate limit.
+		if connect.CodeOf(err) == connect.CodeUnknown {
+			err = connect.NewError(connect.CodeUnauthenticated, err.Error())
+		}
+		a.fail(w, r, err)
 		return
 	}
 
@@ -114,7 +121,13 @@ func (a *api) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	out := r.Clone(r.Context())
+	ctx := r.Context()
+	if user != "" {
+		var stop context.CancelFunc
+		ctx, stop = a.whileUser(r, user)
+		defer stop()
+	}
+	out := r.Clone(ctx)
 	out.URL.Path, out.URL.RawPath = procedure, ""
 	out.Header = forwardHeaders(r.Header)
 	if user != "" {
@@ -122,6 +135,29 @@ func (a *api) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Body, out.ContentLength = io.NopCloser(bytes.NewReader(body)), int64(len(body))
 	a.proxy.ServeHTTP(w, out)
+}
+
+// whileUser is r's context, cancelled once r's link no longer resolves to
+// user, so a revoked link also ends the streams it opened.
+func (a *api) whileUser(r *http.Request, user string) (context.Context, context.CancelFunc) {
+	ctx, cancel := context.WithCancel(r.Context())
+	go func() {
+		tick := time.NewTicker(a.recheck)
+		defer tick.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+			if again, err := a.auth.User(r); err != nil || again != user {
+				a.log.Debug("user call ended: link no longer valid", "client", ClientAddr(r), "error", err)
+				cancel()
+				return
+			}
+		}
+	}()
+	return ctx, cancel
 }
 
 // forwardHeaders keeps only what the RPC protocols need. Everything else a

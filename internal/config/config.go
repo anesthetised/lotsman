@@ -30,6 +30,7 @@ type Config struct {
 	Health    Health       `yaml:"health"`
 	Metrics   Metrics      `yaml:"metrics"`
 	History   History      `yaml:"history"`
+	Users     Users        `yaml:"users"`
 }
 
 // History is how long the availability and traffic history is kept: samples
@@ -39,6 +40,18 @@ type History struct {
 	MinuteRetention time.Duration `yaml:"minute_retention"`
 	HourRetention   time.Duration `yaml:"hour_retention"`
 }
+
+// Users limits what users may do on their own page in the web panel. The
+// operator is not limited.
+type Users struct {
+	// MaxDevices is how many devices a user may have when adding one on
+	// their page. Another profile on a device they have is no new device;
+	// 0 turns adding off, another profile included.
+	MaxDevices int `yaml:"max_devices"`
+}
+
+// DefaultMaxDevices is users.max_devices when the config does not set it.
+const DefaultMaxDevices = 5
 
 // Metrics enables the Prometheus endpoint when Listen is set. The endpoint
 // names users, so it must not be bound to an unspecified address.
@@ -197,6 +210,7 @@ func Default() Config {
 		Health: Health{Interval: 15 * time.Second, Probe: ProbeTargets{netip.MustParseAddrPort("1.1.1.1:443")},
 			DNS: DNSTargets{netip.MustParseAddrPort("1.1.1.1:53")}, DownAfter: 3, UpAfter: 2},
 		History: History{MinuteRetention: 7 * 24 * time.Hour, HourRetention: 90 * 24 * time.Hour},
+		Users:   Users{MaxDevices: DefaultMaxDevices},
 	}
 }
 
@@ -380,6 +394,9 @@ func (c *Config) Validate() error {
 		if err := t.validate(); err != nil {
 			return err
 		}
+	}
+	if c.Users.MaxDevices < 0 {
+		return fmt.Errorf("users.max_devices: must not be negative")
 	}
 	if c.Metrics.Listen != "" {
 		ap, err := netip.ParseAddrPort(c.Metrics.Listen)

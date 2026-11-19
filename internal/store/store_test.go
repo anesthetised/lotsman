@@ -473,3 +473,27 @@ func TestPeerIDsAreNeverReused(t *testing.T) {
 		t.Errorf("ids %d, %d (deleted), then %d: a deleted id was reused", a.ID, b.ID, c.ID)
 	}
 }
+
+func TestPeerLookups(t *testing.T) {
+	s := open(t)
+	addProfiles(t, s, "nl", "de")
+	a, _ := s.AddUserPeer("alice", "phone", "nl", subnet)
+	b, _ := s.AddUserPeer("alice", "laptop", "de", subnet)
+	c, _ := s.AddUserPeer("bob", "phone", "nl", subnet)
+	if p, err := s.PeerByID(c.ID); err != nil || p.User != "bob" || p.PrivateKey != c.PrivateKey {
+		t.Errorf("PeerByID(%d) = %+v, %v", c.ID, p, err)
+	}
+	if _, err := s.PeerByID(c.ID + 100); !errors.Is(err, ErrNotFound) {
+		t.Errorf("PeerByID of a missing peer: %v", err)
+	}
+	peers, err := s.UserPeers("alice")
+	if err != nil || len(peers) != 2 || peers[0].ID != b.ID || peers[1].ID != a.ID {
+		t.Errorf("UserPeers(alice) = %+v, %v; want laptop, then phone", peers, err)
+	}
+	if peers, err := s.UserPeers("carol"); err != nil || len(peers) != 0 {
+		t.Errorf("UserPeers(carol) = %+v, %v", peers, err)
+	}
+	if _, err := s.User("carol"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("User(carol): %v", err)
+	}
+}

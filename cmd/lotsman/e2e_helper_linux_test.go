@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"net/netip"
 	"os"
 	"os/exec"
@@ -39,8 +40,11 @@ func TestMain(m *testing.M) {
 	// Another lotsman process, such as a second serve (see runLotsman).
 	if os.Getenv("LOTSMAN_TEST_RUN") == "1" {
 		if os.Getenv("LOTSMAN_TEST_OPERATOR") == "1" {
-			// A panel that signs everyone in, in this test binary only.
-			newAuthenticator = func(*web.OperatorAuth) web.Authenticator { return everyoneOperator{} }
+			// A panel that signs everyone in as an operator, in this test
+			// binary only; users still need their links.
+			newAuthenticator = func(_ *web.OperatorAuth, daemon http.RoundTripper) web.Authenticator {
+				return web.WithLinks(everyoneOperator{}, web.NewLinks(web.DaemonResolver(daemon)))
+			}
 		}
 		if err := run(os.Args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "lotsman:", err)

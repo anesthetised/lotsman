@@ -81,3 +81,9 @@ func tierOf(p config.Profile, u config.Upstream) int {
 	}
 	return -1
 }
+
+// Allows reports whether a peer with the profile may ever use u: an upstream
+// in none of its tiers is never selected for it.
+func Allows(profile config.Profile, u config.Upstream) bool {
+	return tierOf(profile, u) >= 0
+}

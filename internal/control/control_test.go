@@ -33,6 +33,7 @@ type fakeSource struct {
 	ProfileSource
 	ConnectionSource
 	HistorySource // none unless a test sets one
+	Users         // none unless a test sets one
 
 	ready chan struct{}
 	st    daemon.Status
@@ -265,6 +266,22 @@ func TestUnimplemented(t *testing.T) {
 		lotsmanv1connect.ProfileServiceDeleteProcedure,
 		lotsmanv1connect.HistoryServiceUpstreamProcedure,
 		lotsmanv1connect.HistoryServicePeerProcedure,
+		lotsmanv1connect.UserServiceListProcedure,
+		lotsmanv1connect.UserServiceAddDeviceProcedure,
+		lotsmanv1connect.UserServiceRemoveDeviceProcedure,
+		lotsmanv1connect.UserServiceRemoveUserProcedure,
+		lotsmanv1connect.UserServiceGetConfigProcedure,
+		lotsmanv1connect.UserServiceIssueLinkProcedure,
+		lotsmanv1connect.UserServiceRevokeLinkProcedure,
+		lotsmanv1connect.UserSelfServiceResolveLinkProcedure,
+		lotsmanv1connect.UserSelfServiceGetProcedure,
+		lotsmanv1connect.UserSelfServiceWatchProcedure,
+		lotsmanv1connect.UserSelfServiceAddDeviceProcedure,
+		lotsmanv1connect.UserSelfServiceRemoveDeviceProcedure,
+		lotsmanv1connect.UserSelfServiceGetConfigProcedure,
+		lotsmanv1connect.UserSelfServiceListProfilesProcedure,
+		lotsmanv1connect.UserSelfServiceUpstreamHistoryProcedure,
+		lotsmanv1connect.UserSelfServicePeerHistoryProcedure,
 	}
 	s := NewServer(newFakeSource(daemon.Status{}))
 	var registered []string

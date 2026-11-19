@@ -1,7 +1,7 @@
 # Lotsman web panel (frontend)
 
 The browser UI served by `lotsman web`: the operator console under `/admin` and
-the user page behind a secret link, `/u/<token>`. It talks Connect to the panel
+the user page behind a secret link, `/u#<token>`. It talks Connect to the panel
 (`/api`), which forwards the daemon control API from [`api/`](../api).
 
 Stack: Solid 2, @solidjs/router 2, Kobalte 2 (behind our own components in
@@ -89,8 +89,13 @@ preferences, else English. Units come from `Intl`, not the dictionaries.
 - Charts are canvas: give them a caption with the current values.
 - No external assets (system fonts, inline SVG icons) and no inline scripts or
   styles in the build, so the page runs under `script-src 'self'; style-src 'self'`.
-- The user page carries a secret in its URL: `<meta name="referrer" content="no-referrer">`
-  is in `index.html`, and the panel should also send `Referrer-Policy: no-referrer`.
+- The user page carries a secret in its URL, in the fragment (`/u#<token>`), which the browser
+  never sends to the server. The page reads it from `location.hash` and keeps it in memory only,
+  never in storage; it stays in the address bar for bookmarks. A missing or malformed token shows
+  a message instead of the page. `<meta name="referrer" content="no-referrer">` is in
+  `index.html`, and the panel also sends `Referrer-Policy: no-referrer`. The page's calls carry
+  the token as `Authorization: Bearer <token>` (`withLink` in `src/api/link.ts`); the panel
+  resolves it and never forwards it. The fake ignores it.
 
 ## Pins and patches
 

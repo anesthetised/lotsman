@@ -26,7 +26,7 @@ import (
 // MinInterval is the shortest, and the default, interval between snapshots.
 const MinInterval = time.Second
 
-// Source is what the API reads: the daemon, or a fake in tests.
+// Source is what the API reads and changes: the daemon, or a fake in tests.
 type Source interface {
 	Ready() <-chan struct{}
 	Status() daemon.Status
@@ -35,6 +35,7 @@ type Source interface {
 	ProfileSource
 	ConnectionSource
 	HistorySource
+	Users
 }
 
 // NewServer registers every service of the API. An RPC whose issue has not
@@ -45,8 +46,8 @@ func NewServer(src Source) *connect.Server {
 	lotsmanv1connect.RegisterHistoryServiceHandler(s, historyService{src})
 	lotsmanv1connect.RegisterConnectionServiceHandler(s, connectionService{src, flows.Conntrack{}})
 	lotsmanv1connect.RegisterProfileServiceHandler(s, profileService{src})
-	lotsmanv1connect.RegisterUserServiceHandler(s, lotsmanv1connect.UnimplementedUserServiceHandler{})
-	lotsmanv1connect.RegisterUserSelfServiceHandler(s, lotsmanv1connect.UnimplementedUserSelfServiceHandler{})
+	lotsmanv1connect.RegisterUserServiceHandler(s, userService{src})
+	lotsmanv1connect.RegisterUserSelfServiceHandler(s, newUserSelfService(src))
 	return s
 }
 
@@ -62,6 +63,16 @@ type statusService struct{ src Source }
 // Watch sends a snapshot as soon as the daemon is ready and then every
 // interval, until the client goes away or the daemon stops (both cancel ctx).
 func (s statusService) Watch(ctx context.Context, req *lotsmanv1.WatchStatusRequest, stream lotsmanv1connect.StatusServiceWatchServerStream) error {
+	next := func() (*lotsmanv1.StatusSnapshot, error) {
+		return snapshot(time.Now(), s.src.ClientMTU(), s.src.Status(), s.src.Traffic()), nil
+	}
+	return streamSnapshots(ctx, req, s.src.Ready(), next, stream.Send)
+}
+
+// streamSnapshots sends next's snapshot once ready is closed and then every
+// requested interval, until next fails or ctx is done.
+func streamSnapshots(ctx context.Context, req *lotsmanv1.WatchStatusRequest, ready <-chan struct{},
+	next func() (*lotsmanv1.StatusSnapshot, error), send func(*lotsmanv1.StatusSnapshot) error) error {
 	interval, err := watchInterval(req.GetInterval())
 	if err != nil {
 		return err
@@ -69,12 +80,16 @@ func (s statusService) Watch(ctx context.Context, req *lotsmanv1.WatchStatusRequ
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case <-s.src.Ready():
+	case <-ready:
 	}
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for {
-		if err := stream.Send(snapshot(time.Now(), s.src.ClientMTU(), s.src.Status(), s.src.Traffic())); err != nil {
+		s, err := next()
+		if err != nil {
+			return err
+		}
+		if err := send(s); err != nil {
 			return err
 		}
 		select {
