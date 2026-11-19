@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/anesthetised/lotsman/internal/config"
@@ -26,7 +25,12 @@ const usage = `Usage: lotsman [-config FILE] [-log-level LEVEL] <command> [args]
 Commands:
   version                     print the build version
   serve                       run the gateway (Linux, root)
-  config check                validate the config and the upstream configs
+  config check                validate the config, the upstream configs and the profiles
+  profile list                list profiles, their peers and preference tiers
+  profile add NAME [TIER...]  create profile NAME; each TIER is one preference, best first
+  profile set NAME [TIER...]  replace the tiers of profile NAME
+  profile rm NAME             remove a profile no peer uses
+  profile import FILE         copy the profiles: key of an older lotsman.yaml into the store
   user add NAME -profile P [-device D] [-qr]
                               create a config for NAME's device D (default "default") with profile P
   user show NAME -profile P [-device D] [-qr]
@@ -35,6 +39,9 @@ Commands:
   user rm NAME [-device D] [-profile P]
                               remove one config, every config of a device, or the whole user
   upstream status             show upstream health as last written by the daemon
+
+A TIER is key=value pairs joined by commas, with keys geo, provider and tag, all of
+which an upstream must match (geo=NL,provider=acme), or "any". No TIER means any upstream.
 
 Config file: -config, or $LOTSMAN_CONFIG, or /etc/lotsman/lotsman.yaml
 Log level (serve): -log-level, or $LOTSMAN_LOG_LEVEL, or info; one of debug, info, warn, error
@@ -70,14 +77,14 @@ func run(args []string) error {
 		return errors.New("no command")
 	}
 	cmd := rest[0]
-	if len(rest) > 1 && (cmd == "user" || cmd == "config" || cmd == "upstream") {
+	if len(rest) > 1 && (cmd == "user" || cmd == "profile" || cmd == "config" || cmd == "upstream") {
 		cmd += " " + rest[1]
 		rest = rest[1:]
 	}
 	rest = rest[1:]
 
 	switch cmd {
-	case "version", "serve", "config check", "user list", "upstream status":
+	case "version", "serve", "config check", "user list", "profile list", "upstream status":
 		if len(rest) > 0 {
 			return fmt.Errorf("%s: unexpected argument %q", cmd, rest[0])
 		}
@@ -99,6 +106,14 @@ func run(args []string) error {
 		return userList(*configPath)
 	case "user rm":
 		return userRemove(*configPath, rest)
+	case "profile list":
+		return profileList(*configPath)
+	case "profile add", "profile set":
+		return profilePut(*configPath, cmd, rest)
+	case "profile rm":
+		return profileRemove(*configPath, rest)
+	case "profile import":
+		return profileImport(*configPath, rest)
 	case "upstream status":
 		return upstreamStatus(*configPath)
 	}
@@ -167,7 +182,7 @@ func openState(cfg *config.Config) (*env, error) {
 	if err != nil {
 		return nil, err
 	}
-	st, err := store.Open(filepath.Join(cfg.StateDir, "lotsman.db"))
+	st, err := store.Open(dbPath(cfg.StateDir))
 	if err != nil {
 		return nil, err
 	}

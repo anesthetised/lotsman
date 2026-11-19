@@ -34,6 +34,41 @@ func capture(t *testing.T, args ...string) (string, error) {
 	return buf.String(), err
 }
 
+// mustRun is capture for commands that must succeed.
+func mustRun(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := capture(t, args...)
+	if err != nil {
+		t.Fatalf("lotsman %q: %v", args, err)
+	}
+	return out
+}
+
+// captureStderr returns what f wrote to stderr.
+func captureStderr(t *testing.T, f func()) string {
+	t.Helper()
+	r, w, _ := os.Pipe()
+	old := os.Stderr
+	os.Stderr = w
+	f()
+	w.Close()
+	os.Stderr = old
+	var buf bytes.Buffer
+	io.Copy(&buf, r)
+	return buf.String()
+}
+
+// tableRow returns the fields of the first line of a CLI table whose first
+// column is key, or nil.
+func tableRow(table, key string) []string {
+	for line := range strings.Lines(table) {
+		if f := strings.Fields(line); len(f) > 0 && f[0] == key {
+			return f
+		}
+	}
+	return nil
+}
+
 func writeProviderConf(t *testing.T, dir, name string) string {
 	t.Helper()
 	key, _ := awgconf.GeneratePrivateKey()
@@ -56,8 +91,9 @@ func testConfig(t *testing.T) string {
 endpoint: vpn.example.org:51820
 state_dir: `+filepath.Join(dir, "state")+`
 upstreams: [{name: nl, conf: `+up+`, geo: NL}]
-profiles: [{name: nl, prefer: [{geo: NL}]}, {name: auto}]
 `), 0o600)
+	mustRun(t, "-config", path, "profile", "add", "nl", "geo=NL")
+	mustRun(t, "-config", path, "profile", "add", "auto")
 	return path
 }
 

@@ -136,12 +136,11 @@ state_dir: `+filepath.Join(dir, "state")+`
 upstreams:
   - {name: nl, conf: `+filepath.Join(dir, "nl.conf")+`, provider: awg}
   - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, provider: outline}
-profiles:
-  - {name: p, prefer: [{provider: outline}, {provider: awg}]}
-  - {name: a, prefer: [{provider: awg}]}
 health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_after: 10, up_after: 1}
 metrics: {listen: 127.0.0.1:19100}
 `), 0o600)
+	mustRun(t, "-config", cfgPath, "profile", "add", "p", "provider=outline", "provider=awg")
+	mustRun(t, "-config", cfgPath, "profile", "add", "a", "provider=awg")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)

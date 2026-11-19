@@ -25,8 +25,6 @@ state_dir: %[1]s
 upstreams:
   - {name: nl, conf: %[1]s/nl.conf, geo: NL}
   - {name: ol, kind: outline, conf: %[1]s/ol.key, geo: OL%[2]s}
-profiles:
-  - {name: px, prefer: [{geo: OL}, {geo: NL}]}
 health: {interval: 30ms, probe: 1.1.1.1:443, dns: 9.9.9.9:53, down_after: 2, up_after: 1}
 `
 
@@ -47,6 +45,9 @@ func newProxyHarness(t *testing.T) (*harness, *fakeResolver) {
 	}
 	h.cfg = proxyHarnessConfig(t, h.dir, "")
 	h.d.cfg = h.cfg
+	if err := h.st.AddProfile(config.Profile{Name: "px", Prefer: []config.Match{{Geo: "OL"}, {Geo: "NL"}}}); err != nil {
+		t.Fatal(err)
+	}
 	h.setHealthy("lm-up-ol", true)
 	return h, dns
 }

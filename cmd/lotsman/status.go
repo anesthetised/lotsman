@@ -4,7 +4,9 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -15,10 +17,12 @@ import (
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/proxy"
+	"github.com/anesthetised/lotsman/internal/store"
 )
 
 func pidPath(stateDir string) string    { return filepath.Join(stateDir, "lotsman.pid") }
 func statusPath(stateDir string) string { return filepath.Join(stateDir, "status.json") }
+func dbPath(stateDir string) string     { return filepath.Join(stateDir, "lotsman.db") }
 
 // statusFile is what the daemon writes after every health round.
 type statusFile struct {
@@ -77,6 +81,15 @@ func checkConfig(configPath string) error {
 	if err != nil {
 		return err
 	}
+	profiles, used, err := storedProfiles(cfg.StateDir)
+	if err != nil {
+		return err
+	}
+	// The daemon refuses to start with a profile that has no upstream to use.
+	profileWarnings, err := cfg.CheckProfiles(profiles)
+	if err != nil {
+		return err
+	}
 	// Dynamic keys first, each bounded like the daemon's fetch, so a slow
 	// URL does not eat the lookup budget below.
 	ups := make([]*daemon.Upstream, len(cfg.Upstreams))
@@ -91,7 +104,7 @@ func checkConfig(configPath string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	var warnings []string
+	warnings := profileWarnings
 	for i, u := range cfg.Upstreams {
 		up := ups[i]
 		if err := fetchErrs[i]; err != nil {
@@ -116,9 +129,13 @@ func checkConfig(configPath string) error {
 		}
 		fmt.Println(line)
 	}
-	for _, p := range cfg.Profiles {
-		fmt.Printf("profile  %-10s prefer %v\n", p.Name, p.Prefer)
+	for _, p := range profiles {
+		fmt.Printf("profile  %-10s prefer %s\n", p.Name, formatTiers(p.Prefer))
 	}
+	if len(profiles) == 0 {
+		warnings = append(warnings, "no profiles yet; add one with `profile add NAME [TIER...]`")
+	}
+	warnings = append(warnings, missingProfiles(profiles, used)...)
 	health := "health   probe " + cfg.Health.Probe.String()
 	if slices.ContainsFunc(cfg.Upstreams, config.Upstream.Proxy) {
 		health += "  dns " + cfg.Health.DNS.String()
@@ -127,9 +144,36 @@ func checkConfig(configPath string) error {
 	if t := cfg.Health.Transfer; t != nil {
 		fmt.Printf("transfer url %s  min_bytes %d  timeout %s  interval %s ±20%%\n", t.URL, t.MinBytes, t.Timeout, t.Interval)
 	}
-	for _, w := range append(cfg.Warnings(), warnings...) {
+	for _, w := range warnings {
 		fmt.Println("warning:", w)
 	}
 	fmt.Println("config OK")
 	return nil
+}
+
+// storedProfiles reads the profiles and how many peers use each, without
+// creating a database that does not exist yet.
+func storedProfiles(stateDir string) ([]config.Profile, map[string]int, error) {
+	path := dbPath(stateDir)
+	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+		return nil, nil, nil
+	}
+	st, err := store.Open(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer st.Close()
+	profiles, err := st.ListProfiles()
+	if err != nil {
+		return nil, nil, err
+	}
+	peers, err := st.ListPeers()
+	if err != nil {
+		return nil, nil, err
+	}
+	used := map[string]int{}
+	for _, p := range peers {
+		used[p.Profile]++
+	}
+	return profiles, used, nil
 }

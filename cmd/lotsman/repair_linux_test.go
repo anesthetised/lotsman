@@ -58,11 +58,10 @@ endpoint: 127.0.0.1:51820
 state_dir: `+filepath.Join(dir, "state")+`
 upstreams:
   - {name: nl, conf: `+filepath.Join(dir, "nl.conf")+`, geo: NL}
-profiles:
-  - {name: nl, prefer: [{geo: NL}]}
 health: {interval: 1h, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 metrics: {listen: 127.0.0.1:19100}
 `), 0o600)
+	mustRun(t, "-config", cfgPath, "profile", "add", "nl", "geo=NL")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)

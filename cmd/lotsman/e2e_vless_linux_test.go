@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -88,16 +87,11 @@ state_dir: ` + filepath.Join(dir, "state") + `
 upstreams:
   - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, provider: awg}
   - {name: vl, kind: vless, conf: ` + filepath.Join(dir, "vl.key") + `, provider: vless}
-profiles:
-  - {name: p, prefer: [{provider: vless}, {provider: awg}]}
 health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_after: 2, up_after: 1}
 metrics: {listen: 127.0.0.1:19100}
 `
-	awgFirst := strings.Replace(baseConfig, "prefer: [{provider: vless}, {provider: awg}]", "prefer: [{provider: awg}, {provider: vless}]", 1)
-	if awgFirst == baseConfig {
-		t.Fatal("test setup: could not derive the awg-first config")
-	}
 	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
+	mustRun(t, "-config", cfgPath, "profile", "add", "p", "provider=vless", "provider=awg")
 
 	out, err := capture(t, "-config", cfgPath, "config", "check")
 	if err != nil || !strings.Contains(out, "lm-up-vl  kind vless") || !strings.Contains(out, transport) ||
@@ -150,8 +144,7 @@ metrics: {listen: 127.0.0.1:19100}
 	if via, err := long.ping("a"); err != nil || via != "vl" {
 		t.Fatalf("stream before move: %q, %v", via, err)
 	}
-	os.WriteFile(cfgPath, []byte(awgFirst), 0o600)
-	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	mustRun(t, "-config", cfgPath, "profile", "set", "p", "provider=awg", "provider=vless")
 	eventually(t, "new connections via nl", 15*time.Second, exitsVia("nl"))
 	if via, err := long.ping("b"); err != nil || via != "vl" {
 		t.Errorf("pinned stream after move: %q, %v (want vl)", via, err)
@@ -168,8 +161,7 @@ metrics: {listen: 127.0.0.1:19100}
 
 	// VLESS blocked (it uses TCP only, UDP included): fail over to AWG,
 	// and back.
-	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
-	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	mustRun(t, "-config", cfgPath, "profile", "set", "p", "provider=vless", "provider=awg")
 	eventually(t, "vless preferred again", 15*time.Second, exitsVia("vl"))
 	restore = blockLoopback(t, "tcp", vl.Addr().Port())
 	eventually(t, "vl down", 15*time.Second, func() bool {

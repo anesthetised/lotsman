@@ -66,6 +66,7 @@ sudo install -m 0755 dist/lotsman-linux-amd64 /usr/local/bin/lotsman
 sudo mkdir -p /etc/lotsman/upstreams
 sudo cp deploy/lotsman.example.yaml /etc/lotsman/lotsman.yaml
 # put your provider configs into /etc/lotsman/upstreams/ and edit lotsman.yaml
+sudo lotsman profile add nl geo=NL         # profiles live in the database, not in lotsman.yaml
 sudo lotsman config check
 sudo cp deploy/lotsman.service /etc/systemd/system/
 sudo systemctl enable --now lotsman

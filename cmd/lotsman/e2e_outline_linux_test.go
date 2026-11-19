@@ -118,16 +118,11 @@ state_dir: ` + filepath.Join(dir, "state") + `
 upstreams:
   - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, provider: awg}
   - {name: ol, kind: outline, conf: ` + filepath.Join(dir, "ol.key") + `, provider: outline}
-profiles:
-  - {name: p, prefer: [{provider: outline}, {provider: awg}]}
 health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_after: 2, up_after: 1}
 metrics: {listen: 127.0.0.1:19100}
 `
-	awgFirst := strings.Replace(baseConfig, "prefer: [{provider: outline}, {provider: awg}]", "prefer: [{provider: awg}, {provider: outline}]", 1)
-	if awgFirst == baseConfig {
-		t.Fatal("test setup: could not derive the awg-first config")
-	}
 	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
+	mustRun(t, "-config", cfgPath, "profile", "add", "p", "provider=outline", "provider=awg")
 
 	out, err := capture(t, "-config", cfgPath, "config", "check")
 	if err != nil || !strings.Contains(out, "lm-up-ol  kind outline") || strings.Contains(out, "outline-secret") {
@@ -179,8 +174,7 @@ metrics: {listen: 127.0.0.1:19100}
 	if via, err := long.ping("a"); err != nil || via != "ol" {
 		t.Fatalf("stream before move: %q, %v", via, err)
 	}
-	os.WriteFile(cfgPath, []byte(awgFirst), 0o600)
-	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	mustRun(t, "-config", cfgPath, "profile", "set", "p", "provider=awg", "provider=outline")
 	eventually(t, "new connections via nl", 15*time.Second, exitsVia("nl"))
 	if via, err := long.ping("b"); err != nil || via != "ol" {
 		t.Errorf("pinned stream after move: %q, %v (want ol)", via, err)
@@ -196,8 +190,7 @@ metrics: {listen: 127.0.0.1:19100}
 	eventually(t, "back via nl", 15*time.Second, exitsVia("nl"))
 
 	// Outline blocked: fail over to AWG, and back.
-	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
-	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	mustRun(t, "-config", cfgPath, "profile", "set", "p", "provider=outline", "provider=awg")
 	eventually(t, "outline preferred again", 15*time.Second, exitsVia("ol"))
 	restore = blockOutline(t, ss)
 	eventually(t, "ol down", 15*time.Second, func() bool {
@@ -277,10 +270,9 @@ endpoint: 127.0.0.1:51820
 state_dir: `+filepath.Join(dir, "state")+`
 upstreams:
   - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, provider: outline}
-profiles:
-  - {name: p, prefer: [{provider: outline}]}
 health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_after: 2, up_after: 1}
 `), 0o600)
+	mustRun(t, "-config", cfgPath, "profile", "add", "p", "provider=outline")
 
 	out, err := capture(t, "-config", cfgPath, "config", "check")
 	if err != nil || !strings.Contains(out, "lm-up-ol  kind outline") || !strings.Contains(out, "dynamic  shadowsocks") ||

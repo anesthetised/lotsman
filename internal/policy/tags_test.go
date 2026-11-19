@@ -10,7 +10,7 @@ import (
 // A tag groups upstreams from different countries into one tier that is picked
 // by latency, which a geo or provider matcher alone cannot express.
 func TestSelectTagTiersFromConfig(t *testing.T) {
-	cfg, err := config.Parse([]byte(`
+	cfg, profiles, err := config.ParseLegacy([]byte(`
 endpoint: vpn.example.org:51820
 upstreams:
   - {name: lt, conf: /lt, geo: LT, tags: [near, eu]}
@@ -24,8 +24,7 @@ profiles:
 	if err != nil {
 		t.Fatal(err)
 	}
-	p, _ := cfg.Profile("p")
-	both, _ := cfg.Profile("both")
+	p, both := profiles[0], profiles[1]
 	ups := func(lt, pl, nl, us bool) []Upstream {
 		return []Upstream{
 			{Upstream: cfg.Upstreams[0], Healthy: lt, Latency: 40 * time.Millisecond},

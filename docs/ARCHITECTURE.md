@@ -21,7 +21,7 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 | AWG runtime | `amneziawg-go` embedded as a library | No open-source AWG 2.0 kernel module exists (see below), so crypto is userspace regardless. |
 | Forwarding | Kernel: real TUNs, policy routing (`ip rule`/tables), nftables | NAT, conntrack and MSS clamping come from the kernel; the Go code stays small. Linux only. |
 | Preference | One peer per (user, profile) | The preference is encoded in which key the user connects with; no side channel needed. |
-| State | YAML for upstreams/profiles, SQLite for users/peers | Operators edit and version the YAML; users are created at runtime. |
+| State | YAML for upstreams, SQLite for profiles, users and peers | Operators edit and version the YAML; profiles and users change at runtime (CLI now, the web panel later) and apply without a restart. |
 | Fail-closed | Mandatory | User traffic must never leave via the host's own IP. nftables admits only authorized peers from `lm0` into an `lm-up-*`; all other forwarding from `lm0` is dropped. |
 | Host firewalls | Accept rules inserted into foreign forward chains | Docker's `FORWARD DROP` and ufw would otherwise silently drop forwarded traffic; same approach as Tailscale. |
 | Proxy upstreams | A userspace TCP/IP stack per upstream on its own TUN, flows re-originated through a pluggable dialer (Shadowsocks, VLESS + REALITY through embedded xray-core), each in its own unprivileged helper process | Keeps kernel routing, pinning and fail-closed identical for every upstream kind; a panic in the stack takes down one upstream, not the gateway; see [Proxy upstreams](#proxy-upstreams-outline). |

@@ -35,23 +35,27 @@ func newRetryHarness(t *testing.T) *retryHarness {
 	logs := &bytes.Buffer{}
 	h.d.log = slog.New(slog.NewTextHandler(logs, nil))
 	h.setHealthy("lm-up-fr", true)
-	if _, err := h.st.CreateUser("alice"); err != nil {
-		t.Fatal(err)
-	}
-	peer, err := h.st.AddPeer("alice", store.DefaultDevice, "fr", h.cfg.Subnet)
-	if err != nil {
-		t.Fatal(err)
-	}
 	providerConf(t, h.dir, "fr", "10.12.0.2/32", 0)
 	text := fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir)
 	text = strings.Replace(text, "  - {name: de,", "  - {name: fr, conf: "+h.dir+"/fr.conf, geo: FR}\n  - {name: de,", 1)
-	text = strings.Replace(text, "profiles:\n", "profiles:\n  - {name: fr, prefer: [{geo: FR}]}\n", 1)
 	withFR, err := config.Parse([]byte(text))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(h.d.stop)
 	if err := h.d.start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	// As `lotsman profile add` stores it once fr is in the config file but
+	// before the reload; the start would refuse a profile nothing running matches.
+	if err := h.st.AddProfile(config.Profile{Name: "fr", Prefer: []config.Match{{Geo: "FR"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.st.CreateUser("alice"); err != nil {
+		t.Fatal(err)
+	}
+	peer, err := h.st.AddPeer("alice", store.DefaultDevice, "fr", h.cfg.Subnet)
+	if err != nil {
 		t.Fatal(err)
 	}
 	return &retryHarness{harness: h, logs: logs, peer: peer, withFR: withFR}
@@ -173,6 +177,13 @@ func TestRetryIgnoresRemovedUpstream(t *testing.T) {
 	}
 	if err := h.d.Reload(context.Background(), h.withFR); err == nil {
 		t.Fatal("Reload accepted a missing provider file")
+	}
+	// Dropping fr for good: a profile nothing else matches goes first.
+	if err := h.st.DeletePeer("alice", store.DefaultDevice, "fr"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.st.DeleteProfile("fr"); err != nil {
+		t.Fatal(err)
 	}
 	if err := h.d.Reload(context.Background(), h.harness.cfg); err != nil {
 		t.Fatal(err)

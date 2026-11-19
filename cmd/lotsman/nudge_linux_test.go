@@ -1,8 +1,6 @@
 package main
 
 import (
-	"bytes"
-	"io"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -22,20 +20,6 @@ func envWithPID(t *testing.T, pid int) *env {
 		t.Fatal(err)
 	}
 	return &env{cfg: &config.Config{StateDir: dir}}
-}
-
-// captureStderr returns what f wrote to stderr.
-func captureStderr(t *testing.T, f func()) string {
-	t.Helper()
-	r, w, _ := os.Pipe()
-	old := os.Stderr
-	os.Stderr = w
-	f()
-	w.Close()
-	os.Stderr = old
-	var buf bytes.Buffer
-	io.Copy(&buf, r)
-	return buf.String()
 }
 
 // `user add` and `user rm` must ask the daemon to reconcile only: SIGHUP

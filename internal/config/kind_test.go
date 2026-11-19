@@ -12,8 +12,6 @@ endpoint: vpn.example.org:51820
 upstreams:
   - {name: nl, conf: /etc/lotsman/upstreams/nl.conf}
   - {name: ol, kind: outline, conf: /etc/lotsman/upstreams/ol.key, max_flows: 100}
-profiles:
-  - {name: auto}
 `
 
 func TestUpstreamKinds(t *testing.T) {

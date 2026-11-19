@@ -51,11 +51,10 @@ endpoint: 127.0.0.1:51820
 state_dir: `+filepath.Join(dir, "state")+`
 upstreams:
   - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, provider: outline}
-profiles:
-  - {name: p, prefer: [{provider: outline}]}
 health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_after: 2, up_after: 1}
 metrics: {listen: 127.0.0.1:19100}
 `), 0o600)
+	mustRun(t, "-config", cfgPath, "profile", "add", "p", "provider=outline")
 
 	out, err := capture(t, "-config", cfgPath, "config", "check")
 	endpoint := fmt.Sprintf("endpoint 127.0.0.1:%d", front.Addr().Port()) // localhost, resolved

@@ -229,17 +229,6 @@ func eventually(t *testing.T, what string, timeout time.Duration, cond func() bo
 	t.Fatalf("timed out waiting for %s", what)
 }
 
-// tableRow returns the fields of the first line of a CLI table whose first
-// column is key, or nil.
-func tableRow(table, key string) []string {
-	for line := range strings.Lines(table) {
-		if f := strings.Fields(line); len(f) > 0 && f[0] == key {
-			return f
-		}
-	}
-	return nil
-}
-
 // Block only this provider's outer UDP endpoint inside the disposable container.
 func blockProviderEndpoint(t *testing.T, port uint16) func() {
 	t.Helper()
@@ -287,12 +276,11 @@ state_dir: ` + filepath.Join(dir, "state") + `
 upstreams:
   - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, geo: NL}
   - {name: de, conf: ` + filepath.Join(dir, "de.conf") + `, geo: DE}
-profiles:
-  - {name: eu, prefer: [{geo: NL}, {geo: DE}]}
 health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 metrics: {listen: 127.0.0.1:19100}
 `
 	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
+	mustRun(t, "-config", cfgPath, "profile", "add", "eu", "geo=NL", "geo=DE")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
@@ -422,12 +410,12 @@ metrics: {listen: 127.0.0.1:19100}
 
 	// Flow pinning: a connection opened through NL survives the profile
 	// being repointed at DE while NL is still alive; new connections use DE.
+	// `profile set` applies through the store and SIGUSR1, without a reload.
 	long := c.openStream(t)
 	if via, err := long.ping("a"); err != nil || via != "nl" {
 		t.Fatalf("stream before move: %q, %v", via, err)
 	}
-	os.WriteFile(cfgPath, []byte(strings.Replace(baseConfig, "prefer: [{geo: NL}, {geo: DE}]", "prefer: [{geo: DE}, {geo: NL}]", 1)), 0o600)
-	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	mustRun(t, "-config", cfgPath, "profile", "set", "eu", "geo=DE", "geo=NL")
 	eventually(t, "new connections via de", 15*time.Second, func() bool {
 		got, err := c.exitVia(2 * time.Second)
 		return err == nil && got == "de"
@@ -435,8 +423,7 @@ metrics: {listen: 127.0.0.1:19100}
 	if via, err := long.ping("b"); err != nil || via != "nl" {
 		t.Errorf("pinned stream after move: %q, %v (want nl)", via, err)
 	}
-	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
-	syscall.Kill(os.Getpid(), syscall.SIGHUP)
+	mustRun(t, "-config", cfgPath, "profile", "set", "eu", "geo=NL", "geo=DE")
 	eventually(t, "back via nl", 15*time.Second, func() bool {
 		got, err := c.exitVia(2 * time.Second)
 		return err == nil && got == "nl"
@@ -447,9 +434,9 @@ metrics: {listen: 127.0.0.1:19100}
 	}
 
 	// NL is removed from the config and the daemon reloaded on SIGHUP:
-	// traffic moves to DE without the client reconnecting, and the NL TUN is gone.
+	// traffic moves to DE without the client reconnecting, and the NL TUN is
+	// gone. The profile's NL tier is left empty, which is only a warning.
 	withoutNL := strings.Replace(baseConfig, "  - {name: nl, conf: "+filepath.Join(dir, "nl.conf")+", geo: NL}\n", "", 1)
-	withoutNL = strings.Replace(withoutNL, "prefer: [{geo: NL}, {geo: DE}]", "prefer: [{geo: DE}]", 1)
 	if withoutNL == baseConfig {
 		t.Fatal("test setup: could not derive the config without nl")
 	}
