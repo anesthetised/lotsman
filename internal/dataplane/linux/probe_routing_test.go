@@ -149,6 +149,36 @@ func TestUninstallRemovesInstalledUsers(t *testing.T) {
 	}
 }
 
+// Uninstall restores conntrack accounting to the value the manifest recorded,
+// and leaves it alone without one; a failed restore does not stop it.
+func TestUninstallRestoresConntrackAccounting(t *testing.T) {
+	if _, err := os.Stat("/proc/sys/net/netfilter/nf_conntrack_acct"); err != nil {
+		t.Skip("nf_conntrack is not loaded")
+	}
+	for _, tc := range []struct {
+		name, manifest, sysctl, want string
+	}{
+		{"recorded", "nf_conntrack_acct_before=0\n", "exit 0", "-qw net.netfilter.nf_conntrack_acct=0\n"},
+		{"not recorded", "nf_conntrack_acct_before=\n", "exit 0", ""},
+		{"restore fails", "nf_conntrack_acct_before=0\n", "exit 1", "-qw net.netfilter.nf_conntrack_acct=0\n"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			log := filepath.Join(t.TempDir(), "sysctl.log")
+			stubs := map[string]string{"sysctl": "#!/bin/sh\necho \"$@\" >> " + log + "\n" + tc.sysctl + "\n"}
+			out, err := runUninstallManifest(t, tc.manifest, stubs)
+			if err != nil {
+				t.Fatalf("uninstall: %v\n%s", err, out)
+			}
+			if got, _ := os.ReadFile(log); string(got) != tc.want {
+				t.Errorf("sysctl calls = %q, want %q", got, tc.want)
+			}
+			if failed := strings.Contains(string(out), "cannot restore"); failed != (tc.sysctl == "exit 1") {
+				t.Errorf("output: %s", out)
+			}
+		})
+	}
+}
+
 func TestAmbiguousProbeCleanupPreservesState(t *testing.T) {
 	for _, cleanup := range []string{"startup", "teardown", "uninstall"} {
 		t.Run(cleanup, func(t *testing.T) {
