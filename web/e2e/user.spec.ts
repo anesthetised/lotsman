@@ -11,6 +11,12 @@ test("the user page shows live speed and devices on a phone", async ({ page }) =
   const devices = page.getByRole("region", { name: "Devices" }).getByRole("heading", { level: 3 });
   await expect(devices).toHaveText(["phone", "laptop", "tv"]);
 
+  // Only the exits the user's peers use, each with its 7-day availability.
+  const exits = page.getByRole("region", { name: "Exits" });
+  await expect(exits.getByRole("listitem")).toHaveCount(2);
+  await expect(exits.getByRole("img", { name: /^Availability of lv-1 over 7 days: \d/ })).toBeVisible();
+  await expect(exits.getByRole("img", { name: /^Availability of nl-1 over 7 days: \d/ })).toBeVisible();
+
   // Mobile-first: nothing scrolls sideways.
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(overflow).toBeLessThanOrEqual(0);

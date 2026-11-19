@@ -1,22 +1,21 @@
 // Placeholder operator overview (#136 builds the real console): live upstream
 // table, a total-rate chart, per-upstream sparklines and 7-day availability.
 
-import { durationMs, timestampFromMs, timestampMs } from "@bufbuild/protobuf/wkt";
+import { durationMs, timestampMs } from "@bufbuild/protobuf/wkt";
 import { createMemo, createSignal, Errored, For, Loading, Show } from "solid-js";
 import { api } from "../../api/client";
 import { appendKeyed, appendRow, createLive, num } from "../../api/live";
-import type { PeerStatus, UpstreamStatus } from "../../gen/lotsman/v1/lotsman_pb";
+import type { PeerStatus, UpstreamStatus } from "../../gen/lotsman/v1/status_pb";
 import { useI18n } from "../../i18n";
-import { AvailabilityBar } from "../../ui/AvailabilityBar";
 import { ChoiceMenu } from "../../ui/ChoiceMenu";
 import { Dialog } from "../../ui/Dialog";
 import { LineChart } from "../../ui/LineChart";
 import { Sparkline } from "../../ui/Sparkline";
 import { StateBadge } from "../../ui/StateBadge";
+import { Availability } from "../Availability";
 import { LiveError } from "../LiveError";
 import { kindLabel, stateLabel, stateLevel } from "../upstream";
 
-const DAY = 86_400_000;
 const windows = ["1", "5", "15"] as const;
 type Window = (typeof windows)[number];
 
@@ -149,7 +148,7 @@ function UpstreamRow(props: { upstream: UpstreamStatus; trend: readonly number[]
         <Sparkline values={props.trend} label={t.admin.rateTrend(u().name)} />
       </td>
       <td class="w-44 px-3 py-1.5">
-        <Availability name={u().name} />
+        <Availability name={u().name} label={t.admin.availabilityLabel(u().name)} load={api.history.upstream} />
       </td>
       <td class="px-3 py-1.5 text-right">
         <Dialog
@@ -166,24 +165,6 @@ function UpstreamRow(props: { upstream: UpstreamStatus; trend: readonly number[]
         </Dialog>
       </td>
     </tr>
-  );
-}
-
-/** The upstream's hourly availability over the last 7 days. */
-function Availability(props: { name: string }) {
-  const { t, fmt } = useI18n();
-  const history = createMemo(() => {
-    const to = Date.now();
-    return api.history.upstream({ name: props.name, from: timestampFromMs(to - 7 * DAY), to: timestampFromMs(to) });
-  });
-  const ratios = createMemo(() => history().samples.map((s) => s.upRatio));
-  const overall = () => ratios().reduce((a, b) => a + b, 0) / Math.max(ratios().length, 1);
-  return (
-    <Errored fallback={<span class="text-muted">{t.common.noData}</span>}>
-      <Loading fallback={<span class="text-muted">…</span>}>
-        <AvailabilityBar ratios={ratios()} label={`${t.admin.availabilityLabel(props.name)}: ${fmt.percent(overall())}`} />
-      </Loading>
-    </Errored>
   );
 }
 

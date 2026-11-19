@@ -1,5 +1,5 @@
 # Plugins run through `go tool`, pinned in go.mod to the runtime versions.
-# The TypeScript client (protoc-gen-es) goes here too, with its own out.
+# The TypeScript client has its own web/buf.gen.yaml (`just web-gen`).
 version: v2
 inputs:
   - directory: api

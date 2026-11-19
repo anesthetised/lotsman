@@ -61,6 +61,8 @@ export const en = {
     blocked: "No exit available",
     lastSeen: "Last seen",
     never: "never",
+    exits: "Exits",
+    availabilityLabel: (name: string) => `Availability of ${name} over 7 days`,
   },
 };
 

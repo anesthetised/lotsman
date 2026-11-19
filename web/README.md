@@ -42,7 +42,11 @@ Inside `web/`, `pnpm dev | build | typecheck | test | e2e | gen` do the same.
 simulation instead of `createConnectTransport({ baseUrl: "/api" })`. A plain
 `vite build` has the variable unset, so the fake is dropped from the bundle.
 Methods the fake does not implement answer `Unimplemented`, like the daemon
-before their issue lands.
+before their issue lands. The fake follows the contract where the pages rely
+on it: history rounds `step` up to 1 min (last 7 days) or 1 h and to at most
+2000 samples; the user's `Watch` leaves upstream `traffic`, `routed` and
+`active` unset; `UserSelfService.UpstreamHistory` carries no bytes, and both
+user history RPCs answer `NotFound` outside the user's upstreams and peers.
 
 `pnpm e2e` builds with `--mode e2e` (a production build with the fake inside,
 in `dist-e2e/`) and runs Playwright against `vite preview`, which sends the CSP
@@ -51,9 +55,12 @@ origin fails a test.
 
 ## Build output
 
-`vite build` writes to `internal/web/dist`, which the Go side embeds. Git tracks
-only the placeholder `index.html` there, so `go build` works without Node. Do not
-commit a built `index.html`: CI checks that the committed one is the placeholder.
+`vite build` writes to `internal/web/dist`, which the Go side embeds with
+`//go:embed all:dist`. The output is git-ignored; git tracks only
+`internal/web/dist/.gitkeep`, so `go build` works without Node and `lotsman web`
+then serves its own "UI not built" page. Vite empties the directory before each
+build and a small plugin in `vite.config.ts` puts `.gitkeep` back; CI checks that
+a build leaves `internal/web/dist` clean in git.
 
 ## Translations
 
@@ -76,17 +83,24 @@ preferences, else English. Units come from `Intl`, not the dictionaries.
 ## Pins and patches
 
 Every version is exact, and `minimumReleaseAge` in `pnpm-workspace.yaml` refuses
-any package (transitive ones too) published less than two weeks ago. Hence, as of
+any package (transitive ones too) published less than two weeks ago. As of
 2026-11-19:
 
-- Solid is `2.0.0-rc.21` and the router `2.0.0-next.44`: Solid 2.0.0/2.0.1 and
-  router 2.0.0 were published on 2026-11-17/18. Move to them after 2026-12-02.
-- The Vite plugin is `@solidjs/vite-plugin`; `vite-plugin-solid@3.0.0-next.*` is
-  now only a shim that re-exports it.
+- Solid is `2.0.1` (with `@solidjs/web` and `@solidjs/signals`), the router
+  `2.0.0` and the Vite plugin `@solidjs/vite-plugin@3.0.1`, which compiles with
+  `@solidjs/compiler@2.0.1` (native, with a WASM fallback). They were published
+  on 2026-11-17/18, so `minimumReleaseAgeExclude` lists exactly these versions,
+  plus `seroval@1.8.0` and `seroval-plugins@1.8.0` (2026-11-09), which
+  solid-js 2.0.1 requires. Exact versions only: a newer release of any of them
+  still waits. Remove the seroval entries after 2026-11-23 and the rest after
+  2026-12-02.
+- `@solidjs/testing-library` stays `1.0.0-rc.2`, the newest; it accepts any Solid 2.
+- `vite-plugin-solid@3.0.0-next.*` is only a shim that re-exports
+  `@solidjs/vite-plugin`.
 - pnpm is 11 (the JavaScript line): pnpm 12 ships a native binary that corepack
   0.33 cannot run.
 - Kobalte `2.0.0-alpha.4` declares Solid `2.0.0-rc.16` as its exact peer;
-  `peerDependencyRules` accepts our rc.
+  `peerDependencyRules` accepts our 2.0.1.
 - `patches/@kobalte__core@2.0.0-alpha.4.patch`: in Solid 2 a signal write is
   visible only after the flush, so Kobalte's `DismissableLayer` read its ref as
   `undefined` in `onSettled` and never registered the layer, so Escape and
@@ -94,7 +108,8 @@ any package (transitive ones too) published less than two weeks ago. Hence, as o
   placed directly in the portal breaks; our Dialog's wrapper div happens to hide
   it), so any dialog, menu, popover or select could hit it. The patch registers
   the layer from an effect on the ref. `src/ui/kobalte-patch.test.tsx` fails
-  without it. Drop the patch once a Kobalte release fixes this.
+  without it (still so on Solid 2.0.1). Drop the patch once a Kobalte release
+  fixes this.
 
 Solid 2 differs from 1.x in ways that are easy to get wrong (props are values,
 effects take two functions, writes are not visible until the flush, flow

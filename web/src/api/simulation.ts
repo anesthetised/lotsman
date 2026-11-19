@@ -4,15 +4,10 @@
 
 import { create } from "@bufbuild/protobuf";
 import { durationFromMs, timestampFromMs } from "@bufbuild/protobuf/wkt";
+import { type HistoryResponse, HistoryResponseSchema, SampleSchema } from "../gen/lotsman/v1/history_pb";
 import {
-  type DevicePeer,
-  DevicePeerSchema,
-  DeviceSchema,
-  type HistoryResponse,
-  HistoryResponseSchema,
   type PeerStatus,
   PeerStatusSchema,
-  SampleSchema,
   type StatusSnapshot,
   StatusSnapshotSchema,
   type Traffic,
@@ -20,11 +15,13 @@ import {
   UpstreamKind,
   UpstreamState,
   UpstreamStatusSchema,
-  type User,
-  UserSchema,
-} from "../gen/lotsman/v1/lotsman_pb";
+} from "../gen/lotsman/v1/status_pb";
+import { type DevicePeer, DevicePeerSchema, DeviceSchema, type User, UserSchema } from "../gen/lotsman/v1/user_pb";
 
+const MINUTE = 60_000;
 const HOUR = 3_600_000;
+const DAY = 86_400_000;
+const MAX_SAMPLES = 2000;
 const MAX_RATE = 6_000_000; // bytes per second, about 48 Mbit/s
 
 interface Upstream {
@@ -54,7 +51,7 @@ const upstreams: readonly Upstream[] = [
   { name: "lv-1", kind: UpstreamKind.AWG, geo: "LV", provider: "provider-a", state: UpstreamState.UP, latencyMs: 38 },
   { name: "al-1", kind: UpstreamKind.OUTLINE, geo: "AL", provider: "provider-b", state: UpstreamState.UP, latencyMs: 61 },
   { name: "nl-1", kind: UpstreamKind.VLESS, geo: "NL", provider: "provider-c", state: UpstreamState.DEGRADED, latencyMs: 140 },
-  { name: "de-1", kind: UpstreamKind.AWG, geo: "DE", provider: "provider-a", state: UpstreamState.DOWN, latencyMs: 0 },
+  { name: "de-1", kind: UpstreamKind.AWG, geo: "DE", provider: "provider-a", state: UpstreamState.DOWN, latencyMs: 45 },
 ];
 
 const peerSeeds = [
@@ -130,12 +127,17 @@ export class Simulation {
     }
   }
 
-  /** The current state, optionally limited to the peers `include` accepts and their upstreams. */
-  snapshot(include: (peer: { user: string }) => boolean = () => true): StatusSnapshot {
+  /**
+   * The current state: everything, or the view of one user. That view has the
+   * user's own peers and the upstreams they may use (here: the ones their peers
+   * are routed through), without the routed and active counts or the traffic
+   * of those upstreams, which would show other users.
+   */
+  snapshot(user?: string): StatusSnapshot {
     this.advance();
-    const peers = this.peers.filter(include);
-    const used = new Set(peers.map((p) => p.upstream));
-    const all = peers.length === this.peers.length;
+    const all = user === undefined;
+    const peers = all ? this.peers : this.peers.filter((p) => p.user === user);
+    const used = this.upstreamsOf(user);
     const sum = (list: Peer[]) =>
       list.reduce(
         (t, p) => ({ down: t.down + p.down, up: t.up + p.up, downRate: t.downRate + p.downRate, upRate: t.upRate + p.upRate }),
@@ -146,7 +148,7 @@ export class Simulation {
       time: timestampFromMs(this.time),
       clientMtu: 1376,
       upstreams: upstreams
-        .filter((u) => all || used.has(u.name))
+        .filter((u) => used.has(u.name))
         .map((u) => {
           const routed = this.peers.filter((p) => p.upstream === u.name);
           const t = sum(routed);
@@ -159,7 +161,6 @@ export class Simulation {
             state: u.state,
             latency: u.state === UpstreamState.DOWN ? undefined : durationFromMs(Math.round(u.latencyMs * jitter)),
             lastHandshake: u.kind === UpstreamKind.AWG && u.state !== UpstreamState.DOWN ? timestampFromMs(this.time - 20_000) : undefined,
-            // A user's view carries no counts or traffic of other users.
             routed: all ? routed.length : 0,
             active: all ? routed.filter((p) => this.isActive(p)).length : 0,
             traffic: all ? traffic(t.down, t.up, t.downRate, t.upRate) : undefined,
@@ -184,19 +185,46 @@ export class Simulation {
     });
   }
 
-  /** Hourly availability of an upstream between two instants, oldest first. */
-  history(name: string, from: number, to: number): HistoryResponse {
-    const upstream = upstreams.find((u) => u.name === name);
+  /** The upstreams `user` may use; every upstream when `user` is unset. */
+  upstreamsOf(user?: string): Set<string> {
+    if (user === undefined) return new Set(upstreams.map((u) => u.name));
+    return new Set(this.peers.filter((p) => p.user === user && p.upstream).map((p) => p.upstream));
+  }
+
+  /** The peer's user, or undefined for an unknown peer. */
+  ownerOf(peerId: string): string | undefined {
+    return this.peers.find((p) => p.id === peerId)?.user;
+  }
+
+  /**
+   * Samples of an upstream (by name) or a peer (by peer_id) between two instants,
+   * oldest first, at the step the daemon would use for `wanted` (see historyStep).
+   * Undefined when there is no such upstream or peer.
+   */
+  history(kind: "upstream" | "peer", name: string, from: number, to: number, wanted = 0): HistoryResponse | undefined {
+    const upstream = kind === "upstream" ? upstreams.find((u) => u.name === name) : undefined;
+    const peer = kind === "peer" ? this.peers.find((p) => p.id === name) : undefined;
+    if (!upstream && !peer) return undefined;
+
+    const step = historyStep(from, to, this.clock(), wanted);
+    const routed = upstream ? this.peers.filter((p) => p.upstream === upstream.name).length : 1;
     const samples = [];
-    for (let t = Math.ceil(from / HOUR) * HOUR; t <= to; t += HOUR) {
+    for (let t = Math.ceil(from / step) * step; t <= to; t += step) {
+      const h = random(Math.floor(t / MINUTE) * 17 + name.charCodeAt(0))();
+      const ratio = upstream ? availability(upstream, t, to) : 0;
+      // Bytes moved during the step: about a fifth of the peak rate per peer while up.
+      const down = peer && !peer.upstream ? 0 : (h * MAX_RATE * 0.4 * routed * (upstream ? ratio : 1) * step) / 1000;
       samples.push(
         create(SampleSchema, {
           time: timestampFromMs(t),
-          upRatio: upstream ? availability(upstream, t, to) : 0,
+          upRatio: ratio,
+          latency: upstream && ratio > 0 ? durationFromMs(Math.round(upstream.latencyMs * (0.9 + h * 0.2))) : undefined,
+          downBytes: BigInt(Math.round(down)),
+          upBytes: BigInt(Math.round(down * 0.15)),
         }),
       );
     }
-    return create(HistoryResponseSchema, { step: durationFromMs(HOUR), samples });
+    return create(HistoryResponseSchema, { step: durationFromMs(step), samples });
   }
 
   private isActive(p: Peer): boolean {
@@ -215,6 +243,18 @@ export class Simulation {
       traffic: traffic(p.down, p.up, p.downRate, p.upRate),
     });
   }
+}
+
+/**
+ * The step the daemon uses for a history range: the wanted step rounded up to
+ * a multiple of what it keeps for the range (1 min samples for the last 7 days,
+ * else 1 h), and further so that at most 2000 samples come back.
+ */
+export function historyStep(from: number, to: number, now: number, wanted = 0): number {
+  const kept = now - from <= 7 * DAY ? MINUTE : HOUR;
+  let step = Math.max(1, Math.ceil(wanted / kept), Math.ceil((to - from) / MAX_SAMPLES / kept)) * kept;
+  while (Math.floor(to / step) - Math.ceil(from / step) + 1 > MAX_SAMPLES) step += kept;
+  return step;
 }
 
 /** One random-walk step, kept inside [0, max]. */

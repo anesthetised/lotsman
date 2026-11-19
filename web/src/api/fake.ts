@@ -2,19 +2,18 @@
 // descriptors served by Connect's router transport from a Simulation.
 // Methods without a fake answer Unimplemented, like the daemon before their issue lands.
 
-import { timestampMs, durationMs } from "@bufbuild/protobuf/wkt";
-import { createRouterTransport, type Transport } from "@connectrpc/connect";
-import {
-  HistoryService,
-  type StatusSnapshot,
-  StatusService,
-  UserSelfService,
-  type WatchStatusRequest,
-} from "../gen/lotsman/v1/lotsman_pb";
+import { create } from "@bufbuild/protobuf";
+import { durationMs, timestampMs } from "@bufbuild/protobuf/wkt";
+import { Code, ConnectError, createRouterTransport, type Transport } from "@connectrpc/connect";
+import { type HistoryRequest, type HistoryResponse, HistoryResponseSchema, HistoryService, SampleSchema } from "../gen/lotsman/v1/history_pb";
+import { type StatusSnapshot, StatusService, type WatchStatusRequest } from "../gen/lotsman/v1/status_pb";
+import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
 import { Simulation } from "./simulation";
 
 /** The user every fake `/u/<token>` link resolves to. */
 export const FAKE_USER = "alice";
+
+const DAY = 86_400_000;
 
 export interface FakeOptions {
   seed?: number;
@@ -23,7 +22,14 @@ export interface FakeOptions {
 
 export function createFakeTransport(options: FakeOptions = {}): Transport {
   const sim = new Simulation(options.seed, options.clock);
-  const own = (p: { user: string }) => p.user === FAKE_USER;
+  const clock = options.clock ?? Date.now;
+  const history = (kind: "upstream" | "peer", req: HistoryRequest, allowed = true) => {
+    const to = req.to ? timestampMs(req.to) : clock();
+    const from = req.from ? timestampMs(req.from) : to - 7 * DAY;
+    const res = allowed ? sim.history(kind, req.name, from, to, req.step ? durationMs(req.step) : 0) : undefined;
+    if (!res) throw new ConnectError(`no ${kind} ${req.name}`, Code.NotFound);
+    return res;
+  };
 
   return createRouterTransport(({ service }) => {
     service(StatusService, {
@@ -31,12 +37,22 @@ export function createFakeTransport(options: FakeOptions = {}): Transport {
     });
     service(UserSelfService, {
       get: () => sim.user(FAKE_USER),
-      watch: (req, ctx) => watch(req, ctx.signal, () => sim.snapshot(own)),
+      watch: (req, ctx) => watch(req, ctx.signal, () => sim.snapshot(FAKE_USER)),
+      upstreamHistory: (req) => withoutBytes(history("upstream", req, sim.upstreamsOf(FAKE_USER).has(req.name))),
+      peerHistory: (req) => history("peer", req, sim.ownerOf(req.name) === FAKE_USER),
     });
     service(HistoryService, {
-      upstream: (req) =>
-        sim.history(req.name, req.from ? timestampMs(req.from) : Date.now() - 7 * 86_400_000, req.to ? timestampMs(req.to) : Date.now()),
+      upstream: (req) => history("upstream", req),
+      peer: (req) => history("peer", req),
     });
+  });
+}
+
+/** A user sees an upstream's availability and latency, not the traffic of everyone routed through it. */
+function withoutBytes(res: HistoryResponse): HistoryResponse {
+  return create(HistoryResponseSchema, {
+    step: res.step,
+    samples: res.samples.map((s) => create(SampleSchema, { time: s.time, upRatio: s.upRatio, latency: s.latency })),
   });
 }
 

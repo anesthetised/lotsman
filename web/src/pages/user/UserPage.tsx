@@ -1,5 +1,6 @@
 // Placeholder user page behind the secret link `/u/<token>` (#137 builds the
-// real one): mobile-first cards with the live speed and the user's devices.
+// real one): mobile-first cards with the live speed, the user's devices and
+// the 7-day availability of the exits they use.
 // The panel resolves the token and scopes UserSelfService to that user, so
 // the page itself never sends the token anywhere (see web/README.md).
 
@@ -7,10 +8,12 @@ import { timestampDate } from "@bufbuild/protobuf/wkt";
 import { createMemo, Errored, For, Loading, Show } from "solid-js";
 import { api } from "../../api/client";
 import { createLive, num } from "../../api/live";
-import type { DevicePeer, PeerStatus, UpstreamStatus } from "../../gen/lotsman/v1/lotsman_pb";
+import type { PeerStatus, UpstreamStatus } from "../../gen/lotsman/v1/status_pb";
+import type { DevicePeer } from "../../gen/lotsman/v1/user_pb";
 import { useI18n } from "../../i18n";
 import { Sparkline } from "../../ui/Sparkline";
 import { StateBadge } from "../../ui/StateBadge";
+import { Availability } from "../Availability";
 import { LiveError } from "../LiveError";
 import { SkipLink } from "../SkipLink";
 import { stateLabel, stateLevel } from "../upstream";
@@ -79,6 +82,25 @@ function LiveUser() {
                     }}
                   </For>
                 </ul>
+              </li>
+            )}
+          </For>
+        </ul>
+      </section>
+
+      <section aria-labelledby="exits" class="space-y-2">
+        <h2 id="exits" class="text-sm text-muted">
+          {t.user.exits}
+        </h2>
+        <ul class="space-y-2">
+          <For each={snapshot().upstreams} keyed={(u) => u.name}>
+            {(u) => (
+              <li class="space-y-2 rounded-xl border border-line bg-surface p-4">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="font-medium">{u().name}</span>
+                  <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />
+                </div>
+                <Availability name={u().name} label={t.user.availabilityLabel(u().name)} load={api.self.upstreamHistory} />
               </li>
             )}
           </For>

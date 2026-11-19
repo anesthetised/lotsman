@@ -4,6 +4,27 @@
 # weeks ago: a supply-chain guard against freshly compromised releases.
 minimumReleaseAge: 20160 # minutes
 
+# The only exceptions: the stable Solid 2 releases (2026-11-17/18), which we
+# chose to take early, and seroval 1.8.0 (2026-11-09), the Solid team's
+# serializer that solid-js 2.0.1 requires. Exact versions only, so a later
+# release of the same package still waits two weeks. Drop each entry once it is
+# older than that (seroval after 2026-11-23, the rest after 2026-12-02).
+minimumReleaseAgeExclude:
+  - seroval@1.8.0
+  - seroval-plugins@1.8.0
+  - solid-js@2.0.1
+  - "@solidjs/web@2.0.1"
+  - "@solidjs/signals@2.0.1"
+  - "@solidjs/router@2.0.0"
+  - "@solidjs/vite-plugin@3.0.1"
+  - "@solidjs/compiler@2.0.1"
+  - "@solidjs/compiler-darwin-arm64@2.0.1"
+  - "@solidjs/compiler-darwin-x64@2.0.1"
+  - "@solidjs/compiler-linux-arm64-gnu@2.0.1"
+  - "@solidjs/compiler-linux-x64-gnu@2.0.1"
+  - "@solidjs/compiler-wasm32-wasi@2.0.1"
+  - "@solidjs/compiler-win32-x64-msvc@2.0.1"
+
 # Install exact versions when adding packages.
 savePrefix: ""
 
@@ -13,13 +34,13 @@ allowBuilds:
   "@bufbuild/buf": false
 
 # Kobalte 2.0.0-alpha.4 pins its Solid peers to exactly 2.0.0-rc.16. We run it on
-# the newer rc we pin in package.json; the spike and the tests cover that pair.
+# the Solid we pin in package.json; the spike and the tests cover that pair.
 peerDependencyRules:
   allowedVersions:
-    "@kobalte/core>solid-js": "2.0.0-rc.21"
-    "@kobalte/core>@solidjs/web": "2.0.0-rc.21"
-    "@kobalte/utils>solid-js": "2.0.0-rc.21"
-    "@kobalte/utils>@solidjs/web": "2.0.0-rc.21"
+    "@kobalte/core>solid-js": "2.0.1"
+    "@kobalte/core>@solidjs/web": "2.0.1"
+    "@kobalte/utils>solid-js": "2.0.1"
+    "@kobalte/utils>@solidjs/web": "2.0.1"
 
 patchedDependencies:
   '@kobalte/core@2.0.0-alpha.4': patches/@kobalte__core@2.0.0-alpha.4.patch

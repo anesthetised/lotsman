@@ -61,5 +61,7 @@ export const ru: Dict = {
     blocked: "Нет доступного выхода",
     lastSeen: "Был в сети",
     never: "никогда",
+    exits: "Выходы",
+    availabilityLabel: (name: string) => `Доступность ${name} за 7 дней`,
   },
 };

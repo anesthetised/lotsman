@@ -5,7 +5,9 @@
 
 import { createClient, type Transport } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
-import { HistoryService, StatusService, UserSelfService } from "../gen/lotsman/v1/lotsman_pb";
+import { HistoryService } from "../gen/lotsman/v1/history_pb";
+import { StatusService } from "../gen/lotsman/v1/status_pb";
+import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
 import { createFakeTransport } from "./fake";
 
 const transport: Transport = import.meta.env.VITE_FAKE_API

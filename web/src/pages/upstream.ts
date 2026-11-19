@@ -1,6 +1,6 @@
 // Presentation of upstream states, shared by the operator and user pages.
 
-import { UpstreamKind, UpstreamState } from "../gen/lotsman/v1/lotsman_pb";
+import { UpstreamKind, UpstreamState } from "../gen/lotsman/v1/status_pb";
 import type { Dict } from "../i18n/en";
 import type { Level } from "../ui/AvailabilityBar";
 
