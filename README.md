@@ -43,12 +43,15 @@ Amnezia app ──AWG──▶ Lotsman ──AWG──▶ provider NL ──▶ 
   Clients use the Amnezia app whatever the upstream: 5.0.1.5 or later for the default `awg: 3`; set
   `awg: 2` for older apps and Android 7–8.
 - Optional Prometheus metrics: per-upstream health and per-client traffic.
+- A web panel (`lotsman web`, behind your reverse proxy): operators sign in with passkeys and manage
+  upstreams, profiles, users and devices, with live rates, history and connections; users get a
+  secret link to a page with their own configs, traffic and devices.
 - A single static binary, a YAML file, and SQLite.
 
 ## What you do not get (yet)
 
 - All users behind one upstream share its exit IP and its reputation.
-- IPv6 inside the tunnel, a web UI, more than one node.
+- IPv6 inside the tunnel, more than one node.
 - Throughput of a kernel WireGuard: crypto runs in userspace twice per packet. Outline and VLESS
   upstreams also terminate every TCP connection in userspace.
 - Outline keys beyond plain Shadowsocks and Shadowsocks over WebSocket (other `$type`s of Outline's

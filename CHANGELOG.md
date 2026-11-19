@@ -11,6 +11,15 @@ All notable changes to Lotsman are documented here. The format follows
   may now be capitalized (`Netherlands`) and are unique ignoring case; tags stay lowercase. The
   daemon reads peers and profiles in one transaction, so a rename never leaves a peer unrouted for a
   pass, and its status shows the new name at once.
+- Web panel deployment guide (#138): the operations guide covers the install permissions
+  (`/etc/lotsman` `0750 root:lotsman-web`; the base install now creates `lotsman.yaml` `0600` and
+  `upstreams/` `0700`), recovering a unit stopped by
+  its start limit (`systemctl reset-failed`), Caddy and nginx examples with the reason for
+  `flush_interval -1` and `proxy_buffering off`, what `trusted_proxies` needs to list, checking
+  the install, what changing `public_url`'s host does to passkeys and to links already sent, backing
+  up `web.db` (WAL mode: `sqlite3 .backup` or stop the unit first), and removing a Caddy installed
+  for the panel through the manifest's `package=` entries. Checked by hand on the test gateway
+  with Caddy. No code change.
 - Web panel: the user page behind the secret link (#137) — devices with QR configs, `.conf`
   download and copy; own live traffic and its 24 h and 7 d history; the upstreams in use with their
   7-day availability; adding and removing devices and switching their profile; import
