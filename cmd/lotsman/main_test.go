@@ -196,6 +196,14 @@ func TestCLI(t *testing.T) {
 	if strings.Count(list, "alice") != 1 || strings.Contains(list, "phone") {
 		t.Errorf("after removing profile and device:\n%s", list)
 	}
+	// Without devices the user stays, and the list still shows them.
+	if _, err := capture(t, "-config", cfg, "user", "rm", "alice", "-device", "default"); err != nil {
+		t.Fatal(err)
+	}
+	list, _ = capture(t, "-config", cfg, "user", "list")
+	if strings.Count(list, "alice") != 1 || strings.Contains(list, "default") {
+		t.Errorf("after removing the last device:\n%s", list)
+	}
 	if _, err := capture(t, "-config", cfg, "user", "rm", "alice"); err != nil {
 		t.Fatal(err)
 	}
