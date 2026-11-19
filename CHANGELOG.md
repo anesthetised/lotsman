@@ -6,6 +6,19 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Web panel: the user page behind the secret link (#137) — devices with QR configs, `.conf`
+  download and copy; own live traffic and its 24 h and 7 d history; the upstreams in use with their
+  7-day availability; adding and removing devices and switching their profile; import
+  instructions for the Amnezia app. Mobile first, RU and EN.
+- Web panel: operator console (#136) — upstream pages with history, profiles, users and devices
+  with QR configs and links, live connections. `/admin` lists the upstreams (state, latency, live
+  rate, 7-day availability); an upstream's page adds its routed peers and history over 1 hour to
+  90 days. **Profiles** creates, edits and deletes profiles with the daemon's warnings; **Users**
+  adds and removes devices and users, shows a device's config as a QR code, text or `.conf`, and
+  issues (shown once) or revokes a user's link; **Connections** shows a peer's or every peer's
+  open connections live, never stored. RU and EN, keyboard accessible, 1280 px down to tablet
+  width. New frontend dependency `lean-qr` 2.7.4 (about 4 KB gzipped), which also draws the user
+  page's QR codes in place of `uqr`; only the pages that show QR codes load it.
 - Profiles and live connections in the control API. `ProfileService` `List`, `Put` and `Delete`
   serve the stored profiles with the checks and warnings of `lotsman profile` (#128): a profile the
   checks refuse is `invalid_argument`, deleting one that peers use `failed_precondition`, a missing

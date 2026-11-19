@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { expect, pressIn, test } from "./fixtures";
 
 test("the operator overview shows live data", async ({ page }) => {
   await page.goto("/admin");
@@ -49,11 +49,7 @@ test("the window menu works from the keyboard", async ({ page }) => {
   await trigger.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("menuitemradio", { name: "1 min" })).toHaveAttribute("aria-checked", "true");
-  // Kobalte focuses into the menu, and may move focus again a frame later; a
-  // key pressed in between is lost. Let it settle, as a person would.
-  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[role="menu"]'))).toBe(true);
-  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
-  await page.keyboard.press("ArrowDown");
+  await pressIn(page.getByRole("menu"), "ArrowDown");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("menu")).toBeHidden();
   await expect(page.getByRole("button", { name: "Window: 5 min" })).toBeFocused();

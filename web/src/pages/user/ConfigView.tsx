@@ -3,10 +3,10 @@
 
 import { createMemo, createSignal, Errored, Loading, Show } from "solid-js";
 import { useI18n } from "../../i18n";
+import { QrCode } from "../../ui/QrCode";
 import { confFilename, saveAsFile } from "./config";
 import { useUser } from "./context";
 import { failureOf, failureText } from "./errors";
-import { qrShape } from "./qr";
 import { touchButton } from "./touch";
 
 /** The config of a peer: the one just issued, else fetched on demand (it holds the private key). */
@@ -41,13 +41,6 @@ export function PeerConfig(props: { peerId: string; device: string; profile: str
 export function ConfigView(props: { device: string; profile: string; config: string }) {
   const { t } = useI18n();
   const [copy, setCopy] = createSignal<"idle" | "copied" | "failed">("idle");
-  const shape = createMemo(() => {
-    try {
-      return qrShape(props.config);
-    } catch {
-      return undefined; // more text than the largest QR code holds
-    }
-  });
   const copyText = async () => {
     try {
       await navigator.clipboard.writeText(props.config);
@@ -58,19 +51,12 @@ export function ConfigView(props: { device: string; profile: string; config: str
   };
   return (
     <div class="space-y-3">
-      <Show when={shape()} fallback={<p class="text-sm text-muted">{t.user.config.qrTooLarge}</p>}>
-        {(qr) => (
-          <svg
-            role="img"
-            aria-label={t.user.config.qrLabel(props.device, props.profile)}
-            viewBox={`0 0 ${qr().size} ${qr().size}`}
-            shape-rendering="crispEdges"
-            class="mx-auto block aspect-square w-full max-w-[24rem] rounded-md bg-white"
-          >
-            <path d={qr().path} fill="black" />
-          </svg>
-        )}
-      </Show>
+      <QrCode
+        text={props.config}
+        label={t.user.config.qrLabel(props.device, props.profile)}
+        tooLong={t.user.config.qrTooLarge}
+        class="mx-auto block max-w-[24rem]"
+      />
       <p class="text-sm text-muted">{t.user.config.qrHint}</p>
       <div class="flex flex-wrap gap-2">
         <button type="button" class={touchButton("primary")} onClick={() => saveAsFile(props.config, confFilename(props.device, props.profile))}>

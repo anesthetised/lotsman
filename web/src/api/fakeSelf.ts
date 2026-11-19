@@ -18,8 +18,11 @@ export const FAKE_USER = "alice";
 
 const token = (name: string) => `fake-${name}`.padEnd(43, "_");
 
-/** Links with a scenario of their own; the fake takes any other token as the ordinary user. */
-export const FAKE_LINKS = {
+/**
+ * Links with a scenario of their own; the fake takes any other token as the ordinary user.
+ * A pure IIFE, so a production build drops it with the rest of the fake.
+ */
+export const FAKE_LINKS = /* @__PURE__ */ (() => ({
   ordinary: token("ordinary"),
   /** A link that was revoked or rotated: every call is Unauthenticated. */
   revoked: token("revoked"),
@@ -29,7 +32,7 @@ export const FAKE_LINKS = {
   empty: token("empty"),
   /** The panel cannot reach the daemon. */
   unavailable: token("unavailable"),
-} as const;
+}) as const)();
 
 const NAME_LIMIT = 64; // bytes
 

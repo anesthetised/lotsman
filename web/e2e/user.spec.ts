@@ -48,7 +48,10 @@ test("a device's config shows as a large QR code, a file and text", async ({ pag
   const box = (await qr.boundingBox())!;
   expect(box.width).toBeGreaterThanOrEqual(280);
   expect(Math.abs(box.width - box.height)).toBeLessThan(1);
-  expect(await qr.locator("path").getAttribute("d")).toMatch(/^M\d+ \d+h\d+v1/);
+  expect(await qr.locator("path").getAttribute("d")).toMatch(/^M\d+ \d+L/);
+  // Dark modules on white with a 4-module quiet zone, in either theme.
+  expect(await qr.locator("rect").getAttribute("fill")).toBe("#fff");
+  expect(await qr.getAttribute("viewBox")).toMatch(/^-4 -4 (\d+) \1$/);
 
   const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download .conf" }).click()]);
   expect(download.suggestedFilename()).toBe("phone-default.conf");

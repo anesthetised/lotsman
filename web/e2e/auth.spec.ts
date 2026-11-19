@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./fixtures";
+import { expect, pressIn, test } from "./fixtures";
 
 /**
  * Gives the page Chromium's virtual authenticator: a platform passkey
@@ -79,7 +79,8 @@ test("issue an enrollment link and revoke passkeys", async ({ page }) => {
   const dialog = page.getByRole("dialog", { name: "Enrollment link" });
   const link = await dialog.getByLabel("Link").inputValue();
   expect(link).toMatch(/^http:\/\/localhost:\d+\/enroll#[\w-]{43}$/);
-  await page.keyboard.press("Escape");
+  await pressIn(dialog, "Escape");
+  await expect(dialog).toBeHidden();
 
   // The link enrolls a second passkey, which signs this browser in as it.
   await page.goto(new URL(link).pathname + new URL(link).hash);

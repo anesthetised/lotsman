@@ -25,6 +25,8 @@ export interface QrCodeProps {
   label: string;
   /** Shown instead when the text is too long for a QR code. */
   tooLong: string;
+  /** Width limit and placement; the default is at most 16rem. */
+  class?: string;
 }
 
 export function QrCode(props: QrCodeProps) {
@@ -37,7 +39,7 @@ export function QrCode(props: QrCodeProps) {
           aria-label={props.label}
           viewBox={`${-QUIET} ${-QUIET} ${c().size + 2 * QUIET} ${c().size + 2 * QUIET}`}
           shape-rendering="crispEdges"
-          class="aspect-square w-full max-w-64 rounded-md"
+          class={["aspect-square w-full rounded-md", props.class ?? "max-w-64"]}
         >
           <rect x={-QUIET} y={-QUIET} width={c().size + 2 * QUIET} height={c().size + 2 * QUIET} fill="#fff" />
           <path d={c().path} fill="#000" />

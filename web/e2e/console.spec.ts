@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, test } from "./fixtures";
+import { expect, pressIn, settled, test } from "./fixtures";
 
 /** The console fits the window: tables scroll inside their frames, the page never sideways. */
 async function noSidewaysScroll(page: Page) {
@@ -70,8 +70,8 @@ test("create, edit and delete a profile", async ({ page }) => {
   await page.getByRole("button", { name: "Edit eu" }).click();
   const edit = page.getByRole("dialog", { name: "Edit profile eu" });
   await expect(edit.getByLabel("Name")).toHaveAttribute("readonly", "");
-  // The dialog's own first focus lands a frame after it opens; wait for it, as a person would.
   await expect(edit.getByRole("button", { name: "Close" })).toBeFocused();
+  await settled(edit);
   await edit.getByRole("button", { name: "Move tier 2 up" }).focus();
   await page.keyboard.press("Enter");
   await expect(edit.getByLabel("Tier 1 tag")).toHaveValue("eu");
@@ -88,7 +88,7 @@ test("create, edit and delete a profile", async ({ page }) => {
   const refuse = page.getByRole("dialog", { name: "Delete profile default?" });
   await refuse.getByRole("button", { name: "Delete" }).click();
   await expect(refuse.getByRole("alert")).toHaveText("default is in use. Remove its devices or give them another profile first.");
-  await page.keyboard.press("Escape");
+  await pressIn(refuse, "Escape");
   await expect(refuse).toBeHidden();
 
   await page.getByRole("button", { name: "Delete eu" }).click();
@@ -121,7 +121,8 @@ test("add a device and see its config and QR code", async ({ page, context }) =>
   expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/^\[Interface\]/);
   const [file] = await Promise.all([page.waitForEvent("download"), config.getByRole("button", { name: "Download dave-phone.conf" }).click()]);
   expect(file.suggestedFilename()).toBe("dave-phone.conf");
-  await page.keyboard.press("Escape");
+  await pressIn(config, "Escape");
+  await expect(config).toBeHidden();
 
   // The new user is listed, and the config can be shown again.
   const dave = page.getByRole("region", { name: "dave" });
@@ -129,7 +130,8 @@ test("add a device and see its config and QR code", async ({ page, context }) =>
   await dave.getByRole("button", { name: "Config dave/phone · default" }).click();
   const again = page.getByRole("dialog", { name: "Config of dave/phone · default" });
   await expect(again.getByLabel("Config file")).toHaveValue(/Address = 10\.8\.0\.8\/32/);
-  await page.keyboard.press("Escape");
+  await pressIn(again, "Escape");
+  await expect(again).toBeHidden();
 
   // The same device and profile twice is refused, with the daemon's reason.
   await dave.getByRole("button", { name: "Add device for dave" }).click();
@@ -150,7 +152,8 @@ test("issue a link, see it once in its /u# form, revoke it", async ({ page }) =>
   await dialog.getByRole("button", { name: "Issue link" }).click();
   const link = await dialog.getByLabel("Link").inputValue();
   expect(link).toMatch(/^http:\/\/localhost:\d+\/u#[\w-]{43}$/);
-  await page.keyboard.press("Escape");
+  await pressIn(dialog, "Escape");
+  await expect(dialog).toBeHidden();
   await expect(bob).toContainText("Has a link");
 
   // Issuing again rotates it.
@@ -159,7 +162,8 @@ test("issue a link, see it once in its /u# form, revoke it", async ({ page }) =>
   await expect(rotate).toContainText("The current link stops working");
   await rotate.getByRole("button", { name: "New link" }).click();
   expect(await rotate.getByLabel("Link").inputValue()).not.toBe(link);
-  await page.keyboard.press("Escape");
+  await pressIn(rotate, "Escape");
+  await expect(rotate).toBeHidden();
 
   await bob.getByRole("button", { name: "Revoke link bob" }).click();
   await page.getByRole("dialog", { name: "Revoke bob's link?" }).getByRole("button", { name: "Revoke link" }).click();
@@ -176,7 +180,7 @@ test("remove a device and a user, confirmed from the keyboard", async ({ page })
   await page.keyboard.press("Enter");
   const dialog = page.getByRole("dialog", { name: "Remove alice/tv · streaming?" });
   await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
-  await page.keyboard.press("Escape");
+  await pressIn(dialog, "Escape");
   await expect(dialog).toBeHidden();
   await expect(trigger).toBeFocused();
   // A click outside dismisses it too, once Kobalte listens for it (a tick after opening).
