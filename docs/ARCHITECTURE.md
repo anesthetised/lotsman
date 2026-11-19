@@ -428,6 +428,18 @@ of the agreed contract is registered; until the issue that implements an RPC lan
 waits for it, so no client sees an empty gateway. `peer_id` is `p_<row id>` of the store's peer:
 opaque to clients and unchanged by renames.
 
+`ProfileService` (#128) translates to the daemon's `Profiles`, `PutProfile` and `DeleteProfile`,
+which own validation and storage; `Matcher` maps 1:1 onto `config.Match`. Errors become codes:
+`daemon.ErrInvalidProfile` is `invalid_argument` with the reason, `store.ErrInUse`
+`failed_precondition`, `store.ErrNotFound` `not_found`, and anything else `internal` with no
+detail, so database paths and SQL never reach the browser. `ConnectionService.Watch` (#131) gives
+each stream its own `flows.Meter` over conntrack, the client subnet and the daemon's `PeerRoutes`
+under their `peer_id`s, with the same interval rules and readiness wait as `StatusService.Watch`;
+rates are deltas between that stream's snapshots. Sources and destinations are `IP:port`, or the
+bare IP for ICMP. An unknown `peer_id` is `not_found`; a failed conntrack read ends the stream
+with `unavailable`, and a build without conntrack (not Linux) answers `failed_precondition`, since
+retrying cannot help there.
+
 - Trust boundary: the socket's peer is trusted, and the file mode is the boundary. The socket is
   `0660 root:lotsman-web`; whoever can connect has the operator's full control, and the daemon
   checks no credentials. The `Lotsman-User` header that `UserSelfService` will read is trusted

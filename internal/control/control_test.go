@@ -27,7 +27,12 @@ import (
 )
 
 // fakeSource is a daemon with a fixed status and the traffic the test sets.
+// The profile and connection services have their own fakes; here they are
+// never called.
 type fakeSource struct {
+	ProfileSource
+	ConnectionSource
+
 	ready chan struct{}
 	st    daemon.Status
 
@@ -251,7 +256,13 @@ func TestWatchRejectsInvalidInterval(t *testing.T) {
 // Every RPC of the package is registered, and all but the implemented ones
 // answer Unimplemented. A new RPC is covered without touching this test.
 func TestUnimplemented(t *testing.T) {
-	implemented := []string{lotsmanv1connect.StatusServiceWatchProcedure}
+	implemented := []string{
+		lotsmanv1connect.StatusServiceWatchProcedure,
+		lotsmanv1connect.ConnectionServiceWatchProcedure,
+		lotsmanv1connect.ProfileServiceListProcedure,
+		lotsmanv1connect.ProfileServicePutProcedure,
+		lotsmanv1connect.ProfileServiceDeleteProcedure,
+	}
 	s := NewServer(newFakeSource(daemon.Status{}))
 	var registered []string
 	for spec := range s.Specs() {

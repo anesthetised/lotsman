@@ -18,6 +18,7 @@ import (
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/daemon"
+	"github.com/anesthetised/lotsman/internal/flows"
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/traffic"
 )
@@ -31,17 +32,18 @@ type Source interface {
 	Status() daemon.Status
 	ClientMTU() int
 	Traffic() traffic.Snapshot
+	ProfileSource
+	ConnectionSource
 }
 
-// NewServer registers every service of the API. Only StatusService.Watch is
-// implemented so far; every other RPC fails with CodeUnimplemented until the
-// issue that adds it lands.
+// NewServer registers every service of the API. An RPC whose issue has not
+// landed yet fails with CodeUnimplemented.
 func NewServer(src Source) *connect.Server {
 	s := connect.NewServer()
 	lotsmanv1connect.RegisterStatusServiceHandler(s, statusService{src})
 	lotsmanv1connect.RegisterHistoryServiceHandler(s, lotsmanv1connect.UnimplementedHistoryServiceHandler{})
-	lotsmanv1connect.RegisterConnectionServiceHandler(s, lotsmanv1connect.UnimplementedConnectionServiceHandler{})
-	lotsmanv1connect.RegisterProfileServiceHandler(s, lotsmanv1connect.UnimplementedProfileServiceHandler{})
+	lotsmanv1connect.RegisterConnectionServiceHandler(s, connectionService{src, flows.Conntrack{}})
+	lotsmanv1connect.RegisterProfileServiceHandler(s, profileService{src})
 	lotsmanv1connect.RegisterUserServiceHandler(s, lotsmanv1connect.UnimplementedUserServiceHandler{})
 	lotsmanv1connect.RegisterUserSelfServiceHandler(s, lotsmanv1connect.UnimplementedUserSelfServiceHandler{})
 	return s
@@ -59,12 +61,9 @@ type statusService struct{ src Source }
 // Watch sends a snapshot as soon as the daemon is ready and then every
 // interval, until the client goes away or the daemon stops (both cancel ctx).
 func (s statusService) Watch(ctx context.Context, req *lotsmanv1.WatchStatusRequest, stream lotsmanv1connect.StatusServiceWatchServerStream) error {
-	interval := MinInterval
-	if d := req.GetInterval(); d != nil {
-		if err := d.CheckValid(); err != nil {
-			return connect.NewError(connect.CodeInvalidArgument, "interval: "+err.Error())
-		}
-		interval = max(d.AsDuration(), MinInterval)
+	interval, err := watchInterval(req.GetInterval())
+	if err != nil {
+		return err
 	}
 	select {
 	case <-ctx.Done():

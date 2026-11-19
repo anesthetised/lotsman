@@ -17,13 +17,16 @@ import (
 
 	lotsmanv1 "github.com/anesthetised/lotsman/api/lotsman/v1"
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
+	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/control"
 	"github.com/anesthetised/lotsman/internal/daemon"
+	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/traffic"
 )
 
-// fakeSource is a daemon with one upstream.
-type fakeSource struct{}
+// fakeSource is a daemon with one upstream and one profile, which peers
+// use. The test never calls the connection service.
+type fakeSource struct{ control.ConnectionSource }
 
 func (fakeSource) Ready() <-chan struct{} {
 	ready := make(chan struct{})
@@ -35,6 +38,11 @@ func (fakeSource) Status() daemon.Status {
 	return daemon.Status{Upstreams: []daemon.UpstreamStatus{{Name: "nl", Kind: "awg"}}}
 }
 func (fakeSource) Traffic() traffic.Snapshot { return traffic.Snapshot{} }
+func (fakeSource) Profiles() ([]config.Profile, []string, error) {
+	return []config.Profile{{Name: "eu"}}, nil, nil
+}
+func (fakeSource) PutProfile(config.Profile) ([]string, error) { return nil, nil }
+func (fakeSource) DeleteProfile(string) error                  { return store.ErrInUse }
 
 // daemonSocket serves the real control API, over a fake daemon, on a unix
 // socket, as lotsman serve does.
@@ -124,8 +132,11 @@ func TestForwardWatchStream(t *testing.T) {
 func TestForwardUnary(t *testing.T) {
 	transport := browserPanel(t, daemonSocket(t), fakeAuth{operator: true, user: "alice"})
 	profiles := lotsmanv1connect.NewProfileServiceClient(connect.NewClient(transport))
-	if _, err := profiles.List(t.Context(), &lotsmanv1.ListProfilesRequest{}); connect.CodeOf(err) != connect.CodeUnimplemented {
-		t.Errorf("profile list: %v, want the daemon's unimplemented", err)
+	if res, err := profiles.List(t.Context(), &lotsmanv1.ListProfilesRequest{}); err != nil || len(res.Profiles) != 1 || res.Profiles[0].Name != "eu" {
+		t.Errorf("profile list: %v, %v", res, err)
+	}
+	if _, err := profiles.Delete(t.Context(), &lotsmanv1.DeleteProfileRequest{Name: "eu"}); connect.CodeOf(err) != connect.CodeFailedPrecondition {
+		t.Errorf("profile delete: %v, want the daemon's failed_precondition", err)
 	}
 	self := lotsmanv1connect.NewUserSelfServiceClient(connect.NewClient(transport))
 	if _, err := self.ResolveLink(t.Context(), &lotsmanv1.ResolveLinkRequest{Token: "x"}); connect.CodeOf(err) != connect.CodePermissionDenied {

@@ -34,8 +34,12 @@ type everyoneOperator struct{}
 func (everyoneOperator) Operator(*http.Request) error       { return nil }
 func (everyoneOperator) User(*http.Request) (string, error) { return "", nil }
 
-// panelSource is a daemon with one upstream.
-type panelSource struct{}
+// panelSource is a daemon with one upstream. The test never calls the
+// profile and connection services.
+type panelSource struct {
+	control.ProfileSource
+	control.ConnectionSource
+}
 
 func (panelSource) Ready() <-chan struct{} {
 	ready := make(chan struct{})

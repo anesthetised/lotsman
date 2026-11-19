@@ -20,3 +20,6 @@ func (d *Daemon) PeerRoutes() map[netip.Addr]PeerRoute {
 	}
 	return out
 }
+
+// Subnet is the client subnet. A reload cannot change it.
+func (d *Daemon) Subnet() netip.Prefix { return d.config().Subnet }
