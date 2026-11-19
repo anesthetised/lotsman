@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -12,6 +13,8 @@ import (
 	"connectrpc.com/connect/v2/connectinprocess"
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/testing/protocmp"
+	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	lotsmanv1 "github.com/anesthetised/lotsman/api/lotsman/v1"
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
@@ -19,6 +22,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/control/controltest"
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/health"
+	"github.com/anesthetised/lotsman/internal/history"
 	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/traffic"
 )
@@ -298,6 +302,28 @@ func TestUserSelfMaxDevices(t *testing.T) {
 	}
 }
 
+// max_devices 0 turns adding off, another profile on a device included;
+// removing and the operator still work.
+func TestUserSelfMaxDevicesZero(t *testing.T) {
+	users := controltest.NewUsers(t, "eu", "nl")
+	users.Limit = 0
+	ops, self := userClients(newUserSource(users, daemon.Status{}))
+	if _, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone", Profile: "eu"}); err != nil {
+		t.Fatalf("the operator with max_devices 0: %v", err)
+	}
+	alice := as(t.Context(), "alice")
+	_, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "laptop", Profile: "eu"})
+	wantCode(t, "a new device", err, connect.CodePermissionDenied)
+	_, err = self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "phone", Profile: "nl"})
+	wantCode(t, "another profile on a device", err, connect.CodePermissionDenied)
+	if peers, _ := users.St.UserPeers("alice"); len(peers) != 1 {
+		t.Errorf("alice's peers: %+v", peers)
+	}
+	if _, err := self.RemoveDevice(alice, &lotsmanv1.RemoveSelfDeviceRequest{Device: "phone"}); err != nil {
+		t.Errorf("removing with max_devices 0: %v", err)
+	}
+}
+
 func TestUserSelfAddRateLimit(t *testing.T) {
 	users := controltest.NewUsers(t, "eu")
 	users.Limit = 100
@@ -450,4 +476,83 @@ func TestUserSelfWatch(t *testing.T) {
 	users.St.DeleteUser("alice")
 	_, err = stream.Receive()
 	wantCode(t, "Watch after the user's removal", err, connect.CodeUnauthenticated)
+}
+
+// A user's history covers the upstreams their Watch shows, without bytes,
+// and their own peers; anything else fails as a missing name does.
+func TestUserSelfHistory(t *testing.T) {
+	users := controltest.NewUsers(t)
+	users.St.AddProfile(config.Profile{Name: "nl", Prefer: []config.Match{{Geo: "NL"}}})
+	alices, _ := users.St.AddUserPeer("alice", "phone", "nl", controltest.Subnet)
+	bobs, _ := users.St.AddUserPeer("bob", "phone", "nl", controltest.Subnet)
+	src := newUserSource(users, daemon.Status{
+		Upstreams: []daemon.UpstreamStatus{{Name: "nl", Geo: "NL"}, {Name: "de", Geo: "DE"}, {Name: "us", Geo: "US"}},
+		Peers: []daemon.PeerStatus{
+			{ID: alices.ID, User: "alice", Profile: "nl", Upstream: "de"}, // routed off its profile
+			{ID: bobs.ID, User: "bob", Profile: "nl", Upstream: "us"},
+		},
+	})
+	f := &fakeHistory{res: history.Result{Step: time.Minute, Samples: []store.Sample{
+		{Time: t0, UpRatio: 0.5, Latency: 20 * time.Millisecond, Down: 1000, Up: 100},
+	}}}
+	src.HistorySource = f
+	_, self := userClients(src)
+	alice := as(t.Context(), "alice")
+	req := func(name string) *lotsmanv1.HistoryRequest {
+		return &lotsmanv1.HistoryRequest{Name: name, From: timestamppb.New(t0), To: timestamppb.New(t1)}
+	}
+
+	for _, name := range []string{"nl", "de"} {
+		got, err := self.UpstreamHistory(alice, req(name))
+		want := &lotsmanv1.HistoryResponse{Step: durationpb.New(time.Minute), Samples: []*lotsmanv1.Sample{
+			{Time: timestamppb.New(t0), UpRatio: 0.5, Latency: durationpb.New(20 * time.Millisecond)},
+		}}
+		if err != nil || f.name != name || !cmp.Equal(want, got, protocmp.Transform()) {
+			t.Errorf("UpstreamHistory(%s) asked %q: %v, %v", name, f.name, got, err)
+		}
+	}
+	peer := PeerID(alices.ID)
+	got, err := self.PeerHistory(alice, req(peer))
+	if err != nil || f.name != peer || len(got.Samples) != 1 || got.Samples[0].DownBytes != 1000 {
+		t.Errorf("PeerHistory(own peer) = %v, %v", got, err)
+	}
+
+	// Another user's upstream or peer fails as a missing one does.
+	f.err = store.ErrNotFound
+	_, missingUpstream := self.UpstreamHistory(alice, req("gone"))
+	_, missingPeer := self.PeerHistory(alice, req("p_99"))
+	f.err = nil
+	_, foreignUpstream := self.UpstreamHistory(alice, req("us"))
+	_, foreignPeer := self.PeerHistory(alice, req(PeerID(bobs.ID)))
+	_, unknownPeer := self.PeerHistory(alice, req("p_99")) // the store does not have it
+	for what, err := range map[string]error{
+		"a missing upstream": missingUpstream, "bob's upstream": foreignUpstream,
+		"a missing peer": missingPeer, "bob's peer": foreignPeer, "a peer only the store lacks": unknownPeer,
+	} {
+		wantCode(t, what, err, connect.CodeNotFound)
+		if err != nil && err.Error() != missingUpstream.Error() {
+			t.Errorf("%s: %q, want %q", what, err, missingUpstream)
+		}
+	}
+	_, err = self.PeerHistory(alice, req("alice"))
+	wantCode(t, "a malformed peer id", err, connect.CodeNotFound)
+
+	// The daemon judges the range first, for every name alike.
+	f.err = fmt.Errorf("%w: too long", history.ErrRange)
+	for _, name := range []string{"nl", "us"} {
+		_, err := self.UpstreamHistory(alice, req(name))
+		wantCode(t, "a bad range for "+name, err, connect.CodeInvalidArgument)
+	}
+	_, err = self.PeerHistory(alice, req(PeerID(bobs.ID)))
+	wantCode(t, "a bad range for bob's peer", err, connect.CodeInvalidArgument)
+	f.err = nil
+
+	_, err = self.UpstreamHistory(alice, &lotsmanv1.HistoryRequest{})
+	wantCode(t, "no name", err, connect.CodeInvalidArgument)
+	_, err = self.PeerHistory(alice, &lotsmanv1.HistoryRequest{Name: peer, From: &timestamppb.Timestamp{Nanos: -1}})
+	wantCode(t, "an invalid from", err, connect.CodeInvalidArgument)
+	_, err = self.UpstreamHistory(t.Context(), req("nl"))
+	wantCode(t, "no user", err, connect.CodeUnauthenticated)
+	_, err = self.PeerHistory(as(t.Context(), "carol"), req(peer))
+	wantCode(t, "an unknown user", err, connect.CodeUnauthenticated)
 }

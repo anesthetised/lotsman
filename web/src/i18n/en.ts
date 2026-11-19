@@ -92,6 +92,7 @@ export const en = {
     failed: (message: string) => `Something went wrong: ${message}`,
   },
   user: {
+    badLink: "This link is missing or invalid. Open the whole link the operator gave you, including the part after #, or ask them for a new one.",
     title: (name: string) => `Hello, ${name}`,
     speedNow: "Speed now",
     speedTrend: "Your download rate over the last minute",

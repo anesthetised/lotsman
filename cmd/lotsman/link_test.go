@@ -44,7 +44,7 @@ func TestUserLink(t *testing.T) {
 
 	// -url, else the panel's public_url.
 	out, errOut, err = link("alice", "-url", "https://vpn.example.com/")
-	second, ok := strings.CutPrefix(strings.TrimSpace(out), "https://vpn.example.com/u/")
+	second, ok := strings.CutPrefix(strings.TrimSpace(out), "https://vpn.example.com/u#")
 	if err != nil || !ok || !store.ValidToken(second) || strings.Contains(errOut, second) {
 		t.Fatalf("with -url: %q, %q, %v", out, errOut, err)
 	}
@@ -55,7 +55,7 @@ func TestUserLink(t *testing.T) {
 	os.WriteFile(webCfg, []byte("public_url: https://panel.example.org:8443\n"), 0o600)
 	t.Setenv("LOTSMAN_WEB_CONFIG", webCfg)
 	out, _, err = link("alice")
-	third, ok := strings.CutPrefix(strings.TrimSpace(out), "https://panel.example.org:8443/u/")
+	third, ok := strings.CutPrefix(strings.TrimSpace(out), "https://panel.example.org:8443/u#")
 	if err != nil || !ok || !store.ValidToken(third) {
 		t.Fatalf("with the panel's config: %q, %v", out, err)
 	}

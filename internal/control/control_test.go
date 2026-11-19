@@ -280,6 +280,8 @@ func TestUnimplemented(t *testing.T) {
 		lotsmanv1connect.UserSelfServiceRemoveDeviceProcedure,
 		lotsmanv1connect.UserSelfServiceGetConfigProcedure,
 		lotsmanv1connect.UserSelfServiceListProfilesProcedure,
+		lotsmanv1connect.UserSelfServiceUpstreamHistoryProcedure,
+		lotsmanv1connect.UserSelfServicePeerHistoryProcedure,
 	}
 	s := NewServer(newFakeSource(daemon.Status{}))
 	var registered []string

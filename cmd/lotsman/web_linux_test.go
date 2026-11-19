@@ -13,18 +13,23 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	lotsmanv1 "github.com/anesthetised/lotsman/api/lotsman/v1"
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
+	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/control"
 	"github.com/anesthetised/lotsman/internal/control/controltest"
 	"github.com/anesthetised/lotsman/internal/daemon"
+	"github.com/anesthetised/lotsman/internal/history"
+	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/traffic"
 )
 
@@ -35,13 +40,13 @@ type everyoneOperator struct{}
 func (everyoneOperator) Operator(*http.Request) error       { return nil }
 func (everyoneOperator) User(*http.Request) (string, error) { return "", nil }
 
-// panelSource is a daemon with one upstream. The test never calls the
-// profile and connection services. Its users are nil unless a test sets
-// them.
+// panelSource is a daemon with one upstream and a minute of history for
+// any name. The test never calls the profile and connection services. Its
+// users are nil unless a test sets them; their peers are in the status,
+// routed nowhere.
 type panelSource struct {
 	control.ProfileSource
 	control.ConnectionSource
-	control.HistorySource
 	*controltest.Users
 }
 
@@ -51,10 +56,23 @@ func (panelSource) Ready() <-chan struct{} {
 	return ready
 }
 func (panelSource) ClientMTU() int { return 1280 }
-func (panelSource) Status() daemon.Status {
-	return daemon.Status{Upstreams: []daemon.UpstreamStatus{{Name: "nl", Kind: "awg"}}}
+func (p panelSource) Status() daemon.Status {
+	st := daemon.Status{Upstreams: []daemon.UpstreamStatus{{Name: "nl", Kind: "awg", Geo: "NL"}}}
+	if p.Users != nil {
+		peers, _ := p.St.ListPeers()
+		for _, peer := range peers {
+			st.Peers = append(st.Peers, daemon.PeerStatus{ID: peer.ID, User: peer.User, Device: peer.Device, Profile: peer.Profile})
+		}
+	}
+	return st
 }
 func (panelSource) Traffic() traffic.Snapshot { return traffic.Snapshot{} }
+func (panelSource) UpstreamHistory(string, history.Range) (history.Result, error) {
+	return history.Result{Step: time.Minute, Samples: []store.Sample{{Time: time.Now(), UpRatio: 1, Down: 1000, Up: 100}}}, nil
+}
+func (p panelSource) PeerHistory(int64, history.Range) (history.Result, error) {
+	return p.UpstreamHistory("", history.Range{})
+}
 
 // systemUser makes sure the system user exists, creating it with the given
 // useradd flags and removing it afterwards when the test created it.
@@ -141,9 +159,9 @@ func TestWebPanelSocketAccess(t *testing.T) {
 }
 
 // TestWebPanelUserLink follows a user's link through the panel, run as
-// lotsman-web, to the control socket: the operator issues the link, the
-// user's page resolves it, adds a device and fetches its config, and
-// another user's peer stays out of reach.
+// lotsman-web, to the control socket: `lotsman user link` prints it, the
+// user's page resolves it, adds a device, fetches its config and the
+// history of its exit, and another user's peer stays out of reach.
 func TestWebPanelUserLink(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root: creates users and the control socket")
@@ -167,7 +185,14 @@ func TestWebPanelUserLink(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	users := controltest.NewUsers(t, "eu")
+	// The daemon and the CLI share the store, as on a gateway.
+	cfg := testConfig(t)
+	st, err := store.Open(dbPath(filepath.Join(filepath.Dir(cfg), "state")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+	users := &controltest.Users{St: st, Limit: config.DefaultMaxDevices}
 	ctx, stop := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() { served <- control.Serve(ctx, ln, panelSource{Users: users}) }()
@@ -176,27 +201,44 @@ func TestWebPanelUserLink(t *testing.T) {
 	gid, _ := strconv.Atoi(panelUser.Gid)
 	origin, _, _ := startPanel(t, dir, "links", socket, uid, gid)
 
-	// The operator: bob gets a device, alice a user and a link.
+	// The operator: bob gets a device and a link through the API, alice a
+	// device through the API and a link from the CLI, with the token in the
+	// fragment.
 	opClient := connect.NewClient(connecthttp.NewTransport(&http.Client{Transport: originTransport{origin}}, origin+"/api"))
 	ops := lotsmanv1connect.NewUserServiceClient(opClient)
-	bobs, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "bob", Device: "phone", Profile: "eu"})
+	bobs, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "bob", Device: "phone", Profile: "nl"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone", Profile: "eu"}); err != nil {
+	if _, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone", Profile: "nl"}); err != nil {
 		t.Fatal(err)
 	}
-	link, err := ops.IssueLink(t.Context(), &lotsmanv1.IssueLinkRequest{User: "alice"})
+	bobsLink, err := ops.IssueLink(t.Context(), &lotsmanv1.IssueLinkRequest{User: "bob"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	out := mustRun(t, "-config", cfg, "user", "link", "alice", "-url", origin)
+	token, ok := strings.CutPrefix(strings.TrimSpace(out), origin+"/u#")
+	if !ok || !store.ValidToken(token) {
+		t.Fatalf("user link printed %q, want %s/u#<token>", out, origin)
 	}
 
-	userClient := connect.NewClient(connecthttp.NewTransport(&http.Client{Transport: linkTransport{origin, link.Token}}, origin+"/api"))
-	self := lotsmanv1connect.NewUserSelfServiceClient(userClient)
+	selfClient := func(token string) lotsmanv1connect.UserSelfServiceClient {
+		c := connect.NewClient(connecthttp.NewTransport(&http.Client{Transport: linkTransport{origin, token}}, origin+"/api"))
+		return lotsmanv1connect.NewUserSelfServiceClient(c)
+	}
+	if u, err := selfClient(bobsLink.Token).Get(t.Context(), &lotsmanv1.GetSelfRequest{}); err != nil || u.Name != "bob" {
+		t.Errorf("Get through bob's link: %v, %v", u, err)
+	}
+	self := selfClient(token)
 	if u, err := self.Get(t.Context(), &lotsmanv1.GetSelfRequest{}); err != nil || u.Name != "alice" {
 		t.Fatalf("Get through the link: %v, %v", u, err)
 	}
-	laptop, err := self.AddDevice(t.Context(), &lotsmanv1.AddSelfDeviceRequest{Device: "laptop", Profile: "eu"})
+	h, err := self.UpstreamHistory(t.Context(), &lotsmanv1.HistoryRequest{Name: "nl", From: timestamppb.New(time.Now().Add(-time.Hour))})
+	if err != nil || len(h.Samples) != 1 || h.Samples[0].UpRatio != 1 || h.Samples[0].DownBytes != 0 {
+		t.Errorf("history of alice's exit: %v, %v", h, err)
+	}
+	laptop, err := self.AddDevice(t.Context(), &lotsmanv1.AddSelfDeviceRequest{Device: "laptop", Profile: "nl"})
 	if err != nil {
 		t.Fatal(err)
 	}

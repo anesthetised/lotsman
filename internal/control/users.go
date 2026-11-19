@@ -188,4 +188,6 @@ func notFound(err error, msg string) error {
 	return internal(err)
 }
 
-func internal(err error) error { return connect.NewError(connect.CodeInternal, err.Error()) }
+// internal hides a failure's detail, such as a database path or SQL, from
+// the caller: it may be a browser.
+func internal(error) error { return connect.NewError(connect.CodeInternal, "users: internal error") }

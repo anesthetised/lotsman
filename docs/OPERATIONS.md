@@ -132,7 +132,7 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, `outline` or `vless`), `conf` path (the provider's AmneziaWG config, for `outline` a file with the access key or its `ssconf://` URL, for `vless` a file with the `vless://` link), free-form `geo` and `provider` labels, `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates), and for the proxy kinds `outline` and `vless` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams) and [VLESS upstreams](#vless-upstreams)). |
 | `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline and VLESS upstream; default `1.1.1.1:53`), `down_after`, `up_after`, and the optional `transfer` block (off when absent; see [Throttled upstreams](#throttled-upstreams-transfer-probe)). |
 | `history` | `minute_retention` (default `168h`, 7 days; at least `1h`) and `hour_retention` (default `2160h`, 90 days; not shorter than `minute_retention`): how long the [history](#history) keeps samples of a minute and of an hour. Go durations, so hours (`168h`), not days. Applies on reload. |
-| `users` | `max_devices`: how many devices a user may have when adding one on their [page](#user-links), default 5; `0` lets users add no new device (another profile on one they have still works). The operator's commands are not limited. |
+| `users` | `max_devices`: how many devices a user may have when adding one on their [page](#user-links), default 5; another profile on a device they have does not count. `0` turns adding off, another profile included. The operator's commands are not limited. |
 
 `listen` binds exactly the configured numeric address; hostnames and an omitted
 host are unsupported. An occupied port, unavailable family, or unassigned address
@@ -577,10 +577,10 @@ restart the daemon. Run these commands as the daemon's user (normally root).
 
 ### User links
 
-A user's link opens their own page in the [web panel](#web-panel), `https://<public_url>/u/<token>`.
-There they see their devices and the exits their profiles use, download each config (text and QR
-code), add or remove their own devices and switch a device's profile (add the new profile, then
-remove the old one).
+A user's link opens their own page in the [web panel](#web-panel), `<public_url>/u#<token>`.
+There they see their devices and the exits their profiles use, with their availability, download
+each config (text and QR code), add or remove their own devices and switch a device's profile (add
+the new profile, then remove the old one).
 
 ```bash
 lotsman user link alice                  # print a new link; her previous one stops working
@@ -601,14 +601,16 @@ Users are limited on their page, not in the CLI:
 
 - `users.max_devices` in `lotsman.yaml` (default 5) caps the devices a user can have when adding
   one; another profile on an existing device does not count, so profile switches keep working. `0`
-  lets users add no device. Reload with `systemctl reload lotsman`.
+  turns adding off, another profile included (`permission_denied`); users can still remove
+  devices. Reload with `systemctl reload lotsman`.
 - At most 10 additions at once, then one every 6 minutes, per user (`resource_exhausted` past it).
 - A client address (an IPv6 `/64`) whose links fail to resolve 10 times is refused for a while
   (one more try every 6 seconds), so the panel does not pass guesses on to the daemon.
 
-The token is never logged, by the daemon or the panel. Your reverse proxy's access log does see
-it, because it is in the page's address; leave `/u/` out of the access log if the log is kept or
-shipped elsewhere (nginx: a separate `location /u/ { access_log off; ... }`).
+The token is never logged, by the daemon or the panel. It is in the link's fragment, after `#`,
+which browsers never send, so your reverse proxy's access log sees only `/u`; the page sends the
+token to the panel in a header, which proxies do not log by default. A link cut off before the
+`#` part, or with a garbled token, shows "link missing or invalid" instead of the page.
 
 ## Watching it
 
@@ -668,8 +670,8 @@ group and restart. The unit provides `/run/lotsman` (`RuntimeDirectory=lotsman`)
   be read.
 - `HistoryService` (`Upstream`, `Peer`): the [history](#history) of an upstream or a `peer_id`.
   Errors: `invalid_argument` for a bad range or step, `not_found` for an unknown name.
-- `UserService` and `UserSelfService` but its history RPCs: users, devices, configs and
-  [links](#user-links).
+- `UserService` and `UserSelfService`: users, devices, configs and [links](#user-links), and a
+  user's own view, history included.
 
 Every other RPC returns `unimplemented`. Self-service RPCs act for the user named in the `Lotsman-User` request header,
 which only the [web panel](#web-panel) sets.

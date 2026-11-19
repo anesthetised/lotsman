@@ -97,7 +97,7 @@ health:
 
 # What users may do on their own page in the web panel (lotsman user link).
 # max_devices caps the devices a user can have when adding one there (another
-# profile on a device they have does not count); 0 lets users add no new
-# device. The operator's commands are not limited.
+# profile on a device they have does not count); 0 turns adding off, another
+# profile included. The operator's commands are not limited.
 # users:
 #   max_devices: 5

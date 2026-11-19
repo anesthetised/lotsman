@@ -45,8 +45,8 @@ type History struct {
 // operator is not limited.
 type Users struct {
 	// MaxDevices is how many devices a user may have when adding one on
-	// their page; 0 lets users add no new device. Another profile on a
-	// device they have is no new device.
+	// their page. Another profile on a device they have is no new device;
+	// 0 turns adding off, another profile included.
 	MaxDevices int `yaml:"max_devices"`
 }
 

@@ -2,6 +2,7 @@ package store
 
 import (
 	"bytes"
+	"database/sql"
 	"errors"
 	"os"
 	"path/filepath"
@@ -119,5 +120,51 @@ func TestLinkTokenIsNotStored(t *testing.T) {
 		if bytes.Contains(data, []byte(token)) {
 			t.Errorf("%s holds the token", filepath.Base(f))
 		}
+	}
+}
+
+// A database as the history release left it (schema 5) gains user links and
+// keeps its history.
+func TestMigrateFromVersion5(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lotsman.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migrations[:5] {
+		if _, err := db.Exec(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 5;
+		INSERT INTO users (id, name, created_at) VALUES (1, 'alice', '2026-11-01T00:00:00Z');
+		INSERT INTO upstream_samples VALUES ('nl', 1763985600, 1, 20, 1000, 100);`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var version int
+	s.db.QueryRow(`PRAGMA user_version`).Scan(&version)
+	if version != len(migrations) || version != 6 {
+		t.Errorf("user_version = %d, want 6", version)
+	}
+	token, err := s.IssueLink("alice")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user, err := s.ResolveLink(token); err != nil || user != "alice" {
+		t.Errorf("ResolveLink after migration = %q, %v", user, err)
+	}
+	if n := countRows(t, s, "upstream_samples"); n != 1 {
+		t.Errorf("upstream_samples after migration: %d rows, want 1", n)
+	}
+	backups, _ := filepath.Glob(path + ".v5-*.bak")
+	if len(backups) != 1 {
+		t.Errorf("backups = %v", backups)
 	}
 }

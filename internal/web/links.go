@@ -18,11 +18,13 @@ import (
 	"github.com/anesthetised/lotsman/internal/store"
 )
 
-// A user's page sends the token of its /u/<token> address on every call as
-// "Authorization: Bearer <token>". A header rather than a cookie: the link
-// is meant to be bookmarked and needs no sign-in step, no other site can
-// make a browser send the header, so there is nothing to forge, and it
-// stays apart from operators' session cookies. The panel never forwards it.
+// A user's link is <public_url>/u#<token>. The token is in the fragment,
+// which browsers never send, so it stays out of proxy access logs; the page
+// reads it and sends it on every call as "Authorization: Bearer <token>".
+// A header rather than a cookie: the link is meant to be bookmarked and
+// needs no sign-in step, no other site can make a browser send the header,
+// so there is nothing to forge, and it stays apart from operators' session
+// cookies. The panel never forwards it.
 
 const (
 	// linkTTL is how long a resolved link is trusted without asking the

@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// A user's link is the secret in the address of their page, /u/<token>. It
+// A user's link is the secret in the address of their page, /u#<token>. It
 // lets whoever holds it download the user's configs and change their
 // devices, so it is kept like a password: 256 random bits, only their
 // SHA-256 in the database, and the token itself shown once, when issued.

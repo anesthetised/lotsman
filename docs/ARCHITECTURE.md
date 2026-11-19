@@ -529,7 +529,7 @@ browser ──https──▶ reverse proxy ──http──▶ lotsman web ─�
   Without `index.html` every page is a placeholder generated in Go, so `go build` needs no Node.
   An existing file is served as is (`assets/` with a one-year immutable cache, as Vite hashes those
   names); any other path without an extension gets `index.html` (`no-cache`), so client routes such
-  as `/u/<token>` load the app; a missing path with an extension is a 404 rather than HTML in place
+  as `/u` load the app; a missing path with an extension is a 404 rather than HTML in place
   of a script.
 - State: `web.db` (SQLite, `0600`) in the state directory: the `passkeys`, `sessions` and
   `enrollments` tables of #133. A database from a newer panel is refused rather than misread.
@@ -627,8 +627,10 @@ without a built UI). New modules: `github.com/go-webauthn/webauthn` (BSD-3-Claus
 
 ## User links (#134)
 
-A user reaches their page through a secret link, `<public_url>/u/<token>`, which grants their
-configs and changes to their devices, so it is handled like a private key.
+A user reaches their page through a secret link, `<public_url>/u#<token>`, which grants their
+configs and changes to their devices, so it is handled like a private key. The token is in the
+fragment, as in the operators' enrollment link: browsers never send a fragment, so the token
+reaches neither the reverse proxy's access log nor the panel with the page request.
 
 - Store: `user_links(user, token_hash, created, revoked)`, the store's migration after the history
   tables. A token is 32 random bytes in unpadded base64url (43 characters); only its SHA-256 is
@@ -637,8 +639,10 @@ configs and changes to their devices, so it is handled like a private key.
   enforces it). Revoked rows stay as a record. Removing the user removes their links (`ON DELETE
   CASCADE`), so a name reused later inherits nothing. `lotsman user link NAME [-url URL] [-revoke]`
   and `UserService.IssueLink`/`RevokeLink` are the two ways in; both use the same store calls.
-- Browser to panel: the page takes the token from its address and sends it on every call as
-  `Authorization: Bearer <token>`. The panel's `Links` authenticator resolves it with
+- Browser to panel: the page (route `/u`) takes the token from `location.hash`, keeps it in
+  memory only (no storage; it stays in the address bar, as the link is a bookmark) and sends it on
+  every call as `Authorization: Bearer <token>`. A missing or malformed token shows a message and
+  calls nothing. The panel's `Links` authenticator resolves it with
   `UserSelfService.ResolveLink` (internal scope) and sets `Lotsman-User`; the header allowlist drops
   `Authorization` and any browser `Lotsman-*`. A resolved link is cached for 30 s, keyed by the
   token's SHA-256 (at most 1024 entries); a failed resolution drops the entry. A user call that is
@@ -652,7 +656,8 @@ configs and changes to their devices, so it is handled like a private key.
   unknown user is `unauthenticated`. Another user's peer is `not_found` with the same message as a
   missing one, never `permission_denied`, so a `peer_id` does not reveal whether it exists.
   `AddDevice` enforces `users.max_devices` (default 5; a new profile on an existing device is no new
-  device, so a profile switch, add then remove, works at the limit) and a per-user token bucket of
+  device, so a profile switch, add then remove, works at the limit; `0` refuses every addition, a
+  new profile included, with `permission_denied`) and a per-user token bucket of
   10 additions, then one every 6 minutes; the count and the add happen under one lock. Mutations
   go through `Daemon.AddPeer`, `RemovePeers` and `RemoveUser`: the store calls the CLI makes, then
   a reconcile in place of the CLI's SIGUSR1, so a new device can connect when the call returns.
@@ -662,13 +667,24 @@ configs and changes to their devices, so it is handled like a private key.
   their peers' profiles may use (`policy.Allows`) or a peer of theirs is routed through. Other
   users' peers make up an upstream's `routed`, `active` and `traffic`, so those stay unset; `total`
   is the sum of the user's peers. The stream ends with `unauthenticated` once the user is removed.
+- History: `UpstreamHistory` serves the upstreams that `Watch` shows (the same `userUpstreams`
+  over the daemon's status and the stored profiles) with `up_ratio` and `latency` only, as an
+  upstream's bytes are every user's traffic; `PeerHistory` serves the user's own peers. Both take
+  `HistoryService`'s request checks and error mapping (`historyRange`, `historyResponse`) and ask
+  the daemon before checking the name, so any name the user may not see fails exactly as a missing
+  one: `not_found` with the same message, and `invalid_argument` first for a bad range.
 - Tokens are never logged, and no error repeats one: the daemon does not log requests, and the
   panel's messages name the client address only.
 
 | Browser credential option | For | Against |
 |---|---|---|
-| **A. `Authorization: Bearer` from the page's address (chosen)** | The link stays a bookmark with no sign-in step; no other site can make a browser send the header, so there is nothing to forge (CSRF); apart from operators' cookies | The token is in the page's address, so the reverse proxy's access log sees it, as with any secret link |
+| **A. `Authorization: Bearer` from the page's address (chosen)** | The link stays a bookmark with no sign-in step; no other site can make a browser send the header, so there is nothing to forge (CSRF); apart from operators' cookies | The token is in the address bar and the browser's history, as with any bookmarkable secret link |
 | B. Exchange the link for a session cookie | The address could drop the token after the first load | A sign-in step and session state in `web.db`; cookies ride along on cross-site requests, so CSRF defences are needed; mixes with operator sessions |
+
+| Token place option | For | Against |
+|---|---|---|
+| **A. Fragment, `/u#<token>` (chosen)** | Browsers never send it, so it stays out of proxy access logs and the page request; the same as the enrollment link | Only the page's script can read it, which it must anyway to send the header |
+| B. Path, `/u/<token>` | Readable by the server, if it ever needed that | Every page load writes the token to the reverse proxy's access log unless the operator excludes the path |
 
 | Limit option | For | Against |
 |---|---|---|
@@ -801,7 +817,7 @@ is up to a minute and a bit old.
 
 The query is a Go API, `Daemon.UpstreamHistory(name, history.Range)` and `Daemon.PeerHistory(id,
 history.Range)`; the handlers in `internal/control/history.go` only map it, and the user-scoped
-history RPCs of #134 call the same two after checking ownership.
+history RPCs of #134 call the same two and then check that the user may see the name.
 
 **Cost.** Measured on an Apple M1 Max with a throwaway test, 90 days of 5 upstreams and 50 peers (random byte
 counts of the size a busy peer moves, so the integers are not shorter than in practice), filled

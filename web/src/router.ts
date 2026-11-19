@@ -18,7 +18,7 @@ export const Router = createRouter({
     },
     { path: "/login", component: lazy(() => import("./pages/auth/SignIn")) },
     { path: "/enroll", component: lazy(() => import("./pages/auth/Enroll")) },
-    { path: "/u/:token", component: lazy(() => import("./pages/user/UserPage")) },
+    { path: "/u", component: lazy(() => import("./pages/user/UserPage")) },
     { path: "*404", component: NotFound },
   ],
 });

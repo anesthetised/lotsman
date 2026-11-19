@@ -38,7 +38,7 @@ const placeholder = `<!doctype html>
 const staticTimeout = 30 * time.Second
 
 // ui serves the single-page app from files: a file by its path, and
-// index.html for any other page, so client-side routes such as /u/<token>
+// index.html for any other page, so client-side routes such as /u
 // load the app. Without index.html it serves the placeholder.
 type ui struct {
 	files fs.FS

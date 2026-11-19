@@ -33,8 +33,6 @@ const (
 // it, as only the panel can reach the socket. Another user's peer is
 // NotFound rather than PermissionDenied, so its existence is not confirmed.
 type userSelfService struct {
-	lotsmanv1connect.UnimplementedUserSelfServiceHandler // the history RPCs (#130)
-
 	src  Source
 	now  func() time.Time
 	adds *ratelimit.Limiter[string]
@@ -81,22 +79,92 @@ func (s *userSelfService) Watch(ctx context.Context, req *lotsmanv1.WatchStatusR
 		if _, err := s.src.Store().User(u.Name); err != nil {
 			return nil, unauthenticated(err)
 		}
-		stored, err := s.src.Store().ListProfiles()
+		profiles, err := s.profiles()
 		if err != nil {
-			return nil, internal(err)
-		}
-		profiles := map[string]config.Profile{}
-		for _, p := range stored {
-			profiles[p.Name] = p
+			return nil, err
 		}
 		return userSnapshot(s.now(), s.src.ClientMTU(), st, tr, u.Name, profiles), nil
 	}
 	return streamSnapshots(ctx, req, s.src.Ready(), next, stream.Send)
 }
 
+// UpstreamHistory is HistoryService.Upstream for an upstream the user's
+// Watch shows, without bytes: those are every user's traffic. The daemon
+// answers before the check, so another upstream fails exactly as a missing
+// one does, a bad range included.
+func (s *userSelfService) UpstreamHistory(ctx context.Context, req *lotsmanv1.HistoryRequest) (*lotsmanv1.HistoryResponse, error) {
+	u, err := s.actingUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.GetName() == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, "name is required")
+	}
+	r, err := historyRange(req)
+	if err != nil {
+		return nil, err
+	}
+	res, err := s.src.UpstreamHistory(req.GetName(), r)
+	if err == nil {
+		var profiles map[string]config.Profile
+		if profiles, err = s.profiles(); err != nil {
+			return nil, err
+		}
+		if !userUpstreams(s.src.Status(), u.Name, profiles)[req.GetName()] {
+			err = store.ErrNotFound
+		}
+	}
+	out, err := historyResponse(res, err)
+	for _, sample := range out.GetSamples() {
+		sample.DownBytes, sample.UpBytes = 0, 0
+	}
+	return out, err
+}
+
+// PeerHistory is HistoryService.Peer for one of the user's own peers.
+// Another user's peer fails exactly as a missing one does.
+func (s *userSelfService) PeerHistory(ctx context.Context, req *lotsmanv1.HistoryRequest) (*lotsmanv1.HistoryResponse, error) {
+	u, err := s.actingUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.GetName() == "" {
+		return nil, connect.NewError(connect.CodeInvalidArgument, "name is required")
+	}
+	r, err := historyRange(req)
+	if err != nil {
+		return nil, err
+	}
+	id, ok := ParsePeerID(req.GetName())
+	if !ok {
+		return nil, connect.NewError(connect.CodeNotFound, "no such peer")
+	}
+	res, err := s.src.PeerHistory(id, r)
+	if err == nil {
+		var p store.Peer
+		if p, err = s.src.Store().PeerByID(id); err == nil && p.User != u.Name {
+			err = store.ErrNotFound
+		}
+	}
+	return historyResponse(res, err)
+}
+
+// profiles are the stored profiles by name.
+func (s *userSelfService) profiles() (map[string]config.Profile, error) {
+	stored, err := s.src.Store().ListProfiles()
+	if err != nil {
+		return nil, internal(err)
+	}
+	profiles := map[string]config.Profile{}
+	for _, p := range stored {
+		profiles[p.Name] = p
+	}
+	return profiles, nil
+}
+
 // AddDevice adds a device, or another profile to one of the user's
-// devices, within max_devices and the rate limit. The operator's AddDevice
-// has neither.
+// devices, within max_devices and the rate limit; max_devices 0 refuses
+// every addition. The operator's AddDevice has neither limit.
 func (s *userSelfService) AddDevice(ctx context.Context, req *lotsmanv1.AddSelfDeviceRequest) (*lotsmanv1.DeviceConfig, error) {
 	u, err := s.actingUser(ctx)
 	if err != nil {
@@ -121,7 +189,11 @@ func (s *userSelfService) AddDevice(ctx context.Context, req *lotsmanv1.AddSelfD
 			devices = append(devices, p.Device)
 		}
 	}
-	if limit := s.src.MaxDevices(); !slices.Contains(devices, device) && len(devices) >= limit {
+	limit := s.src.MaxDevices()
+	if limit == 0 {
+		return nil, connect.NewError(connect.CodePermissionDenied, "adding devices is turned off; ask the operator")
+	}
+	if !slices.Contains(devices, device) && len(devices) >= limit {
 		return nil, connect.NewError(connect.CodeResourceExhausted, "at most "+strconv.Itoa(limit)+" devices; remove one first or ask the operator")
 	}
 	if !s.adds.Allow(u.Name, s.now()) {
@@ -229,16 +301,26 @@ func userSnapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Sna
 		total.DownRate += t.DownRate
 		total.UpRate += t.UpRate
 	}
+	usable := userUpstreams(st, user, profiles)
 	for _, u := range st.Upstreams {
-		up := config.Upstream{Name: u.Name, Geo: u.Geo, Provider: u.Provider, Tags: u.Tags}
-		usable := slices.ContainsFunc(own.Peers, func(p daemon.PeerStatus) bool {
-			profile, ok := profiles[p.Profile]
-			return p.Upstream == u.Name || (ok && policy.Allows(profile, up))
-		})
-		if usable {
+		if usable[u.Name] {
 			u.Routed, u.Active = 0, 0
 			own.Upstreams = append(own.Upstreams, u)
 		}
 	}
 	return snapshot(now, clientMTU, own, traffic.Snapshot{Time: tr.Time, Peers: tr.Peers, Total: total})
+}
+
+// userUpstreams names the upstreams a user may see: those their peers'
+// profiles may use, and those a peer of theirs is routed through.
+func userUpstreams(st daemon.Status, user string, profiles map[string]config.Profile) map[string]bool {
+	usable := map[string]bool{}
+	for _, u := range st.Upstreams {
+		up := config.Upstream{Name: u.Name, Geo: u.Geo, Provider: u.Provider, Tags: u.Tags}
+		usable[u.Name] = slices.ContainsFunc(st.Peers, func(p daemon.PeerStatus) bool {
+			profile, ok := profiles[p.Profile]
+			return p.User == user && (p.Upstream == u.Name || (ok && policy.Allows(profile, up)))
+		})
+	}
+	return usable
 }

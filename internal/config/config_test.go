@@ -354,7 +354,7 @@ func TestUsersMaxDevices(t *testing.T) {
 	}{
 		{"", DefaultMaxDevices, true},
 		{"users: {max_devices: 2}\n", 2, true},
-		{"users: {max_devices: 0}\n", 0, true}, // users add no devices
+		{"users: {max_devices: 0}\n", 0, true}, // users add nothing
 		{"users: {max_devices: -1}\n", 0, false},
 	} {
 		cfg, err := Parse([]byte(minimal + tc.extra))

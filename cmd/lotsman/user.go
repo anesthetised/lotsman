@@ -139,7 +139,8 @@ func userRemove(configPath string, args []string) error {
 // one they had, or with -revoke ends it. The link is printed once, to
 // stdout: only its hash is stored. Its address is the panel's public_url,
 // read from the panel's config, or -url; without either only the token is
-// printed.
+// printed. The token goes in the fragment, <public_url>/u#<token>, which
+// browsers never send, so it stays out of proxy logs.
 func userLink(configPath string, args []string) error {
 	fs := flag.NewFlagSet("user link", flag.ContinueOnError)
 	revoke := fs.Bool("revoke", false, "end the user's link instead of issuing one")
@@ -177,9 +178,9 @@ func userLink(configPath string, args []string) error {
 	}
 	if origin == "" {
 		fmt.Println(token)
-		fmt.Fprintln(os.Stderr, "lotsman: no public URL known (-url, or public_url in the panel's config); the page is <public_url>/u/<token>")
+		fmt.Fprintln(os.Stderr, "lotsman: no public URL known (-url, or public_url in the panel's config); the page is <public_url>/u#<token>")
 	} else {
-		fmt.Println(strings.TrimRight(origin, "/") + "/u/" + token)
+		fmt.Println(strings.TrimRight(origin, "/") + "/u#" + token)
 	}
 	fmt.Fprintf(os.Stderr, "lotsman: the link is shown only this once and replaces %s's previous one; it gives their configs to whoever has it\n", name)
 	return nil
