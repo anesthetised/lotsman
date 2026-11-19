@@ -604,6 +604,8 @@ Users are limited on their page, not in the CLI:
   turns adding off, another profile included (`permission_denied`); users can still remove
   devices. Reload with `systemctl reload lotsman`.
 - At most 10 additions at once, then one every 6 minutes, per user (`resource_exhausted` past it).
+  Both limits answer `resource_exhausted` with a `SelfServiceLimit` detail that names the limit and
+  carries `max_devices` or `retry_after`.
 - A client address (an IPv6 `/64`) whose links fail to resolve 10 times is refused for a while
   (one more try every 6 seconds), so the panel does not pass guesses on to the daemon.
 
