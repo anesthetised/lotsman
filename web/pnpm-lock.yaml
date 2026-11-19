@@ -29,6 +29,9 @@ importers:
       '@solidjs/web':
         specifier: 2.0.1
         version: 2.0.1(solid-js@2.0.1)
+      lean-qr:
+        specifier: 2.7.4
+        version: 2.7.4
       solid-js:
         specifier: 2.0.1
         version: 2.0.1
@@ -1075,6 +1078,10 @@ packages:
   json5@2.2.3:
     resolution: {integrity: sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==}
     engines: {node: '>=6'}
+    hasBin: true
+
+  lean-qr@2.7.4:
+    resolution: {integrity: sha512-tlMPFfqhAAZN7+j/djRSvl/2+AYT2+7RRuyq8bvcbV8gMiENiscquQ9WTfCSyeEdxsVaEB+tU7e9nFZC63BFnQ==}
     hasBin: true
 
   lightningcss-android-arm64@1.33.0:
@@ -2355,6 +2362,8 @@ snapshots:
 
   json5@2.2.3:
     optional: true
+
+  lean-qr@2.7.4: {}
 
   lightningcss-android-arm64@1.33.0:
     optional: true

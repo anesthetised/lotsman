@@ -25,6 +25,10 @@ export interface Formatters {
   ago(date: Date, now: Date): string;
   /** A date and time of day: "Nov 19, 2026, 12:15 PM". */
   dateTime(date: Date): string;
+  /** A time of day with seconds: "12:15:03 PM". */
+  time(date: Date): string;
+  /** A count: "1,234". */
+  count(n: number): string;
 }
 
 export function formatters(locale: string): Formatters {
@@ -38,6 +42,8 @@ export function formatters(locale: string): Formatters {
   const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   const percent = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 });
   const dateTime = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" });
+  const time = new Intl.DateTimeFormat(locale, { timeStyle: "medium" });
+  const count = new Intl.NumberFormat(locale);
 
   return {
     rate(bytesPerSecond) {
@@ -64,6 +70,12 @@ export function formatters(locale: string): Formatters {
     },
     dateTime(date) {
       return dateTime.format(date);
+    },
+    time(date) {
+      return time.format(date);
+    },
+    count(n) {
+      return count.format(n);
     },
   };
 }

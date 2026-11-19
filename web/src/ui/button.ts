@@ -7,6 +7,8 @@ const variants = {
   primary: "bg-accent px-3 py-1.5 text-accent-fg hover:opacity-90",
   secondary: "border border-line bg-surface px-3 py-1.5 hover:bg-bg",
   ghost: "p-1.5 text-muted hover:bg-bg hover:text-fg",
+  /** For actions inside table rows. */
+  compact: "border border-line bg-surface px-2 py-0.5 text-xs hover:bg-bg",
   danger: "bg-bad px-3 py-1.5 text-accent-fg hover:opacity-90",
 };
 

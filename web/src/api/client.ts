@@ -16,7 +16,8 @@ import { onUnauthenticated } from "./unauthenticated";
 
 const fakeAuth = import.meta.env.VITE_FAKE_API ? createFakeAuthServer({ storage: sessionStorage }) : undefined;
 
-const transport: Transport = fakeAuth
+/** Shared with the operator console's clients in `admin.ts`. */
+export const transport: Transport = fakeAuth
   ? createFakeTransport({ seed: 7, interceptors: [onUnauthenticated(redirectToSignIn)], signedIn: fakeAuth.signedIn })
   : createConnectTransport({ baseUrl: "/api", interceptors: [onUnauthenticated(redirectToSignIn)] });
 

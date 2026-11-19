@@ -1,9 +1,12 @@
-// A small traffic simulation behind the fake API: a fixed set of upstreams and
-// peers whose rates take a random walk. It is deterministic for a given seed
-// and clock, so tests can assert on it.
+// A small simulation behind the fake API: a fixed set of upstreams, peers
+// whose rates take a random walk, the connections they open, and the
+// profiles, users and links the operator changes. It is deterministic for a
+// given seed, clock and sequence of calls, so tests can assert on it.
 
 import { create } from "@bufbuild/protobuf";
 import { durationFromMs, timestampFromMs } from "@bufbuild/protobuf/wkt";
+import { Code, ConnectError } from "@connectrpc/connect";
+import { type Connection, ConnectionSchema, type ConnectionSnapshot, ConnectionSnapshotSchema, Protocol } from "../gen/lotsman/v1/connection_pb";
 import { type HistoryResponse, HistoryResponseSchema, SampleSchema } from "../gen/lotsman/v1/history_pb";
 import {
   type PeerStatus,
@@ -17,18 +20,22 @@ import {
   UpstreamStatusSchema,
 } from "../gen/lotsman/v1/status_pb";
 import { type DevicePeer, DevicePeerSchema, DeviceSchema, type User, UserSchema } from "../gen/lotsman/v1/user_pb";
+import { type Tier, tierString } from "./profiles";
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
 const MAX_SAMPLES = 2000;
 const MAX_RATE = 6_000_000; // bytes per second, about 48 Mbit/s
+/** The fake's cap on connections per update; the daemon's is 500. Low, so the full list shows `truncated`. */
+export const CONNECTION_CAP = 25;
 
 interface Upstream {
   name: string;
   kind: UpstreamKind;
   geo: string;
   provider: string;
+  tags: readonly string[];
   state: UpstreamState;
   latencyMs: number;
 }
@@ -40,7 +47,9 @@ interface Peer {
   profile: string;
   address: string;
   upstream: string;
-  created?: number; // ms since the epoch; the seeded peers predate the simulation
+  created: number; // ms since the epoch
+  /** Whether the device ever connected; an added one never does. */
+  connected: boolean;
   lastHandshake: number; // ms since the epoch, 0 = never
   downRate: number;
   upRate: number;
@@ -48,24 +57,79 @@ interface Peer {
   up: number;
 }
 
-const upstreams: readonly Upstream[] = [
-  { name: "lv-1", kind: UpstreamKind.AWG, geo: "LV", provider: "provider-a", state: UpstreamState.UP, latencyMs: 38 },
-  { name: "al-1", kind: UpstreamKind.OUTLINE, geo: "AL", provider: "provider-b", state: UpstreamState.UP, latencyMs: 61 },
-  { name: "nl-1", kind: UpstreamKind.VLESS, geo: "NL", provider: "provider-c", state: UpstreamState.DEGRADED, latencyMs: 140 },
-  { name: "de-1", kind: UpstreamKind.AWG, geo: "DE", provider: "provider-a", state: UpstreamState.DOWN, latencyMs: 45 },
-];
+interface Flow {
+  peer: Peer;
+  protocol: Protocol;
+  source: string;
+  destination: string;
+  started: number; // ms since the epoch, 0 = open before anyone watched
+  /** Its share of the peer's traffic, relative to the peer's other flows. */
+  weight: number;
+  down: number;
+  up: number;
+  downRate: number;
+  upRate: number;
+}
 
+interface UserRecord {
+  name: string;
+  created: number;
+  hasLink: boolean;
+}
+
+export interface Profile {
+  name: string;
+  prefer: Tier[];
+}
+
+// The tables below are pure IIFEs: a production build drops the fake, and
+// without the annotation it would keep their enum reads and calls.
+const upstreams: readonly Upstream[] = /* @__PURE__ */ (() => [
+  { name: "lv-1", kind: UpstreamKind.AWG, geo: "LV", provider: "provider-a", tags: ["near", "eu"], state: UpstreamState.UP, latencyMs: 38 },
+  { name: "al-1", kind: UpstreamKind.OUTLINE, geo: "AL", provider: "provider-b", tags: [], state: UpstreamState.UP, latencyMs: 61 },
+  { name: "nl-1", kind: UpstreamKind.VLESS, geo: "NL", provider: "provider-c", tags: ["eu"], state: UpstreamState.DEGRADED, latencyMs: 140 },
+  { name: "de-1", kind: UpstreamKind.AWG, geo: "DE", provider: "provider-a", tags: ["near", "eu"], state: UpstreamState.DOWN, latencyMs: 45 },
+])();
+
+const tier = (t: Partial<Tier>): Tier => ({ geo: "", provider: "", tag: "", ...t });
+
+// Stored profiles, as if `profile add` had made them. `default` has a tier
+// that never applies; `backup` routes new devices through al-1; `fi`'s only
+// tier matches no upstream, so its users are blocked (the daemon keeps such a
+// profile with a warning: its upstream was removed after it was stored).
+const profileSeeds: readonly Profile[] = /* @__PURE__ */ (() => [
+  { name: "default", prefer: [tier({ tag: "near" }), tier({ geo: "LV" }), tier({})] },
+  { name: "streaming", prefer: [tier({ geo: "NL" }), tier({ tag: "eu" })] },
+  { name: "backup", prefer: [tier({ geo: "AL" })] },
+  { name: "fi", prefer: [tier({ geo: "FI" })] },
+])();
+
+// The seeded peers keep these upstreams; peers added later are routed by their profile.
 const peerSeeds = [
   ["alice", "phone", "default", "lv-1"],
   ["alice", "laptop", "default", "lv-1"],
   ["alice", "tv", "streaming", "nl-1"],
   ["bob", "phone", "default", "al-1"],
   ["bob", "laptop", "streaming", "nl-1"],
-  ["carol", "phone", "default", ""], // blocked: no upstream fits her profile
+  ["carol", "phone", "fi", ""], // blocked: no upstream fits her profile
 ] as const;
 
-/** The upstream each profile resolves to for peers added at runtime. */
-const profileUpstream: Readonly<Record<string, string>> = { default: "lv-1", streaming: "nl-1", backup: "al-1" };
+/**
+ * Where the simulated connections go (documentation addresses only, and the
+ * gateway's resolver), with how heavy such a flow is: pings and DNS barely move bytes.
+ */
+const destinations: readonly (readonly [Protocol, string, number, number])[] = /* @__PURE__ */ (() => [
+  [Protocol.TCP, "198.51.100.10", 443, 1],
+  [Protocol.TCP, "198.51.100.23", 443, 1],
+  [Protocol.UDP, "203.0.113.5", 443, 1],
+  [Protocol.TCP, "203.0.113.80", 80, 0.5],
+  [Protocol.TCP, "198.51.100.77", 993, 0.1],
+  [Protocol.UDP, "192.0.2.44", 3478, 0.5],
+  [Protocol.UDP, "10.8.0.1", 53, 0.001],
+  [Protocol.ICMP, "192.0.2.1", 0, 0.0001],
+] as const)();
+
+const NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
 /** mulberry32: a tiny seeded PRNG returning floats in [0, 1). */
 function random(seed: number): () => number {
@@ -90,15 +154,23 @@ function traffic(down: number, up: number, downRate: number, upRate: number): Tr
 
 export class Simulation {
   private readonly rand: () => number;
+  /** Connections and new secrets draw from their own sequences, so the traffic stays as it was. */
+  private readonly flowRand: () => number;
+  private readonly secretRand: () => number;
   private readonly peers: Peer[];
+  private readonly users = new Map<string, UserRecord>();
+  private profiles: Profile[] = profileSeeds.map((p) => ({ name: p.name, prefer: p.prefer.map((t) => ({ ...t })) }));
+  private flows: Flow[] = [];
+  private nextPeer: number;
   private time: number;
-  private lastId = peerSeeds.length;
 
   constructor(
     seed = 1,
     private readonly clock: () => number = Date.now,
   ) {
     this.rand = random(seed);
+    this.flowRand = random(seed ^ 0x5bd1e995);
+    this.secretRand = random(seed ^ 0x27d4eb2f);
     this.time = clock();
     this.peers = peerSeeds.map(([user, device, profile, upstream], i) => ({
       id: `peer-${i + 1}`,
@@ -107,6 +179,8 @@ export class Simulation {
       profile,
       address: `10.8.0.${i + 2}`,
       upstream,
+      created: this.time - (40 - i * 5) * DAY,
+      connected: upstream !== "",
       // carol never connected; everyone else did recently.
       lastHandshake: upstream ? this.time - Math.round(this.rand() * 100_000) : 0,
       downRate: upstream ? this.rand() * MAX_RATE : 0,
@@ -114,6 +188,15 @@ export class Simulation {
       down: upstream ? this.rand() * 4e9 : 0,
       up: upstream ? this.rand() * 4e8 : 0,
     }));
+    this.nextPeer = this.peers.length + 1;
+    for (const [i, p] of this.peers.entries()) {
+      if (!this.users.has(p.user)) this.users.set(p.user, { name: p.user, created: p.created - DAY, hasLink: i === 0 });
+    }
+    for (const p of this.peers.filter((p) => p.connected)) {
+      const count = 4 + Math.floor(this.flowRand() * 5);
+      for (let i = 0; i < count; i++) this.flows.push(this.newFlow(p, 0));
+    }
+    this.shareTraffic();
   }
 
   /** Advances the simulation in one-second steps up to the clock. */
@@ -122,14 +205,52 @@ export class Simulation {
     while (this.time + 1000 <= now) {
       this.time += 1000;
       for (const p of this.peers) {
-        if (!p.upstream) continue;
+        if (!p.connected) continue;
         p.downRate = walk(p.downRate, MAX_RATE, this.rand());
         p.upRate = walk(p.upRate, MAX_RATE * 0.2, this.rand());
         p.down += p.downRate;
         p.up += p.upRate;
         if (this.rand() < 0.05) p.lastHandshake = this.time;
       }
+      // Now and then a connection closes and another opens.
+      if (this.flows.length > 0 && this.flowRand() < 0.3) {
+        const i = Math.floor(this.flowRand() * this.flows.length);
+        this.flows[i] = this.newFlow(this.flows[i]!.peer, this.time);
+      }
+      this.shareTraffic();
+      for (const f of this.flows) {
+        f.down += f.downRate;
+        f.up += f.upRate;
+      }
     }
+  }
+
+  /** Splits each peer's rates over its connections by their weights. */
+  private shareTraffic(): void {
+    const weights = new Map<Peer, number>();
+    for (const f of this.flows) weights.set(f.peer, (weights.get(f.peer) ?? 0) + f.weight);
+    for (const f of this.flows) {
+      const share = f.weight / weights.get(f.peer)!;
+      f.downRate = f.peer.downRate * share;
+      f.upRate = f.peer.upRate * share;
+    }
+  }
+
+  private newFlow(peer: Peer, started: number): Flow {
+    const [protocol, ip, port, heft] = destinations[Math.floor(this.flowRand() * destinations.length)]!;
+    const sourcePort = 32768 + Math.floor(this.flowRand() * 28000);
+    return {
+      peer,
+      protocol,
+      source: protocol === Protocol.ICMP ? peer.address : `${peer.address}:${sourcePort}`,
+      destination: port ? `${ip}:${port}` : ip,
+      started,
+      weight: heft * (this.flowRand() ** 2 + 0.01),
+      down: heft * this.flowRand() * 5e7,
+      up: heft * this.flowRand() * 5e6,
+      downRate: 0,
+      upRate: 0,
+    };
   }
 
   /**
@@ -163,6 +284,7 @@ export class Simulation {
             kind: u.kind,
             geo: u.geo,
             provider: u.provider,
+            tags: [...u.tags],
             state: u.state,
             latency: u.state === UpstreamState.DOWN ? undefined : durationFromMs(Math.round(u.latencyMs * jitter)),
             lastHandshake: u.kind === UpstreamKind.AWG && u.state !== UpstreamState.DOWN ? timestampFromMs(this.time - 20_000) : undefined,
@@ -176,23 +298,156 @@ export class Simulation {
     });
   }
 
+  /**
+   * The open connections of one peer, or of all, fastest first and at most
+   * CONNECTION_CAP of them. NotFound for an unknown peer, as the daemon answers.
+   */
+  connections(peerId = ""): ConnectionSnapshot {
+    this.advance();
+    if (peerId && !this.peers.some((p) => p.id === peerId)) throw new ConnectError(`peer ${peerId} not found`, Code.NotFound);
+    const flows = this.flows
+      .filter((f) => !peerId || f.peer.id === peerId)
+      .sort((a, b) => b.downRate + b.upRate - (a.downRate + a.upRate));
+    return create(ConnectionSnapshotSchema, {
+      time: timestampFromMs(this.time),
+      connections: flows.slice(0, CONNECTION_CAP).map((f) => connection(f)),
+      truncated: flows.length > CONNECTION_CAP,
+    });
+  }
+
   /** The user with their devices, one peer per profile. */
   user(name: string): User {
+    const record = this.users.get(name);
     const devices = new Map<string, DevicePeer[]>();
     for (const p of this.peers.filter((p) => p.user === name)) {
-      const peer = create(DevicePeerSchema, {
-        peerId: p.id,
-        profile: p.profile,
-        address: p.address,
-        created: p.created ? timestampFromMs(p.created) : undefined,
-      });
+      const peer = create(DevicePeerSchema, { peerId: p.id, profile: p.profile, address: p.address, created: timestampFromMs(p.created) });
       devices.set(p.device, [...(devices.get(p.device) ?? []), peer]);
     }
     return create(UserSchema, {
       name,
-      hasLink: true,
+      hasLink: record?.hasLink ?? false,
+      created: record ? timestampFromMs(record.created) : undefined,
       devices: [...devices].map(([device, peers]) => create(DeviceSchema, { name: device, peers })),
     });
+  }
+
+  /** Every user, in the order they were created. */
+  listUsers(): User[] {
+    return [...this.users.keys()].map((name) => this.user(name));
+  }
+
+  /**
+   * Adds a peer for the user's device with the profile, creating the user if
+   * needed, as `user add` does. An empty device is the default one.
+   */
+  addDevice(user: string, device: string, profile: string): { peerId: string; config: string } {
+    device ||= "default";
+    checkNames("user", user, "device", device, "profile", profile);
+    const p = this.profiles.find((p) => p.name === profile);
+    if (!p) throw new ConnectError(`no such profile: ${profile}`, Code.InvalidArgument);
+    if (this.peers.some((x) => x.user === user && x.device === device && x.profile === profile)) {
+      throw new ConnectError(`${user}/${device} already has profile ${profile}`, Code.AlreadyExists);
+    }
+    const peerId = this.addPeer(user, device, profile).peerId;
+    return { peerId, config: this.config(peerId) };
+  }
+
+  /**
+   * Adds a peer for a known profile without the daemon's checks (the callers
+   * make them), creating the user if needed. It is routed by its profile and
+   * never connects.
+   */
+  addPeer(user: string, device: string, profile: string): DevicePeer {
+    this.advance();
+    if (!this.users.has(user)) this.users.set(user, { name: user, created: this.time, hasLink: false });
+    const p = this.profiles.find((p) => p.name === profile);
+    const peer: Peer = {
+      id: `peer-${this.nextPeer++}`,
+      user,
+      device,
+      profile,
+      address: this.freeAddress(),
+      upstream: p ? selectUpstream(p) : "",
+      created: this.time,
+      connected: false,
+      lastHandshake: 0,
+      downRate: 0,
+      upRate: 0,
+      down: 0,
+      up: 0,
+    };
+    this.peers.push(peer);
+    return create(DevicePeerSchema, { peerId: peer.id, profile, address: peer.address, created: timestampFromMs(peer.created) });
+  }
+
+  /** Removes the device's peer of that profile, or every peer of the device when profile is empty. */
+  removeDevice(user: string, device: string, profile: string): void {
+    device ||= "default";
+    if (this.removePeers(user, device, profile) === 0) throw new ConnectError("no such device or profile", Code.NotFound);
+  }
+
+  /** Removes one profile of a device, or all of them when `profile` is empty; how many peers went. */
+  removePeers(user: string, device: string, profile: string): number {
+    const gone = this.peers.filter((p) => p.user === user && p.device === device && (!profile || p.profile === profile));
+    this.dropPeers(gone);
+    return gone.length;
+  }
+
+  /** Removes the user with every peer and the link. */
+  removeUser(user: string): void {
+    if (!this.users.delete(user)) throw new ConnectError("no such user", Code.NotFound);
+    this.dropPeers(this.peers.filter((p) => p.user === user));
+  }
+
+  /** A new link token for the user: 256 bits, base64url. Their previous one dies. */
+  issueLink(user: string): string {
+    const record = this.users.get(user);
+    if (!record) throw new ConnectError("no such user", Code.NotFound);
+    record.hasLink = true;
+    return base64url(Array.from({ length: 32 }, () => Math.floor(this.secretRand() * 256)));
+  }
+
+  revokeLink(user: string): void {
+    const record = this.users.get(user);
+    if (!record) throw new ConnectError("no such user", Code.NotFound);
+    record.hasLink = false;
+  }
+
+  /** The client config of a peer, shaped like the daemon's. NotFound for an unknown peer. */
+  config(peerId: string): string {
+    const p = this.peers.find((p) => p.id === peerId);
+    if (!p) throw new ConnectError("no such peer", Code.NotFound);
+    return clientConfig(p.id, p.address);
+  }
+
+  /** The stored profiles and their warnings against the upstreams. */
+  listProfiles(): { profiles: Profile[]; warnings: string[] } {
+    return { profiles: this.profiles, warnings: profileWarnings(this.profiles) };
+  }
+
+  /** Creates or replaces a profile, as `profile add` and `profile set` do; returns every profile's warnings. */
+  putProfile(profile: Profile): string[] {
+    if (profile.name === "") throw new ConnectError("profile: name is required", Code.InvalidArgument);
+    if (!NAME_RE.test(profile.name)) {
+      throw new ConnectError(`invalid profile: profile name "${profile.name}" must match ${NAME_RE.source}`, Code.InvalidArgument);
+    }
+    if (profile.prefer.length > 0 && !tierSizes(profile).some((t) => t.own > 0)) {
+      throw new ConnectError(`invalid profile: profile "${profile.name}": prefer matches no upstream`, Code.InvalidArgument);
+    }
+    const stored = { name: profile.name, prefer: profile.prefer.map((t) => ({ geo: t.geo, provider: t.provider, tag: t.tag })) };
+    const i = this.profiles.findIndex((p) => p.name === profile.name);
+    if (i < 0) this.profiles.push(stored);
+    else this.profiles[i] = stored;
+    return profileWarnings(this.profiles);
+  }
+
+  /** Deletes a profile no peer uses. */
+  deleteProfile(name: string): void {
+    if (!this.profiles.some((p) => p.name === name)) throw new ConnectError(`profile "${name}" not found`, Code.NotFound);
+    if (this.peers.some((p) => p.profile === name)) {
+      throw new ConnectError(`profile "${name}" is in use: remove its peers first`, Code.FailedPrecondition);
+    }
+    this.profiles = this.profiles.filter((p) => p.name !== name);
   }
 
   /** The upstreams `user` may use; every upstream when `user` is unset. */
@@ -223,7 +478,7 @@ export class Simulation {
       const h = random(Math.floor(t / MINUTE) * 17 + name.charCodeAt(0))();
       const ratio = upstream ? availability(upstream, t, to) : 0;
       // Bytes moved during the step: about a fifth of the peak rate per peer while up.
-      const down = peer && !peer.upstream ? 0 : (h * MAX_RATE * 0.4 * routed * (upstream ? ratio : 1) * step) / 1000;
+      const down = peer && !peer.connected ? 0 : (h * MAX_RATE * 0.4 * routed * (upstream ? ratio : 1) * step) / 1000;
       samples.push(
         create(SampleSchema, {
           time: timestampFromMs(t),
@@ -239,7 +494,7 @@ export class Simulation {
 
   /** The profiles users may choose from, in the order the daemon lists them. */
   profileNames(): string[] {
-    return Object.keys(profileUpstream);
+    return this.profiles.map((p) => p.name);
   }
 
   /** The device names of `user`, in the order they were added. */
@@ -252,37 +507,15 @@ export class Simulation {
     return this.peers.some((p) => p.user === user && p.device === device && p.profile === profile);
   }
 
-  /** Adds a peer for a known profile: routed through that profile's upstream, never connected yet. */
-  addPeer(user: string, device: string, profile: string, created = this.clock()): DevicePeer {
-    const id = `peer-${++this.lastId}`;
-    this.peers.push({
-      id,
-      user,
-      device,
-      profile,
-      address: `10.8.0.${this.lastId + 1}`,
-      upstream: profileUpstream[profile] ?? "",
-      created,
-      lastHandshake: 0,
-      downRate: 0,
-      upRate: 0,
-      down: 0,
-      up: 0,
-    });
-    return create(DevicePeerSchema, { peerId: id, profile, address: `10.8.0.${this.lastId + 1}`, created: timestampFromMs(created) });
+  private dropPeers(gone: readonly Peer[]): void {
+    this.peers.splice(0, this.peers.length, ...this.peers.filter((p) => !gone.includes(p)));
+    this.flows = this.flows.filter((f) => !gone.includes(f.peer));
   }
 
-  /** Removes one profile of a device, or all of them when `profile` is empty; how many peers went. */
-  removePeers(user: string, device: string, profile: string): number {
-    const gone = this.peers.filter((p) => p.user === user && p.device === device && (!profile || p.profile === profile));
-    for (const p of gone) this.peers.splice(this.peers.indexOf(p), 1);
-    return gone.length;
-  }
-
-  /** The client config of a peer, or undefined for an unknown peer. Made-up keys, deterministic. */
-  config(peerId: string): string | undefined {
-    const p = this.peers.find((p) => p.id === peerId);
-    return p && clientConfig(p.id, p.address);
+  private freeAddress(): string {
+    const used = new Set(this.peers.map((p) => p.address));
+    for (let i = 2; i < 255; i++) if (!used.has(`10.8.0.${i}`)) return `10.8.0.${i}`;
+    throw new ConnectError("the gateway's subnet has no free address", Code.ResourceExhausted);
   }
 
   private isActive(p: Peer): boolean {
@@ -301,6 +534,84 @@ export class Simulation {
       traffic: traffic(p.down, p.up, p.downRate, p.upRate),
     });
   }
+}
+
+function connection(f: Flow): Connection {
+  return create(ConnectionSchema, {
+    peerId: f.peer.id,
+    protocol: f.protocol,
+    source: f.source,
+    destination: f.destination,
+    upstream: f.peer.upstream,
+    started: f.started ? timestampFromMs(f.started) : undefined,
+    traffic: traffic(f.down, f.up, f.downRate, f.upRate),
+  });
+}
+
+function matches(t: Tier, u: Upstream): boolean {
+  return (!t.geo || t.geo === u.geo) && (!t.provider || t.provider === u.provider) && (!t.tag || u.tags.includes(t.tag));
+}
+
+/**
+ * Per tier, as the daemon counts them: the upstreams it matches, those for
+ * which it is the first match (its own), and the earlier tiers that took the rest.
+ */
+function tierSizes(p: Profile): { matched: number; own: number; shadowers: number[] }[] {
+  const tiers = p.prefer.map(() => ({ matched: 0, own: 0, shadowers: [] as number[] }));
+  for (const u of upstreams) {
+    let first = -1;
+    for (const [j, t] of p.prefer.entries()) {
+      if (!matches(t, u)) continue;
+      const size = tiers[j]!;
+      size.matched++;
+      if (first < 0) {
+        first = j;
+        size.own++;
+      } else if (!size.shadowers.includes(first)) size.shadowers.push(first);
+    }
+  }
+  for (const t of tiers) t.shadowers.sort((a, b) => a - b);
+  return tiers;
+}
+
+/** The daemon's profile warnings, word for word: tiers that match nothing, or only what earlier tiers took. */
+export function profileWarnings(profiles: readonly Profile[]): string[] {
+  const out: string[] = [];
+  for (const p of profiles) {
+    for (const [j, t] of tierSizes(p).entries()) {
+      const m = tierString(p.prefer[j]!);
+      if (t.matched === 0) out.push(`profile "${p.name}": tier ${j + 1} ${m} matches no upstream and is ignored`);
+      else if (t.own === 0) {
+        const by = t.shadowers.map((k) => `tier ${k + 1} ${tierString(p.prefer[k]!)}`).join(", ");
+        out.push(`profile "${p.name}": tier ${j + 1} ${m} never applies: every upstream it matches is taken by ${by}`);
+      }
+    }
+  }
+  return out;
+}
+
+/** The upstream a new peer of the profile gets: the first tier with one up, lowest latency first; "" if none. */
+function selectUpstream(p: Profile): string {
+  for (const t of p.prefer.length > 0 ? p.prefer : [{ geo: "", provider: "", tag: "" }]) {
+    const up = upstreams.filter((u) => u.state === UpstreamState.UP && matches(t, u)).sort((a, b) => a.latencyMs - b.latencyMs);
+    if (up[0]) return up[0].name;
+  }
+  return "";
+}
+
+/** The daemon's checks of names that come through the API. */
+function checkNames(...pairs: string[]): void {
+  for (let i = 0; i + 1 < pairs.length; i += 2) {
+    const [what, name] = [pairs[i]!, pairs[i + 1]!];
+    if (name === "") throw new ConnectError(`${what} is required`, Code.InvalidArgument);
+    if (new TextEncoder().encode(name).length > 64 || /[\u0000-\u001f\u007f-\u009f]/.test(name) || name.trim() !== name) {
+      throw new ConnectError(`${what} must be printable UTF-8 of at most 64 bytes, without spaces around it`, Code.InvalidArgument);
+    }
+  }
+}
+
+function base64url(bytes: number[]): string {
+  return btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 /**

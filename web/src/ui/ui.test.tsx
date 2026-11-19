@@ -5,6 +5,7 @@ import { i18n, I18nContext } from "../i18n";
 import { AvailabilityBar, availabilityLevel } from "./AvailabilityBar";
 import { ChoiceMenu } from "./ChoiceMenu";
 import { Dialog } from "./Dialog";
+import { QrCode, qrCode } from "./QrCode";
 import { sparklinePath } from "./Sparkline";
 
 describe("Dialog", () => {
@@ -73,4 +74,23 @@ test("availability levels and segments", () => {
   render(() => <AvailabilityBar ratios={[1, 0.5, undefined]} label="lv-1: 50 %" />);
   const bar = screen.getByRole("img", { name: "lv-1: 50 %" });
   expect([...bar.querySelectorAll("rect")].map((r) => r.getAttribute("class"))).toEqual(["fill-ok", "fill-bad", "fill-empty"]);
+});
+
+test("QR codes are inline SVG paths, and too long a text says so", () => {
+  const code = qrCode("[Interface]\nPrivateKey = x\n");
+  expect(code?.size).toBe(25); // version 2: 26 bytes
+  expect(code?.path).toMatch(/^M[\d ]+L/);
+  expect(qrCode("x".repeat(3000))).toBeUndefined();
+
+  render(() => <QrCode text="hello" label="QR of hello" tooLong="too long" />);
+  const svg = screen.getByRole("img", { name: "QR of hello" });
+  expect(svg.tagName).toBe("svg");
+  expect(svg.querySelector("path")?.getAttribute("d")).toBe(qrCode("hello")?.path);
+  expect(document.querySelector("img")).toBeNull();
+});
+
+test("a QR code that does not fit shows the fallback", () => {
+  render(() => <QrCode text={"x".repeat(3000)} label="QR" tooLong="too long" />);
+  expect(screen.queryByRole("img")).toBeNull();
+  expect(screen.getByText("too long")).toBeTruthy();
 });

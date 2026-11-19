@@ -38,29 +38,39 @@ function Shell(props: { name: string; children?: JSX.Element }) {
     await auth.signOut();
     navigate("/login", { replace: true });
   };
-  const link = (href: string, label: string) => (
-    <a
-      href={href}
-      aria-current={location.pathname === href ? "page" : undefined}
-      class="rounded px-2 py-1 text-muted hover:text-fg aria-[current]:font-medium aria-[current]:text-fg"
-    >
-      {label}
-    </a>
-  );
+  // A section's link is current on its own page and on the pages under it
+  // (an upstream's page belongs to the overview).
+  const link = (href: string, label: string, under?: string) => {
+    const current = () => location.pathname === href || (under !== undefined && location.pathname.startsWith(under));
+    return (
+      <a
+        href={href}
+        aria-current={current() ? "page" : undefined}
+        class="rounded px-2 py-1 whitespace-nowrap text-muted hover:text-fg aria-[current]:font-medium aria-[current]:text-fg"
+      >
+        {label}
+      </a>
+    );
+  };
   return (
     <div class="min-h-screen text-sm">
       <SkipLink />
       <header class="border-b border-line bg-surface">
-        <div class="mx-auto flex h-11 max-w-7xl items-center gap-6 px-4">
+        <div class="mx-auto flex min-h-11 max-w-7xl flex-wrap items-center gap-x-6 gap-y-1 px-4 py-1">
           <span class="font-semibold">{t.app.name}</span>
-          <nav aria-label={t.admin.nav} class="flex gap-1">
-            {link("/admin", t.admin.upstreams)}
+          <nav aria-label={t.admin.nav} class="flex flex-wrap gap-1">
+            {link("/admin", t.admin.upstreams, "/admin/upstreams/")}
+            {link("/admin/profiles", t.admin.profiles)}
+            {link("/admin/users", t.admin.users)}
+            {link("/admin/connections", t.admin.connections)}
             {link("/admin/passkeys", t.admin.passkeys)}
           </nav>
-          <span class="ml-auto hidden text-muted sm:inline">{t.auth.signedInAs(props.name)}</span>
-          <button type="button" class={buttonClass("ghost")} onClick={signOut}>
-            {t.auth.signOut}
-          </button>
+          <div class="ml-auto flex items-center gap-6">
+            <span class="hidden text-muted sm:inline">{t.auth.signedInAs(props.name)}</span>
+            <button type="button" class={buttonClass("ghost")} onClick={signOut}>
+              {t.auth.signOut}
+            </button>
+          </div>
         </div>
       </header>
       <main id="main" class="mx-auto max-w-7xl px-4 py-4">

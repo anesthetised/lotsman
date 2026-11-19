@@ -3,14 +3,17 @@ import { defineConfig, devices } from "@playwright/test";
 // Smoke tests against `vite preview` of a production build that serves the
 // fake daemon (`--mode e2e`), with the CSP the panel will send.
 const port = 4173;
+const operator = ["admin.spec.ts", "auth.spec.ts", "console.spec.ts"];
 
 export default defineConfig({
   testDir: "e2e",
   forbidOnly: !!process.env.CI,
   reporter: process.env.CI ? [["github"], ["list"]] : "list",
   use: { baseURL: `http://localhost:${port}`, trace: "retain-on-failure" },
+  // The console at 1280 px and at tablet width (768 px); the user page on a phone.
   projects: [
-    { name: "desktop", testMatch: ["admin.spec.ts", "auth.spec.ts", "user.spec.ts"], use: { ...devices["Desktop Chrome"] } },
+    { name: "desktop", testMatch: [...operator, "user.spec.ts"], use: { ...devices["Desktop Chrome"] } },
+    { name: "tablet", testMatch: operator, use: { ...devices["Desktop Chrome"], viewport: { width: 768, height: 1024 } } },
     { name: "phone", testMatch: "user.spec.ts", use: { ...devices["Pixel 7"] } },
   ],
   webServer: {
