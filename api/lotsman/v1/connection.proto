@@ -1,4 +1,4 @@
-// The lotsman.v1 control API, agreed with the user on 2026-11-19: connections (#131).
+// The lotsman.v1 control API: connections (#131).
 // See status.proto for where it is served.
 syntax = "proto3";
 

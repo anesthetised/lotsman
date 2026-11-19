@@ -1,4 +1,4 @@
-// The lotsman.v1 control API, agreed with the user on 2026-11-19: history (#130).
+// The lotsman.v1 control API: history (#130).
 // See status.proto for where it is served.
 syntax = "proto3";
 
@@ -17,11 +17,15 @@ service HistoryService {
 message HistoryRequest {
   string name = 1;
   google.protobuf.Timestamp from = 2;
-  google.protobuf.Timestamp to = 3; // resolution: 1 min up to 7 d back, else 1 h
+  google.protobuf.Timestamp to = 3;
+  // The wanted step. The server rounds it up to a multiple of what it keeps
+  // for the range (1 min up to 7 d back, else 1 h) and, if needed, further
+  // so that at most 2000 samples come back. Unset: the finest kept step.
+  google.protobuf.Duration step = 4;
 }
 
 message HistoryResponse {
-  google.protobuf.Duration step = 1;
+  google.protobuf.Duration step = 1; // the step the server used
   repeated Sample samples = 2;
 }
 
