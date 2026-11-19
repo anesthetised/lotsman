@@ -76,8 +76,8 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 	api := apiClient(control.SocketPath)
 	profiles := lotsmanv1connect.NewProfileServiceClient(api)
 
-	// No upstream is in DE: the second tier is ignored, with a warning.
-	eu := &lotsmanv1.Profile{Name: "eu", Prefer: []*lotsmanv1.Matcher{{Geo: "NL"}, {Geo: "DE"}}}
+	// The first tier takes the only upstream: the second never applies, with a warning.
+	eu := &lotsmanv1.Profile{Name: "eu", Prefer: []*lotsmanv1.Matcher{{Geo: "NL"}, {Provider: "acme"}}}
 	put, err := profiles.Put(t.Context(), &lotsmanv1.PutProfileRequest{Profile: eu})
 	if err != nil {
 		t.Fatal(err)
@@ -91,6 +91,12 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 	if _, err := profiles.Put(t.Context(), &lotsmanv1.PutProfileRequest{Profile: &lotsmanv1.Profile{Name: "spare"}}); err != nil {
 		t.Fatal(err)
 	}
+	// A tier no upstream matches is refused, even beside one that matches.
+	if _, err := profiles.Put(t.Context(), &lotsmanv1.PutProfileRequest{Profile: &lotsmanv1.Profile{
+		Name: "de", Prefer: []*lotsmanv1.Matcher{{Geo: "NL"}, {Geo: "DE"}},
+	}}); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("put de: %v, want invalid_argument", err)
+	}
 	// A profile no upstream can serve is refused.
 	if _, err := profiles.Put(t.Context(), &lotsmanv1.PutProfileRequest{Profile: &lotsmanv1.Profile{
 		Name: "us", Prefer: []*lotsmanv1.Matcher{{Geo: "US"}},
@@ -103,6 +109,9 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 	}
 	if len(list.Profiles) != 2 || !proto.Equal(list.Profiles[0], eu) || list.Profiles[1].Name != "spare" || !warned(list.Warnings) {
 		t.Errorf("list = %v", list)
+	}
+	if want := []*lotsmanv1.UpstreamLabels{{Name: "nl", Geo: "NL", Provider: "acme"}}; !slices.EqualFunc(list.Upstreams, want, func(a, b *lotsmanv1.UpstreamLabels) bool { return proto.Equal(a, b) }) {
+		t.Errorf("list upstreams = %v, want %v", list.Upstreams, want)
 	}
 	if _, err := profiles.Delete(t.Context(), &lotsmanv1.DeleteProfileRequest{Name: "spare"}); err != nil {
 		t.Errorf("delete spare: %v", err)

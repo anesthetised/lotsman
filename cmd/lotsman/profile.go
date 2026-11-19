@@ -56,7 +56,7 @@ func profilePut(configPath, cmd string, args []string) error {
 	defer e.store.Close()
 	// The CLI validates against the config file, as `user add` does; the
 	// daemon checks its stored profiles again on every reload.
-	if err := e.cfg.ValidateProfile(p); err != nil {
+	if err := e.cfg.ValidateProfileWrite(p); err != nil {
 		return err
 	}
 	put, hint := e.store.AddProfile, "use `profile set` to change it"

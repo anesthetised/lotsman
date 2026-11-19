@@ -66,6 +66,9 @@ export const consoleEn = {
     save: "Save",
     fields: { geo: "geo", provider: "provider", tag: "tag" },
     fieldLabel: (n: number, field: string) => `Tier ${n} ${field}`,
+    tierUnmatched: (n: number) => `Tier ${n} matches no upstream. The fields suggest the values that do.`,
+    tierValue: (n: number, field: string) => `Tier ${n}: a ${field} is at most 64 characters, without spaces, commas or =.`,
+    tierTag: (n: number) => `Tier ${n}: a tag is lowercase letters, digits and -.`,
   },
   users: {
     title: "Users",

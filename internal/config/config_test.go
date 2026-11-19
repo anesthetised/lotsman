@@ -298,6 +298,39 @@ func TestValidateProfile(t *testing.T) {
 	}
 }
 
+// A profile being written must have every tier match an upstream now, in
+// values the CLI can write back; a stored one only needs one usable tier.
+func TestValidateProfileWrite(t *testing.T) {
+	cfg, err := Parse([]byte(minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []Profile{
+		{Name: "auto"},
+		{Name: "nl", Prefer: []Match{{Geo: "NL", Provider: "acme"}, {Geo: "DE"}, {}}},
+	} {
+		if err := cfg.ValidateProfileWrite(p); err != nil {
+			t.Errorf("%+v: %v", p, err)
+		}
+	}
+	for _, tc := range []struct {
+		p    Profile
+		want string
+	}{
+		{Profile{Name: "Bad Name"}, `profile name "Bad Name" must match`},
+		{Profile{Name: "p", Prefer: []Match{{Geo: "NL"}, {Geo: "XX"}}}, `profile "p": tier 2 geo=XX matches no upstream`},
+		{Profile{Name: "p", Prefer: []Match{{Geo: "DE", Provider: "other"}}}, `profile "p": tier 1 geo=DE,provider=other matches no upstream`},
+		{Profile{Name: "p", Prefer: []Match{{Geo: "N L"}}}, `profile "p": tier 1: geo "N L" must be at most 64 characters without spaces, commas or =`},
+		{Profile{Name: "p", Prefer: []Match{{Provider: "a,b"}}}, `tier 1: provider "a,b" must be`},
+		{Profile{Name: "p", Prefer: []Match{{Provider: strings.Repeat("a", 65)}}}, "must be at most 64 characters"},
+		{Profile{Name: "p", Prefer: []Match{{Tag: "EU"}}}, `profile "p": tier 1: tag "EU" must match`},
+	} {
+		if err := cfg.ValidateProfileWrite(tc.p); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%+v: error = %v, want %q", tc.p, err, tc.want)
+		}
+	}
+}
+
 func TestMatchString(t *testing.T) {
 	for m, want := range map[Match]string{
 		{}:                                     "any",

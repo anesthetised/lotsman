@@ -73,6 +73,9 @@ export const consoleRu: ConsoleDict = {
     save: "Сохранить",
     fields: { geo: "geo", provider: "provider", tag: "tag" },
     fieldLabel: (n: number, field: string) => `Уровень ${n}, ${field}`,
+    tierUnmatched: (n: number) => `Уровню ${n} не подходит ни один выход. Подходящие значения поля подсказывают сами.`,
+    tierValue: (n: number, field: string) => `Уровень ${n}: ${field} — до 64 символов, без пробелов, запятых и =.`,
+    tierTag: (n: number) => `Уровень ${n}: tag — строчные латинские буквы, цифры и -.`,
   },
   users: {
     title: "Пользователи",

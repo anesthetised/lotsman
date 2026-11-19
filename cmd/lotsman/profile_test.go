@@ -33,7 +33,7 @@ func TestProfileCLI(t *testing.T) {
 	if _, err := capture(t, "-config", cfg, "user", "add", "alice", "-profile", "nl"); err != nil {
 		t.Fatal(err)
 	}
-	out, err := capture(t, "-config", cfg, "profile", "add", "eu", "geo=NL,provider=acme", "any")
+	out, err := capture(t, "-config", cfg, "profile", "add", "eu", "geo=NL", "any")
 	if err != nil || out != "" {
 		t.Fatalf("profile add: %v, %q", err, out)
 	}
@@ -43,7 +43,7 @@ func TestProfileCLI(t *testing.T) {
 	}
 	for _, row := range [][]string{
 		{"auto", "0", "(any", "upstream)"},
-		{"eu", "0", "geo=NL,provider=acme", "any"},
+		{"eu", "0", "geo=NL", "any"},
 		{"nl", "1", "geo=NL"},
 	} {
 		if got := tableRow(list, row[0]); !reflect.DeepEqual(got, row) {
@@ -52,11 +52,11 @@ func TestProfileCLI(t *testing.T) {
 	}
 
 	// set replaces every tier; list prints them back in the syntax add takes.
-	if _, err := capture(t, "-config", cfg, "profile", "set", "eu", "tag=near", "geo=NL"); err != nil {
+	if _, err := capture(t, "-config", cfg, "profile", "set", "eu", "any", "geo=NL"); err != nil {
 		t.Fatal(err)
 	}
 	list, _ = capture(t, "-config", cfg, "profile", "list")
-	if got := tableRow(list, "eu"); !reflect.DeepEqual(got, []string{"eu", "0", "tag=near", "geo=NL"}) {
+	if got := tableRow(list, "eu"); !reflect.DeepEqual(got, []string{"eu", "0", "any", "geo=NL"}) {
 		t.Errorf("after set: %q", got)
 	}
 	if _, err := capture(t, "-config", cfg, "profile", "set", "eu"); err != nil {
@@ -73,7 +73,8 @@ func TestProfileCLI(t *testing.T) {
 	}{
 		{[]string{"profile", "add", "nl", "geo=NL"}, "use `profile set`"},
 		{[]string{"profile", "set", "fi", "geo=NL"}, "use `profile add`"},
-		{[]string{"profile", "add", "fi", "geo=FI"}, `profile "fi": prefer matches no upstream`},
+		{[]string{"profile", "add", "fi", "geo=FI"}, `profile "fi": tier 1 geo=FI matches no upstream`},
+		{[]string{"profile", "set", "nl", "geo=NL", "geo=FI"}, `profile "nl": tier 2 geo=FI matches no upstream`},
 		{[]string{"profile", "add", "Bad", "geo=NL"}, `profile name "Bad" must match`},
 		{[]string{"profile", "add"}, "NAME is required"},
 		{[]string{"profile", "add", "-h"}, "NAME is required"},

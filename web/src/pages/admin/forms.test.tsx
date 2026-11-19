@@ -13,7 +13,7 @@ const input = (el: HTMLElement, value: string) => {
   flush();
 };
 
-test("the profile form checks the name, shows the daemon's refusal, and saves", async () => {
+test("the profile form checks the name and the tiers, suggests upstream labels, and saves", async () => {
   render(() => <Profiles />);
   fireEvent.click(await screen.findByRole("button", { name: "New profile" }));
   const dialog = within(await screen.findByRole("dialog", { name: "New profile" }));
@@ -35,18 +35,32 @@ test("the profile form checks the name, shows the daemon's refusal, and saves", 
   await waitFor(() => expect(name.getAttribute("aria-invalid")).toBeNull());
   expect(dialog.getByText("No tiers: any upstream, lowest latency first.")).toBeTruthy();
   fireEvent.click(dialog.getByRole("button", { name: "Add tier" }));
-  input(await dialog.findByLabelText("Tier 1 geo"), "FI");
-  await dialog.findByText("lotsman profile set eu geo=FI");
-  fireEvent.click(save);
-  expect((await dialog.findByRole("alert")).textContent).toMatch(/prefer matches no upstream/);
+  const geo = await dialog.findByLabelText("Tier 1 geo");
+  const options = (field: HTMLElement) => [...(field as HTMLInputElement).list!.options].map((o) => o.value);
+  // Every geo an upstream has, and once a geo is set only what fits it.
+  expect(options(geo)).toEqual(["AL", "DE", "LV", "NL"]);
+  input(geo, "FI");
+  await dialog.findByText("lotsman profile add eu geo=FI");
+  expect(options(dialog.getByLabelText("Tier 1 provider"))).toEqual([]);
 
+  // A tier that matches nothing is flagged here, before the daemon refuses it.
+  fireEvent.click(save);
+  const problem = await dialog.findByText("Tier 1 matches no upstream. The fields suggest the values that do.");
+  expect(geo.getAttribute("aria-invalid")).toBe("true");
+  expect(geo.getAttribute("aria-describedby")).toBe(problem.id);
+  expect(document.activeElement).toBe(geo);
+  expect(dialog.queryByRole("alert")).toBeNull();
+
+  input(geo, "LV");
+  expect(options(dialog.getByLabelText("Tier 1 provider"))).toEqual(["provider-a"]);
+  await waitFor(() => expect(geo.getAttribute("aria-invalid")).toBeNull());
   fireEvent.click(dialog.getByRole("button", { name: "Add tier" }));
   input(await dialog.findByLabelText("Tier 2 tag"), "eu");
   fireEvent.click(save);
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   const row = await screen.findByRole("row", { name: /^eu/ });
-  expect(within(row).getByRole("list", { name: "Tiers of eu" }).textContent).toBe("1. geo=FI2. tag=eu");
-  expect(row.textContent).toContain("Warning: Tier 1 (geo=FI) matches no upstream and is ignored.");
+  expect(within(row).getByRole("list", { name: "Tiers of eu" }).textContent).toBe("1. geo=LV2. tag=eu");
+  expect(row.textContent).not.toContain("Warning");
 });
 
 test("adding a device shows its config with a QR code, or the daemon's refusal", async () => {

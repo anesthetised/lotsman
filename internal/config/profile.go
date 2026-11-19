@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 )
@@ -51,6 +52,40 @@ func (c *Config) ValidateProfile(p Profile) error {
 	}
 	if len(p.Prefer) > 0 && !slices.ContainsFunc(c.preferTiers(p), func(t preferTier) bool { return t.own > 0 }) {
 		return fmt.Errorf("profile %q: prefer matches no upstream", p.Name)
+	}
+	return nil
+}
+
+// matchValueRe is what a geo or provider in a tier may be: the CLI writes a
+// tier as key=value pairs joined by commas, so a value with a comma, an = or
+// a space could not be written back.
+var matchValueRe = regexp.MustCompile(`^[^\s,=]{1,64}$`)
+
+// ValidateProfileWrite is the stricter check for a profile being written,
+// by the CLI or the control API: on top of ValidateProfile, every tier must
+// be one the CLI can write and must match an upstream now, so a typo is
+// refused rather than stored as a warning. A stored tier may still match
+// nothing later, after an upstream is removed; ValidateProfile allows that.
+func (c *Config) ValidateProfileWrite(p Profile) error {
+	// Every tier matching implies the usable tier ValidateProfile wants, so
+	// only the name is checked here, before the more precise tier errors.
+	if !profileNameRe.MatchString(p.Name) {
+		return fmt.Errorf("profile name %q must match %s", p.Name, profileNameRe)
+	}
+	for j, m := range p.Prefer {
+		for _, f := range [...]struct{ key, val string }{{"geo", m.Geo}, {"provider", m.Provider}} {
+			if f.val != "" && !matchValueRe.MatchString(f.val) {
+				return fmt.Errorf("profile %q: tier %d: %s %q must be at most 64 characters without spaces, commas or =", p.Name, j+1, f.key, f.val)
+			}
+		}
+		if m.Tag != "" && !profileNameRe.MatchString(m.Tag) {
+			return fmt.Errorf("profile %q: tier %d: tag %q must match %s", p.Name, j+1, m.Tag, profileNameRe)
+		}
+	}
+	for j, t := range c.preferTiers(p) {
+		if t.matched == 0 {
+			return fmt.Errorf("profile %q: tier %d %v matches no upstream", p.Name, j+1, p.Prefer[j])
+		}
 	}
 	return nil
 }

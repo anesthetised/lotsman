@@ -26,10 +26,11 @@ func TestConfigCheckPrintsProbeTargets(t *testing.T) {
 
 func TestConfigCheckPrintsWarnings(t *testing.T) {
 	path := testConfig(t)
-	// FI matches nothing, but the NL tier still applies: stored with a warning.
+	// The first tier takes every upstream, so the second never applies:
+	// stored with a warning.
 	var err error
-	msg := captureStderr(t, func() { err = run([]string{"-config", path, "profile", "set", "nl", "geo=NL", "geo=FI"}) })
-	const want = `warning: profile "nl": tier 2 geo=FI matches no upstream`
+	msg := captureStderr(t, func() { err = run([]string{"-config", path, "profile", "set", "nl", "any", "geo=NL"}) })
+	const want = `warning: profile "nl": tier 2 geo=NL never applies`
 	if err != nil || !strings.Contains(msg, want) {
 		t.Fatalf("profile set: %v, stderr %q", err, msg)
 	}
@@ -37,7 +38,7 @@ func TestConfigCheckPrintsWarnings(t *testing.T) {
 	if err != nil {
 		t.Fatalf("config check: %v\n%s", err, out)
 	}
-	if !strings.Contains(out, want) || !strings.Contains(out, "profile  nl         prefer geo=NL geo=FI") || !strings.Contains(out, "config OK") {
+	if !strings.Contains(out, want) || !strings.Contains(out, "profile  nl         prefer any geo=NL") || !strings.Contains(out, "config OK") {
 		t.Errorf("config check output lacks the profile or its warning:\n%s", out)
 	}
 }

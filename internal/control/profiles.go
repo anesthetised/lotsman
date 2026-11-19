@@ -17,6 +17,8 @@ import (
 // validates and stores; the service only translates.
 type ProfileSource interface {
 	Profiles() ([]config.Profile, []string, error)
+	// Upstreams are the running upstreams, whose labels tiers match.
+	Upstreams() []config.Upstream
 	PutProfile(config.Profile) ([]string, error)
 	DeleteProfile(name string) error
 }
@@ -31,6 +33,9 @@ func (s profileService) List(context.Context, *lotsmanv1.ListProfilesRequest) (*
 	res := &lotsmanv1.ListProfilesResponse{Warnings: warnings}
 	for _, p := range profiles {
 		res.Profiles = append(res.Profiles, profileMessage(p))
+	}
+	for _, u := range s.src.Upstreams() {
+		res.Upstreams = append(res.Upstreams, &lotsmanv1.UpstreamLabels{Name: u.Name, Geo: u.Geo, Provider: u.Provider, Tags: u.Tags})
 	}
 	return res, nil
 }
