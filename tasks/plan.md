@@ -139,7 +139,7 @@ after every health round). An explicitly empty `-device ""` is still accepted; n
 
 #55 is closed: the measurements led to #102 (PR #104, socket buffers) and #106 (PR #109).
 
-### Wave 5: web panel (filed 2026-11-19, not yet authorized for implementation)
+### Wave 5: web panel (done 2026-11-19)
 
 Issues #127–#138, label `web-panel`; each issue carries the shared decisions (process,
 Connect API, auth, retention, conntrack privacy, frontend stack). Order:
@@ -151,6 +151,11 @@ Connect API, auth, retention, conntrack privacy, frontend stack). Order:
   `.proto` contract. If the spike fails, stop and revisit the stack with the user. Then
   #136 (operator console) and #137 (user page).
 - #138 (deployment docs) comes last and includes a manual check on the test gateway.
+
+Implemented and merged 2026-11-19: #127–#137 and follow-ups (through PR #157). #138 is the
+operations guide change for deployment (reverse proxy, install permissions, `public_url` caveat,
+`web.db` backup, checks) plus the manual check of the panel behind Caddy on the test gateway; the
+nginx example is not tested there.
 
 ### Manual and deferred
 
