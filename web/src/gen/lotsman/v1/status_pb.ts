@@ -60,7 +60,7 @@ export type StatusSnapshot = Message<"lotsman.v1.StatusSnapshot"> & {
   peers: PeerStatus[];
 
   /**
-   * #129
+   * all peers' bytes, removed peers' included; unset before the first sample
    *
    * @generated from field: lotsman.v1.Traffic total = 5;
    */
@@ -135,7 +135,7 @@ export type UpstreamStatus = Message<"lotsman.v1.UpstreamStatus"> & {
   active: number;
 
   /**
-   * #129
+   * unset until the daemon has sampled it
    *
    * @generated from field: lotsman.v1.Traffic traffic = 11;
    */
@@ -195,7 +195,7 @@ export type PeerStatus = Message<"lotsman.v1.PeerStatus"> & {
   lastHandshake?: Timestamp | undefined;
 
   /**
-   * #129
+   * unset until the daemon has sampled it
    *
    * @generated from field: lotsman.v1.Traffic traffic = 8;
    */
@@ -210,7 +210,9 @@ export const PeerStatusSchema: GenMessage<PeerStatus> = /*@__PURE__*/
   messageDesc(file_lotsman_v1_status, 3);
 
 /**
- * Directions are from the user's side: down = towards the client.
+ * Directions are from the user's side: down = towards the client. A peer
+ * counts its tunnel's packets as sent and received (encrypted); an upstream
+ * counts the packets crossing its interface, its health probes included.
  *
  * @generated from message lotsman.v1.Traffic
  */
@@ -228,7 +230,7 @@ export type Traffic = Message<"lotsman.v1.Traffic"> & {
   upBytes: bigint;
 
   /**
-   * bytes per second, last interval
+   * bytes per second over the daemon's last sample (1 s), whatever the stream's interval
    *
    * @generated from field: uint64 down_rate = 3;
    */
