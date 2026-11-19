@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file lotsman/v1/user.proto.
  */
 export const file_lotsman_v1_user: GenFile = /*@__PURE__*/
-  fileDesc("ChVsb3RzbWFuL3YxL3VzZXIucHJvdG8SCmxvdHNtYW4udjEieAoEVXNlchIMCgRuYW1lGAEgASgJEiMKB2RldmljZXMYAiADKAsyEi5sb3RzbWFuLnYxLkRldmljZRIQCghoYXNfbGluaxgDIAEoCBIrCgdjcmVhdGVkGAQgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcCI9CgZEZXZpY2USDAoEbmFtZRgBIAEoCRIlCgVwZWVycxgCIAMoCzIWLmxvdHNtYW4udjEuRGV2aWNlUGVlciJsCgpEZXZpY2VQZWVyEg8KB3BlZXJfaWQYASABKAkSDwoHcHJvZmlsZRgCIAEoCRIPCgdhZGRyZXNzGAMgASgJEisKB2NyZWF0ZWQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIi8KDERldmljZUNvbmZpZxIPCgdwZWVyX2lkGAEgASgJEg4KBmNvbmZpZxgCIAEoCSISChBMaXN0VXNlcnNSZXF1ZXN0IjQKEUxpc3RVc2Vyc1Jlc3BvbnNlEh8KBXVzZXJzGAEgAygLMhAubG90c21hbi52MS5Vc2VyIkEKEEFkZERldmljZVJlcXVlc3QSDAoEdXNlchgBIAEoCRIOCgZkZXZpY2UYAiABKAkSDwoHcHJvZmlsZRgDIAEoCSJEChNSZW1vdmVEZXZpY2VSZXF1ZXN0EgwKBHVzZXIYASABKAkSDgoGZGV2aWNlGAIgASgJEg8KB3Byb2ZpbGUYAyABKAkiFgoUUmVtb3ZlRGV2aWNlUmVzcG9uc2UiIQoRUmVtb3ZlVXNlclJlcXVlc3QSDAoEdXNlchgBIAEoCSIUChJSZW1vdmVVc2VyUmVzcG9uc2UiIwoQR2V0Q29uZmlnUmVxdWVzdBIPCgdwZWVyX2lkGAEgASgJIiAKEElzc3VlTGlua1JlcXVlc3QSDAoEdXNlchgBIAEoCSIiChFJc3N1ZUxpbmtSZXNwb25zZRINCgV0b2tlbhgBIAEoCSIhChFSZXZva2VMaW5rUmVxdWVzdBIMCgR1c2VyGAEgASgJIhQKElJldm9rZUxpbmtSZXNwb25zZTKTBAoLVXNlclNlcnZpY2USQwoETGlzdBIcLmxvdHNtYW4udjEuTGlzdFVzZXJzUmVxdWVzdBodLmxvdHNtYW4udjEuTGlzdFVzZXJzUmVzcG9uc2USQwoJQWRkRGV2aWNlEhwubG90c21hbi52MS5BZGREZXZpY2VSZXF1ZXN0GhgubG90c21hbi52MS5EZXZpY2VDb25maWcSUQoMUmVtb3ZlRGV2aWNlEh8ubG90c21hbi52MS5SZW1vdmVEZXZpY2VSZXF1ZXN0GiAubG90c21hbi52MS5SZW1vdmVEZXZpY2VSZXNwb25zZRJLCgpSZW1vdmVVc2VyEh0ubG90c21hbi52MS5SZW1vdmVVc2VyUmVxdWVzdBoeLmxvdHNtYW4udjEuUmVtb3ZlVXNlclJlc3BvbnNlEkMKCUdldENvbmZpZxIcLmxvdHNtYW4udjEuR2V0Q29uZmlnUmVxdWVzdBoYLmxvdHNtYW4udjEuRGV2aWNlQ29uZmlnEkgKCUlzc3VlTGluaxIcLmxvdHNtYW4udjEuSXNzdWVMaW5rUmVxdWVzdBodLmxvdHNtYW4udjEuSXNzdWVMaW5rUmVzcG9uc2USSwoKUmV2b2tlTGluaxIdLmxvdHNtYW4udjEuUmV2b2tlTGlua1JlcXVlc3QaHi5sb3RzbWFuLnYxLlJldm9rZUxpbmtSZXNwb25zZUI6WjhnaXRodWIuY29tL2FuZXN0aGV0aXNlZC9sb3RzbWFuL2FwaS9sb3RzbWFuL3YxO2xvdHNtYW52MWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("ChVsb3RzbWFuL3YxL3VzZXIucHJvdG8SCmxvdHNtYW4udjEinAEKBFVzZXISDAoEbmFtZRgBIAEoCRIjCgdkZXZpY2VzGAIgAygLMhIubG90c21hbi52MS5EZXZpY2USEAoIaGFzX2xpbmsYAyABKAgSKwoHY3JlYXRlZBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASIgoGcmlnaHRzGAUgASgLMhIubG90c21hbi52MS5SaWdodHMiRAoGUmlnaHRzEhMKC2VkaXRfcm91dGVzGAEgASgIEhYKDnNob3dfcHJvdmlkZXJzGAIgASgIEg0KBWV4aXRzGAMgAygJIocBCgZEZXZpY2USDwoHcGVlcl9pZBgBIAEoCRIMCgRuYW1lGAIgASgJEg8KB2FkZHJlc3MYAyABKAkSKwoHY3JlYXRlZBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASIAoFcm91dGUYBSABKAsyES5sb3RzbWFuLnYxLlJvdXRlIlAKBVJvdXRlEg8KB2Zhc3Rlc3QYASABKAgSDgoGc3RyaWN0GAIgASgIEiYKCWNvdW50cmllcxgDIAMoCzITLmxvdHNtYW4udjEuQ291bnRyeSIpCgdDb3VudHJ5EgsKA2dlbxgBIAEoCRIRCglwcm92aWRlcnMYAiADKAkiLwoMRGV2aWNlQ29uZmlnEg8KB3BlZXJfaWQYASABKAkSDgoGY29uZmlnGAIgASgJIhIKEExpc3RVc2Vyc1JlcXVlc3QiNAoRTGlzdFVzZXJzUmVzcG9uc2USHwoFdXNlcnMYASADKAsyEC5sb3RzbWFuLnYxLlVzZXIiHgoOQWRkVXNlclJlcXVlc3QSDAoEdXNlchgBIAEoCSJEChBTZXRSaWdodHNSZXF1ZXN0EgwKBHVzZXIYASABKAkSIgoGcmlnaHRzGAIgASgLMhIubG90c21hbi52MS5SaWdodHMiUgoQQWRkRGV2aWNlUmVxdWVzdBIMCgR1c2VyGAEgASgJEg4KBmRldmljZRgCIAEoCRIgCgVyb3V0ZRgDIAEoCzIRLmxvdHNtYW4udjEuUm91dGUiUQoPU2V0Um91dGVSZXF1ZXN0EgwKBHVzZXIYASABKAkSDgoGZGV2aWNlGAIgASgJEiAKBXJvdXRlGAMgASgLMhEubG90c21hbi52MS5Sb3V0ZSIzChNSZW1vdmVEZXZpY2VSZXF1ZXN0EgwKBHVzZXIYASABKAkSDgoGZGV2aWNlGAIgASgJIhYKFFJlbW92ZURldmljZVJlc3BvbnNlIiEKEVJlbW92ZVVzZXJSZXF1ZXN0EgwKBHVzZXIYASABKAkiFAoSUmVtb3ZlVXNlclJlc3BvbnNlIiMKEEdldENvbmZpZ1JlcXVlc3QSDwoHcGVlcl9pZBgBIAEoCSIgChBJc3N1ZUxpbmtSZXF1ZXN0EgwKBHVzZXIYASABKAkiIgoRSXNzdWVMaW5rUmVzcG9uc2USDQoFdG9rZW4YASABKAkiIQoRUmV2b2tlTGlua1JlcXVlc3QSDAoEdXNlchgBIAEoCSIUChJSZXZva2VMaW5rUmVzcG9uc2UyxgUKC1VzZXJTZXJ2aWNlEkMKBExpc3QSHC5sb3RzbWFuLnYxLkxpc3RVc2Vyc1JlcXVlc3QaHS5sb3RzbWFuLnYxLkxpc3RVc2Vyc1Jlc3BvbnNlEjcKB0FkZFVzZXISGi5sb3RzbWFuLnYxLkFkZFVzZXJSZXF1ZXN0GhAubG90c21hbi52MS5Vc2VyEjsKCVNldFJpZ2h0cxIcLmxvdHNtYW4udjEuU2V0UmlnaHRzUmVxdWVzdBoQLmxvdHNtYW4udjEuVXNlchJDCglBZGREZXZpY2USHC5sb3RzbWFuLnYxLkFkZERldmljZVJlcXVlc3QaGC5sb3RzbWFuLnYxLkRldmljZUNvbmZpZxI7CghTZXRSb3V0ZRIbLmxvdHNtYW4udjEuU2V0Um91dGVSZXF1ZXN0GhIubG90c21hbi52MS5EZXZpY2USUQoMUmVtb3ZlRGV2aWNlEh8ubG90c21hbi52MS5SZW1vdmVEZXZpY2VSZXF1ZXN0GiAubG90c21hbi52MS5SZW1vdmVEZXZpY2VSZXNwb25zZRJLCgpSZW1vdmVVc2VyEh0ubG90c21hbi52MS5SZW1vdmVVc2VyUmVxdWVzdBoeLmxvdHNtYW4udjEuUmVtb3ZlVXNlclJlc3BvbnNlEkMKCUdldENvbmZpZxIcLmxvdHNtYW4udjEuR2V0Q29uZmlnUmVxdWVzdBoYLmxvdHNtYW4udjEuRGV2aWNlQ29uZmlnEkgKCUlzc3VlTGluaxIcLmxvdHNtYW4udjEuSXNzdWVMaW5rUmVxdWVzdBodLmxvdHNtYW4udjEuSXNzdWVMaW5rUmVzcG9uc2USSwoKUmV2b2tlTGluaxIdLmxvdHNtYW4udjEuUmV2b2tlTGlua1JlcXVlc3QaHi5sb3RzbWFuLnYxLlJldm9rZUxpbmtSZXNwb25zZUI6WjhnaXRodWIuY29tL2FuZXN0aGV0aXNlZC9sb3RzbWFuL2FwaS9sb3RzbWFuL3YxO2xvdHNtYW52MWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * @generated from message lotsman.v1.User
@@ -40,6 +40,11 @@ export type User = Message<"lotsman.v1.User"> & {
    * @generated from field: google.protobuf.Timestamp created = 4;
    */
   created?: Timestamp | undefined;
+
+  /**
+   * @generated from field: lotsman.v1.Rights rights = 5;
+   */
+  rights?: Rights | undefined;
 };
 
 /**
@@ -50,42 +55,55 @@ export const UserSchema: GenMessage<User> = /*@__PURE__*/
   messageDesc(file_lotsman_v1_user, 0);
 
 /**
- * @generated from message lotsman.v1.Device
+ * What the operator lets a user do on their page.
+ *
+ * @generated from message lotsman.v1.Rights
  */
-export type Device = Message<"lotsman.v1.Device"> & {
+export type Rights = Message<"lotsman.v1.Rights"> & {
   /**
-   * @generated from field: string name = 1;
+   * false: only the operator sets the user's routes
+   *
+   * @generated from field: bool edit_routes = 1;
    */
-  name: string;
+  editRoutes: boolean;
 
   /**
-   * one per profile
+   * false: the user's page and API show countries only
    *
-   * @generated from field: repeated lotsman.v1.DevicePeer peers = 2;
+   * @generated from field: bool show_providers = 2;
    */
-  peers: DevicePeer[];
+  showProviders: boolean;
+
+  /**
+   * upstream names the user's devices may use; empty = all
+   *
+   * @generated from field: repeated string exits = 3;
+   */
+  exits: string[];
 };
 
 /**
- * Describes the message lotsman.v1.Device.
- * Use `create(DeviceSchema)` to create a new message.
+ * Describes the message lotsman.v1.Rights.
+ * Use `create(RightsSchema)` to create a new message.
  */
-export const DeviceSchema: GenMessage<Device> = /*@__PURE__*/
+export const RightsSchema: GenMessage<Rights> = /*@__PURE__*/
   messageDesc(file_lotsman_v1_user, 1);
 
 /**
- * @generated from message lotsman.v1.DevicePeer
+ * One device is one tunnel: one key, one address, one client config.
+ *
+ * @generated from message lotsman.v1.Device
  */
-export type DevicePeer = Message<"lotsman.v1.DevicePeer"> & {
+export type Device = Message<"lotsman.v1.Device"> & {
   /**
    * @generated from field: string peer_id = 1;
    */
   peerId: string;
 
   /**
-   * @generated from field: string profile = 2;
+   * @generated from field: string name = 2;
    */
-  profile: string;
+  name: string;
 
   /**
    * @generated from field: string address = 3;
@@ -96,14 +114,83 @@ export type DevicePeer = Message<"lotsman.v1.DevicePeer"> & {
    * @generated from field: google.protobuf.Timestamp created = 4;
    */
   created?: Timestamp | undefined;
+
+  /**
+   * @generated from field: lotsman.v1.Route route = 5;
+   */
+  route?: Route | undefined;
 };
 
 /**
- * Describes the message lotsman.v1.DevicePeer.
- * Use `create(DevicePeerSchema)` to create a new message.
+ * Describes the message lotsman.v1.Device.
+ * Use `create(DeviceSchema)` to create a new message.
  */
-export const DevicePeerSchema: GenMessage<DevicePeer> = /*@__PURE__*/
+export const DeviceSchema: GenMessage<Device> = /*@__PURE__*/
   messageDesc(file_lotsman_v1_user, 2);
+
+/**
+ * Which exits a device's traffic uses, among the user's allowed exits. The
+ * route lives on the gateway, so changing it never touches the client config.
+ *
+ * @generated from message lotsman.v1.Route
+ */
+export type Route = Message<"lotsman.v1.Route"> & {
+  /**
+   * false: the first country in order with an available exit wins;
+   * true: every listed country is one choice and the lowest latency wins.
+   *
+   * @generated from field: bool fastest = 1;
+   */
+  fastest: boolean;
+
+  /**
+   * true: when no listed country has an available exit the device is
+   * blocked; false: it falls back to any allowed exit.
+   *
+   * @generated from field: bool strict = 2;
+   */
+  strict: boolean;
+
+  /**
+   * empty: any allowed exit
+   *
+   * @generated from field: repeated lotsman.v1.Country countries = 3;
+   */
+  countries: Country[];
+};
+
+/**
+ * Describes the message lotsman.v1.Route.
+ * Use `create(RouteSchema)` to create a new message.
+ */
+export const RouteSchema: GenMessage<Route> = /*@__PURE__*/
+  messageDesc(file_lotsman_v1_user, 3);
+
+/**
+ * @generated from message lotsman.v1.Country
+ */
+export type Country = Message<"lotsman.v1.Country"> & {
+  /**
+   * an upstream's geo, ISO 3166-1 alpha-2
+   *
+   * @generated from field: string geo = 1;
+   */
+  geo: string;
+
+  /**
+   * empty: every provider in the country
+   *
+   * @generated from field: repeated string providers = 2;
+   */
+  providers: string[];
+};
+
+/**
+ * Describes the message lotsman.v1.Country.
+ * Use `create(CountrySchema)` to create a new message.
+ */
+export const CountrySchema: GenMessage<Country> = /*@__PURE__*/
+  messageDesc(file_lotsman_v1_user, 4);
 
 /**
  * @generated from message lotsman.v1.DeviceConfig
@@ -127,7 +214,7 @@ export type DeviceConfig = Message<"lotsman.v1.DeviceConfig"> & {
  * Use `create(DeviceConfigSchema)` to create a new message.
  */
 export const DeviceConfigSchema: GenMessage<DeviceConfig> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 3);
+  messageDesc(file_lotsman_v1_user, 5);
 
 /**
  * @generated from message lotsman.v1.ListUsersRequest
@@ -140,7 +227,7 @@ export type ListUsersRequest = Message<"lotsman.v1.ListUsersRequest"> & {
  * Use `create(ListUsersRequestSchema)` to create a new message.
  */
 export const ListUsersRequestSchema: GenMessage<ListUsersRequest> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 4);
+  messageDesc(file_lotsman_v1_user, 6);
 
 /**
  * @generated from message lotsman.v1.ListUsersResponse
@@ -157,7 +244,46 @@ export type ListUsersResponse = Message<"lotsman.v1.ListUsersResponse"> & {
  * Use `create(ListUsersResponseSchema)` to create a new message.
  */
 export const ListUsersResponseSchema: GenMessage<ListUsersResponse> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 5);
+  messageDesc(file_lotsman_v1_user, 7);
+
+/**
+ * @generated from message lotsman.v1.AddUserRequest
+ */
+export type AddUserRequest = Message<"lotsman.v1.AddUserRequest"> & {
+  /**
+   * @generated from field: string user = 1;
+   */
+  user: string;
+};
+
+/**
+ * Describes the message lotsman.v1.AddUserRequest.
+ * Use `create(AddUserRequestSchema)` to create a new message.
+ */
+export const AddUserRequestSchema: GenMessage<AddUserRequest> = /*@__PURE__*/
+  messageDesc(file_lotsman_v1_user, 8);
+
+/**
+ * @generated from message lotsman.v1.SetRightsRequest
+ */
+export type SetRightsRequest = Message<"lotsman.v1.SetRightsRequest"> & {
+  /**
+   * @generated from field: string user = 1;
+   */
+  user: string;
+
+  /**
+   * @generated from field: lotsman.v1.Rights rights = 2;
+   */
+  rights?: Rights | undefined;
+};
+
+/**
+ * Describes the message lotsman.v1.SetRightsRequest.
+ * Use `create(SetRightsRequestSchema)` to create a new message.
+ */
+export const SetRightsRequestSchema: GenMessage<SetRightsRequest> = /*@__PURE__*/
+  messageDesc(file_lotsman_v1_user, 9);
 
 /**
  * @generated from message lotsman.v1.AddDeviceRequest
@@ -174,9 +300,11 @@ export type AddDeviceRequest = Message<"lotsman.v1.AddDeviceRequest"> & {
   device: string;
 
   /**
-   * @generated from field: string profile = 3;
+   * unset: the fastest of any allowed exit
+   *
+   * @generated from field: lotsman.v1.Route route = 3;
    */
-  profile: string;
+  route?: Route | undefined;
 };
 
 /**
@@ -184,7 +312,34 @@ export type AddDeviceRequest = Message<"lotsman.v1.AddDeviceRequest"> & {
  * Use `create(AddDeviceRequestSchema)` to create a new message.
  */
 export const AddDeviceRequestSchema: GenMessage<AddDeviceRequest> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 6);
+  messageDesc(file_lotsman_v1_user, 10);
+
+/**
+ * @generated from message lotsman.v1.SetRouteRequest
+ */
+export type SetRouteRequest = Message<"lotsman.v1.SetRouteRequest"> & {
+  /**
+   * @generated from field: string user = 1;
+   */
+  user: string;
+
+  /**
+   * @generated from field: string device = 2;
+   */
+  device: string;
+
+  /**
+   * @generated from field: lotsman.v1.Route route = 3;
+   */
+  route?: Route | undefined;
+};
+
+/**
+ * Describes the message lotsman.v1.SetRouteRequest.
+ * Use `create(SetRouteRequestSchema)` to create a new message.
+ */
+export const SetRouteRequestSchema: GenMessage<SetRouteRequest> = /*@__PURE__*/
+  messageDesc(file_lotsman_v1_user, 11);
 
 /**
  * @generated from message lotsman.v1.RemoveDeviceRequest
@@ -199,13 +354,6 @@ export type RemoveDeviceRequest = Message<"lotsman.v1.RemoveDeviceRequest"> & {
    * @generated from field: string device = 2;
    */
   device: string;
-
-  /**
-   * empty = every profile
-   *
-   * @generated from field: string profile = 3;
-   */
-  profile: string;
 };
 
 /**
@@ -213,7 +361,7 @@ export type RemoveDeviceRequest = Message<"lotsman.v1.RemoveDeviceRequest"> & {
  * Use `create(RemoveDeviceRequestSchema)` to create a new message.
  */
 export const RemoveDeviceRequestSchema: GenMessage<RemoveDeviceRequest> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 7);
+  messageDesc(file_lotsman_v1_user, 12);
 
 /**
  * @generated from message lotsman.v1.RemoveDeviceResponse
@@ -226,7 +374,7 @@ export type RemoveDeviceResponse = Message<"lotsman.v1.RemoveDeviceResponse"> & 
  * Use `create(RemoveDeviceResponseSchema)` to create a new message.
  */
 export const RemoveDeviceResponseSchema: GenMessage<RemoveDeviceResponse> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 8);
+  messageDesc(file_lotsman_v1_user, 13);
 
 /**
  * @generated from message lotsman.v1.RemoveUserRequest
@@ -243,7 +391,7 @@ export type RemoveUserRequest = Message<"lotsman.v1.RemoveUserRequest"> & {
  * Use `create(RemoveUserRequestSchema)` to create a new message.
  */
 export const RemoveUserRequestSchema: GenMessage<RemoveUserRequest> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 9);
+  messageDesc(file_lotsman_v1_user, 14);
 
 /**
  * @generated from message lotsman.v1.RemoveUserResponse
@@ -256,7 +404,7 @@ export type RemoveUserResponse = Message<"lotsman.v1.RemoveUserResponse"> & {
  * Use `create(RemoveUserResponseSchema)` to create a new message.
  */
 export const RemoveUserResponseSchema: GenMessage<RemoveUserResponse> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 10);
+  messageDesc(file_lotsman_v1_user, 15);
 
 /**
  * @generated from message lotsman.v1.GetConfigRequest
@@ -273,7 +421,7 @@ export type GetConfigRequest = Message<"lotsman.v1.GetConfigRequest"> & {
  * Use `create(GetConfigRequestSchema)` to create a new message.
  */
 export const GetConfigRequestSchema: GenMessage<GetConfigRequest> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 11);
+  messageDesc(file_lotsman_v1_user, 16);
 
 /**
  * @generated from message lotsman.v1.IssueLinkRequest
@@ -290,7 +438,7 @@ export type IssueLinkRequest = Message<"lotsman.v1.IssueLinkRequest"> & {
  * Use `create(IssueLinkRequestSchema)` to create a new message.
  */
 export const IssueLinkRequestSchema: GenMessage<IssueLinkRequest> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 12);
+  messageDesc(file_lotsman_v1_user, 17);
 
 /**
  * @generated from message lotsman.v1.IssueLinkResponse
@@ -309,7 +457,7 @@ export type IssueLinkResponse = Message<"lotsman.v1.IssueLinkResponse"> & {
  * Use `create(IssueLinkResponseSchema)` to create a new message.
  */
 export const IssueLinkResponseSchema: GenMessage<IssueLinkResponse> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 13);
+  messageDesc(file_lotsman_v1_user, 18);
 
 /**
  * @generated from message lotsman.v1.RevokeLinkRequest
@@ -326,7 +474,7 @@ export type RevokeLinkRequest = Message<"lotsman.v1.RevokeLinkRequest"> & {
  * Use `create(RevokeLinkRequestSchema)` to create a new message.
  */
 export const RevokeLinkRequestSchema: GenMessage<RevokeLinkRequest> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 14);
+  messageDesc(file_lotsman_v1_user, 19);
 
 /**
  * @generated from message lotsman.v1.RevokeLinkResponse
@@ -339,7 +487,7 @@ export type RevokeLinkResponse = Message<"lotsman.v1.RevokeLinkResponse"> & {
  * Use `create(RevokeLinkResponseSchema)` to create a new message.
  */
 export const RevokeLinkResponseSchema: GenMessage<RevokeLinkResponse> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user, 15);
+  messageDesc(file_lotsman_v1_user, 20);
 
 /**
  * @generated from service lotsman.v1.UserService
@@ -354,6 +502,22 @@ export const UserService: GenService<{
     output: typeof ListUsersResponseSchema;
   },
   /**
+   * @generated from rpc lotsman.v1.UserService.AddUser
+   */
+  addUser: {
+    methodKind: "unary";
+    input: typeof AddUserRequestSchema;
+    output: typeof UserSchema;
+  },
+  /**
+   * @generated from rpc lotsman.v1.UserService.SetRights
+   */
+  setRights: {
+    methodKind: "unary";
+    input: typeof SetRightsRequestSchema;
+    output: typeof UserSchema;
+  },
+  /**
    * creates the user if needed
    *
    * @generated from rpc lotsman.v1.UserService.AddDevice
@@ -362,6 +526,16 @@ export const UserService: GenService<{
     methodKind: "unary";
     input: typeof AddDeviceRequestSchema;
     output: typeof DeviceConfigSchema;
+  },
+  /**
+   * the config stays valid
+   *
+   * @generated from rpc lotsman.v1.UserService.SetRoute
+   */
+  setRoute: {
+    methodKind: "unary";
+    input: typeof SetRouteRequestSchema;
+    output: typeof DeviceSchema;
   },
   /**
    * @generated from rpc lotsman.v1.UserService.RemoveDevice

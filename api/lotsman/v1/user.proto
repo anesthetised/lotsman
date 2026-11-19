@@ -10,7 +10,10 @@ option go_package = "github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1";
 
 service UserService {
   rpc List(ListUsersRequest) returns (ListUsersResponse);
+  rpc AddUser(AddUserRequest) returns (User);
+  rpc SetRights(SetRightsRequest) returns (User);
   rpc AddDevice(AddDeviceRequest) returns (DeviceConfig); // creates the user if needed
+  rpc SetRoute(SetRouteRequest) returns (Device); // the config stays valid
   rpc RemoveDevice(RemoveDeviceRequest) returns (RemoveDeviceResponse);
   rpc RemoveUser(RemoveUserRequest) returns (RemoveUserResponse);
   rpc GetConfig(GetConfigRequest) returns (DeviceConfig);
@@ -23,18 +26,40 @@ message User {
   repeated Device devices = 2;
   bool has_link = 3;
   google.protobuf.Timestamp created = 4;
+  Rights rights = 5;
 }
 
+// What the operator lets a user do on their page.
+message Rights {
+  bool edit_routes = 1; // false: only the operator sets the user's routes
+  bool show_providers = 2; // false: the user's page and API show countries only
+  repeated string exits = 3; // upstream names the user's devices may use; empty = all
+}
+
+// One device is one tunnel: one key, one address, one client config.
 message Device {
-  string name = 1;
-  repeated DevicePeer peers = 2; // one per profile
-}
-
-message DevicePeer {
   string peer_id = 1;
-  string profile = 2;
+  string name = 2;
   string address = 3;
   google.protobuf.Timestamp created = 4;
+  Route route = 5;
+}
+
+// Which exits a device's traffic uses, among the user's allowed exits. The
+// route lives on the gateway, so changing it never touches the client config.
+message Route {
+  // false: the first country in order with an available exit wins;
+  // true: every listed country is one choice and the lowest latency wins.
+  bool fastest = 1;
+  // true: when no listed country has an available exit the device is
+  // blocked; false: it falls back to any allowed exit.
+  bool strict = 2;
+  repeated Country countries = 3; // empty: any allowed exit
+}
+
+message Country {
+  string geo = 1; // an upstream's geo, ISO 3166-1 alpha-2
+  repeated string providers = 2; // empty: every provider in the country
 }
 
 message DeviceConfig {
@@ -46,15 +71,26 @@ message ListUsersRequest {}
 message ListUsersResponse {
   repeated User users = 1;
 }
+message AddUserRequest {
+  string user = 1;
+}
+message SetRightsRequest {
+  string user = 1;
+  Rights rights = 2;
+}
 message AddDeviceRequest {
   string user = 1;
   string device = 2;
-  string profile = 3;
+  Route route = 3; // unset: the fastest of any allowed exit
+}
+message SetRouteRequest {
+  string user = 1;
+  string device = 2;
+  Route route = 3;
 }
 message RemoveDeviceRequest {
   string user = 1;
   string device = 2;
-  string profile = 3; // empty = every profile
 }
 message RemoveDeviceResponse {}
 message RemoveUserRequest {

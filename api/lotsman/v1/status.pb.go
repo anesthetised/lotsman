@@ -260,13 +260,12 @@ type UpstreamStatus struct {
 	Kind          UpstreamKind           `protobuf:"varint,2,opt,name=kind,proto3,enum=lotsman.v1.UpstreamKind" json:"kind,omitempty"`
 	Geo           string                 `protobuf:"bytes,3,opt,name=geo,proto3" json:"geo,omitempty"`
 	Provider      string                 `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"`
-	Tags          []string               `protobuf:"bytes,5,rep,name=tags,proto3" json:"tags,omitempty"`
-	State         UpstreamState          `protobuf:"varint,6,opt,name=state,proto3,enum=lotsman.v1.UpstreamState" json:"state,omitempty"`
-	Latency       *durationpb.Duration   `protobuf:"bytes,7,opt,name=latency,proto3" json:"latency,omitempty"`
-	LastHandshake *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_handshake,json=lastHandshake,proto3" json:"last_handshake,omitempty"` // unset for proxy upstreams / never
-	Routed        uint32                 `protobuf:"varint,9,opt,name=routed,proto3" json:"routed,omitempty"`                                   // peers directed through it
-	Active        uint32                 `protobuf:"varint,10,opt,name=active,proto3" json:"active,omitempty"`                                  // of those, handshake inside the active window
-	Traffic       *Traffic               `protobuf:"bytes,11,opt,name=traffic,proto3" json:"traffic,omitempty"`                                 // unset until the daemon has sampled it
+	State         UpstreamState          `protobuf:"varint,5,opt,name=state,proto3,enum=lotsman.v1.UpstreamState" json:"state,omitempty"`
+	Latency       *durationpb.Duration   `protobuf:"bytes,6,opt,name=latency,proto3" json:"latency,omitempty"`
+	LastHandshake *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_handshake,json=lastHandshake,proto3" json:"last_handshake,omitempty"` // unset for proxy upstreams / never
+	Routed        uint32                 `protobuf:"varint,8,opt,name=routed,proto3" json:"routed,omitempty"`                                   // peers directed through it
+	Active        uint32                 `protobuf:"varint,9,opt,name=active,proto3" json:"active,omitempty"`                                   // of those, handshake inside the active window
+	Traffic       *Traffic               `protobuf:"bytes,10,opt,name=traffic,proto3" json:"traffic,omitempty"`                                 // unset until the daemon has sampled it
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -329,13 +328,6 @@ func (x *UpstreamStatus) GetProvider() string {
 	return ""
 }
 
-func (x *UpstreamStatus) GetTags() []string {
-	if x != nil {
-		return x.Tags
-	}
-	return nil
-}
-
 func (x *UpstreamStatus) GetState() UpstreamState {
 	if x != nil {
 		return x.State
@@ -383,11 +375,10 @@ type PeerStatus struct {
 	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"` // stable, opaque; survives renames
 	User          string                 `protobuf:"bytes,2,opt,name=user,proto3" json:"user,omitempty"`
 	Device        string                 `protobuf:"bytes,3,opt,name=device,proto3" json:"device,omitempty"`
-	Profile       string                 `protobuf:"bytes,4,opt,name=profile,proto3" json:"profile,omitempty"`
-	Address       string                 `protobuf:"bytes,5,opt,name=address,proto3" json:"address,omitempty"`   // client tunnel IP
-	Upstream      string                 `protobuf:"bytes,6,opt,name=upstream,proto3" json:"upstream,omitempty"` // "" when blocked
-	LastHandshake *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_handshake,json=lastHandshake,proto3" json:"last_handshake,omitempty"`
-	Traffic       *Traffic               `protobuf:"bytes,8,opt,name=traffic,proto3" json:"traffic,omitempty"` // unset until the daemon has sampled it
+	Address       string                 `protobuf:"bytes,4,opt,name=address,proto3" json:"address,omitempty"`   // client tunnel IP
+	Upstream      string                 `protobuf:"bytes,5,opt,name=upstream,proto3" json:"upstream,omitempty"` // "" when blocked
+	LastHandshake *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=last_handshake,json=lastHandshake,proto3" json:"last_handshake,omitempty"`
+	Traffic       *Traffic               `protobuf:"bytes,7,opt,name=traffic,proto3" json:"traffic,omitempty"` // unset until the daemon has sampled it
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -439,13 +430,6 @@ func (x *PeerStatus) GetUser() string {
 func (x *PeerStatus) GetDevice() string {
 	if x != nil {
 		return x.Device
-	}
-	return ""
-}
-
-func (x *PeerStatus) GetProfile() string {
-	if x != nil {
-		return x.Profile
 	}
 	return ""
 }
@@ -563,30 +547,28 @@ const file_lotsman_v1_status_proto_rawDesc = "" +
 	"client_mtu\x18\x02 \x01(\rR\tclientMtu\x128\n" +
 	"\tupstreams\x18\x03 \x03(\v2\x1a.lotsman.v1.UpstreamStatusR\tupstreams\x12,\n" +
 	"\x05peers\x18\x04 \x03(\v2\x16.lotsman.v1.PeerStatusR\x05peers\x12)\n" +
-	"\x05total\x18\x05 \x01(\v2\x13.lotsman.v1.TrafficR\x05total\"\x9c\x03\n" +
+	"\x05total\x18\x05 \x01(\v2\x13.lotsman.v1.TrafficR\x05total\"\x88\x03\n" +
 	"\x0eUpstreamStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x18.lotsman.v1.UpstreamKindR\x04kind\x12\x10\n" +
 	"\x03geo\x18\x03 \x01(\tR\x03geo\x12\x1a\n" +
-	"\bprovider\x18\x04 \x01(\tR\bprovider\x12\x12\n" +
-	"\x04tags\x18\x05 \x03(\tR\x04tags\x12/\n" +
-	"\x05state\x18\x06 \x01(\x0e2\x19.lotsman.v1.UpstreamStateR\x05state\x123\n" +
-	"\alatency\x18\a \x01(\v2\x19.google.protobuf.DurationR\alatency\x12A\n" +
-	"\x0elast_handshake\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\rlastHandshake\x12\x16\n" +
-	"\x06routed\x18\t \x01(\rR\x06routed\x12\x16\n" +
-	"\x06active\x18\n" +
-	" \x01(\rR\x06active\x12-\n" +
-	"\atraffic\x18\v \x01(\v2\x13.lotsman.v1.TrafficR\atraffic\"\x93\x02\n" +
+	"\bprovider\x18\x04 \x01(\tR\bprovider\x12/\n" +
+	"\x05state\x18\x05 \x01(\x0e2\x19.lotsman.v1.UpstreamStateR\x05state\x123\n" +
+	"\alatency\x18\x06 \x01(\v2\x19.google.protobuf.DurationR\alatency\x12A\n" +
+	"\x0elast_handshake\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\rlastHandshake\x12\x16\n" +
+	"\x06routed\x18\b \x01(\rR\x06routed\x12\x16\n" +
+	"\x06active\x18\t \x01(\rR\x06active\x12-\n" +
+	"\atraffic\x18\n" +
+	" \x01(\v2\x13.lotsman.v1.TrafficR\atraffic\"\xf9\x01\n" +
 	"\n" +
 	"PeerStatus\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x12\n" +
 	"\x04user\x18\x02 \x01(\tR\x04user\x12\x16\n" +
 	"\x06device\x18\x03 \x01(\tR\x06device\x12\x18\n" +
-	"\aprofile\x18\x04 \x01(\tR\aprofile\x12\x18\n" +
-	"\aaddress\x18\x05 \x01(\tR\aaddress\x12\x1a\n" +
-	"\bupstream\x18\x06 \x01(\tR\bupstream\x12A\n" +
-	"\x0elast_handshake\x18\a \x01(\v2\x1a.google.protobuf.TimestampR\rlastHandshake\x12-\n" +
-	"\atraffic\x18\b \x01(\v2\x13.lotsman.v1.TrafficR\atraffic\"y\n" +
+	"\aaddress\x18\x04 \x01(\tR\aaddress\x12\x1a\n" +
+	"\bupstream\x18\x05 \x01(\tR\bupstream\x12A\n" +
+	"\x0elast_handshake\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\rlastHandshake\x12-\n" +
+	"\atraffic\x18\a \x01(\v2\x13.lotsman.v1.TrafficR\atraffic\"y\n" +
 	"\aTraffic\x12\x1d\n" +
 	"\n" +
 	"down_bytes\x18\x01 \x01(\x04R\tdownBytes\x12\x19\n" +

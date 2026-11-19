@@ -11,11 +11,9 @@ import type { Duration } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_duration } from "@bufbuild/protobuf/wkt";
 import type { HistoryRequestSchema, HistoryResponseSchema } from "./history_pb";
 import { file_lotsman_v1_history } from "./history_pb";
-import type { ListProfilesRequestSchema, ListProfilesResponseSchema } from "./profile_pb";
-import { file_lotsman_v1_profile } from "./profile_pb";
 import type { StatusSnapshotSchema, WatchStatusRequestSchema } from "./status_pb";
 import { file_lotsman_v1_status } from "./status_pb";
-import type { DeviceConfigSchema, GetConfigRequestSchema, RemoveDeviceResponseSchema, UserSchema } from "./user_pb";
+import type { DeviceConfigSchema, DeviceSchema, GetConfigRequestSchema, RemoveDeviceResponseSchema, Route, UserSchema } from "./user_pb";
 import { file_lotsman_v1_user } from "./user_pb";
 import type { Message } from "@bufbuild/protobuf";
 
@@ -23,7 +21,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file lotsman/v1/user_self.proto.
  */
 export const file_lotsman_v1_user_self: GenFile = /*@__PURE__*/
-  fileDesc("Chpsb3RzbWFuL3YxL3VzZXJfc2VsZi5wcm90bxIKbG90c21hbi52MSIjChJSZXNvbHZlTGlua1JlcXVlc3QSDQoFdG9rZW4YASABKAkiIwoTUmVzb2x2ZUxpbmtSZXNwb25zZRIMCgR1c2VyGAEgASgJIhAKDkdldFNlbGZSZXF1ZXN0IjcKFEFkZFNlbGZEZXZpY2VSZXF1ZXN0Eg4KBmRldmljZRgBIAEoCRIPCgdwcm9maWxlGAIgASgJIjoKF1JlbW92ZVNlbGZEZXZpY2VSZXF1ZXN0Eg4KBmRldmljZRgBIAEoCRIPCgdwcm9maWxlGAIgASgJIt8BChBTZWxmU2VydmljZUxpbWl0EjMKBnJlYXNvbhgBIAEoDjIjLmxvdHNtYW4udjEuU2VsZlNlcnZpY2VMaW1pdC5SZWFzb24SEwoLbWF4X2RldmljZXMYAiABKA0SLgoLcmV0cnlfYWZ0ZXIYAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iUQoGUmVhc29uEhYKElJFQVNPTl9VTlNQRUNJRklFRBAAEhYKElJFQVNPTl9NQVhfREVWSUNFUxABEhcKE1JFQVNPTl9SQVRFX0xJTUlURUQQAjKpBQoPVXNlclNlbGZTZXJ2aWNlEk4KC1Jlc29sdmVMaW5rEh4ubG90c21hbi52MS5SZXNvbHZlTGlua1JlcXVlc3QaHy5sb3RzbWFuLnYxLlJlc29sdmVMaW5rUmVzcG9uc2USMwoDR2V0EhoubG90c21hbi52MS5HZXRTZWxmUmVxdWVzdBoQLmxvdHNtYW4udjEuVXNlchJFCgVXYXRjaBIeLmxvdHNtYW4udjEuV2F0Y2hTdGF0dXNSZXF1ZXN0GhoubG90c21hbi52MS5TdGF0dXNTbmFwc2hvdDABEkcKCUFkZERldmljZRIgLmxvdHNtYW4udjEuQWRkU2VsZkRldmljZVJlcXVlc3QaGC5sb3RzbWFuLnYxLkRldmljZUNvbmZpZxJVCgxSZW1vdmVEZXZpY2USIy5sb3RzbWFuLnYxLlJlbW92ZVNlbGZEZXZpY2VSZXF1ZXN0GiAubG90c21hbi52MS5SZW1vdmVEZXZpY2VSZXNwb25zZRJDCglHZXRDb25maWcSHC5sb3RzbWFuLnYxLkdldENvbmZpZ1JlcXVlc3QaGC5sb3RzbWFuLnYxLkRldmljZUNvbmZpZxJRCgxMaXN0UHJvZmlsZXMSHy5sb3RzbWFuLnYxLkxpc3RQcm9maWxlc1JlcXVlc3QaIC5sb3RzbWFuLnYxLkxpc3RQcm9maWxlc1Jlc3BvbnNlEkoKD1Vwc3RyZWFtSGlzdG9yeRIaLmxvdHNtYW4udjEuSGlzdG9yeVJlcXVlc3QaGy5sb3RzbWFuLnYxLkhpc3RvcnlSZXNwb25zZRJGCgtQZWVySGlzdG9yeRIaLmxvdHNtYW4udjEuSGlzdG9yeVJlcXVlc3QaGy5sb3RzbWFuLnYxLkhpc3RvcnlSZXNwb25zZUI6WjhnaXRodWIuY29tL2FuZXN0aGV0aXNlZC9sb3RzbWFuL2FwaS9sb3RzbWFuL3YxO2xvdHNtYW52MWIGcHJvdG8z", [file_google_protobuf_duration, file_lotsman_v1_history, file_lotsman_v1_profile, file_lotsman_v1_status, file_lotsman_v1_user]);
+  fileDesc("Chpsb3RzbWFuL3YxL3VzZXJfc2VsZi5wcm90bxIKbG90c21hbi52MSIjChJSZXNvbHZlTGlua1JlcXVlc3QSDQoFdG9rZW4YASABKAkiIwoTUmVzb2x2ZUxpbmtSZXNwb25zZRIMCgR1c2VyGAEgASgJIhAKDkdldFNlbGZSZXF1ZXN0IkgKFEFkZFNlbGZEZXZpY2VSZXF1ZXN0Eg4KBmRldmljZRgBIAEoCRIgCgVyb3V0ZRgCIAEoCzIRLmxvdHNtYW4udjEuUm91dGUiRwoTU2V0U2VsZlJvdXRlUmVxdWVzdBIOCgZkZXZpY2UYASABKAkSIAoFcm91dGUYAiABKAsyES5sb3RzbWFuLnYxLlJvdXRlIikKF1JlbW92ZVNlbGZEZXZpY2VSZXF1ZXN0Eg4KBmRldmljZRgBIAEoCSLfAQoQU2VsZlNlcnZpY2VMaW1pdBIzCgZyZWFzb24YASABKA4yIy5sb3RzbWFuLnYxLlNlbGZTZXJ2aWNlTGltaXQuUmVhc29uEhMKC21heF9kZXZpY2VzGAIgASgNEi4KC3JldHJ5X2FmdGVyGAMgASgLMhkuZ29vZ2xlLnByb3RvYnVmLkR1cmF0aW9uIlEKBlJlYXNvbhIWChJSRUFTT05fVU5TUEVDSUZJRUQQABIWChJSRUFTT05fTUFYX0RFVklDRVMQARIXChNSRUFTT05fUkFURV9MSU1JVEVEEAIylwUKD1VzZXJTZWxmU2VydmljZRJOCgtSZXNvbHZlTGluaxIeLmxvdHNtYW4udjEuUmVzb2x2ZUxpbmtSZXF1ZXN0Gh8ubG90c21hbi52MS5SZXNvbHZlTGlua1Jlc3BvbnNlEjMKA0dldBIaLmxvdHNtYW4udjEuR2V0U2VsZlJlcXVlc3QaEC5sb3RzbWFuLnYxLlVzZXISRQoFV2F0Y2gSHi5sb3RzbWFuLnYxLldhdGNoU3RhdHVzUmVxdWVzdBoaLmxvdHNtYW4udjEuU3RhdHVzU25hcHNob3QwARJHCglBZGREZXZpY2USIC5sb3RzbWFuLnYxLkFkZFNlbGZEZXZpY2VSZXF1ZXN0GhgubG90c21hbi52MS5EZXZpY2VDb25maWcSPwoIU2V0Um91dGUSHy5sb3RzbWFuLnYxLlNldFNlbGZSb3V0ZVJlcXVlc3QaEi5sb3RzbWFuLnYxLkRldmljZRJVCgxSZW1vdmVEZXZpY2USIy5sb3RzbWFuLnYxLlJlbW92ZVNlbGZEZXZpY2VSZXF1ZXN0GiAubG90c21hbi52MS5SZW1vdmVEZXZpY2VSZXNwb25zZRJDCglHZXRDb25maWcSHC5sb3RzbWFuLnYxLkdldENvbmZpZ1JlcXVlc3QaGC5sb3RzbWFuLnYxLkRldmljZUNvbmZpZxJKCg9VcHN0cmVhbUhpc3RvcnkSGi5sb3RzbWFuLnYxLkhpc3RvcnlSZXF1ZXN0GhsubG90c21hbi52MS5IaXN0b3J5UmVzcG9uc2USRgoLUGVlckhpc3RvcnkSGi5sb3RzbWFuLnYxLkhpc3RvcnlSZXF1ZXN0GhsubG90c21hbi52MS5IaXN0b3J5UmVzcG9uc2VCOlo4Z2l0aHViLmNvbS9hbmVzdGhldGlzZWQvbG90c21hbi9hcGkvbG90c21hbi92MTtsb3RzbWFudjFiBnByb3RvMw", [file_google_protobuf_duration, file_lotsman_v1_history, file_lotsman_v1_status, file_lotsman_v1_user]);
 
 /**
  * @generated from message lotsman.v1.ResolveLinkRequest
@@ -82,9 +80,11 @@ export type AddSelfDeviceRequest = Message<"lotsman.v1.AddSelfDeviceRequest"> & 
   device: string;
 
   /**
-   * @generated from field: string profile = 2;
+   * unset: the fastest of any allowed exit
+   *
+   * @generated from field: lotsman.v1.Route route = 2;
    */
-  profile: string;
+  route?: Route | undefined;
 };
 
 /**
@@ -95,6 +95,28 @@ export const AddSelfDeviceRequestSchema: GenMessage<AddSelfDeviceRequest> = /*@_
   messageDesc(file_lotsman_v1_user_self, 3);
 
 /**
+ * @generated from message lotsman.v1.SetSelfRouteRequest
+ */
+export type SetSelfRouteRequest = Message<"lotsman.v1.SetSelfRouteRequest"> & {
+  /**
+   * @generated from field: string device = 1;
+   */
+  device: string;
+
+  /**
+   * @generated from field: lotsman.v1.Route route = 2;
+   */
+  route?: Route | undefined;
+};
+
+/**
+ * Describes the message lotsman.v1.SetSelfRouteRequest.
+ * Use `create(SetSelfRouteRequestSchema)` to create a new message.
+ */
+export const SetSelfRouteRequestSchema: GenMessage<SetSelfRouteRequest> = /*@__PURE__*/
+  messageDesc(file_lotsman_v1_user_self, 4);
+
+/**
  * @generated from message lotsman.v1.RemoveSelfDeviceRequest
  */
 export type RemoveSelfDeviceRequest = Message<"lotsman.v1.RemoveSelfDeviceRequest"> & {
@@ -102,11 +124,6 @@ export type RemoveSelfDeviceRequest = Message<"lotsman.v1.RemoveSelfDeviceReques
    * @generated from field: string device = 1;
    */
   device: string;
-
-  /**
-   * @generated from field: string profile = 2;
-   */
-  profile: string;
 };
 
 /**
@@ -114,7 +131,7 @@ export type RemoveSelfDeviceRequest = Message<"lotsman.v1.RemoveSelfDeviceReques
  * Use `create(RemoveSelfDeviceRequestSchema)` to create a new message.
  */
 export const RemoveSelfDeviceRequestSchema: GenMessage<RemoveSelfDeviceRequest> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user_self, 4);
+  messageDesc(file_lotsman_v1_user_self, 5);
 
 /**
  * The detail of a resource_exhausted AddDevice: which limit refused it.
@@ -147,7 +164,7 @@ export type SelfServiceLimit = Message<"lotsman.v1.SelfServiceLimit"> & {
  * Use `create(SelfServiceLimitSchema)` to create a new message.
  */
 export const SelfServiceLimitSchema: GenMessage<SelfServiceLimit> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_user_self, 5);
+  messageDesc(file_lotsman_v1_user_self, 6);
 
 /**
  * @generated from enum lotsman.v1.SelfServiceLimit.Reason
@@ -177,7 +194,7 @@ export enum SelfServiceLimit_Reason {
  * Describes the enum lotsman.v1.SelfServiceLimit.Reason.
  */
 export const SelfServiceLimit_ReasonSchema: GenEnum<SelfServiceLimit_Reason> = /*@__PURE__*/
-  enumDesc(file_lotsman_v1_user_self, 5, 0);
+  enumDesc(file_lotsman_v1_user_self, 6, 0);
 
 /**
  * The acting user comes from the `Lotsman-User` request header, which only
@@ -205,9 +222,10 @@ export const UserSelfService: GenService<{
     output: typeof UserSchema;
   },
   /**
-   * Own peers and the upstreams their profiles may use. Other users show
-   * through upstreams, so for those the daemon leaves traffic, routed and
-   * active unset, and the snapshot's total covers only the user's own peers.
+   * Own devices and the user's allowed exits. Other users show through
+   * upstreams, so for those the daemon leaves traffic, routed and active
+   * unset, and the snapshot's total covers only the user's own devices.
+   * Without rights.show_providers every upstream's provider is empty.
    *
    * @generated from rpc lotsman.v1.UserSelfService.Watch
    */
@@ -217,7 +235,8 @@ export const UserSelfService: GenService<{
     output: typeof StatusSnapshotSchema;
   },
   /**
-   * max_devices, rate limit
+   * max_devices, rate limit. Without rights.edit_routes the route must be
+   * unset (PermissionDenied otherwise) and the device gets the default one.
    *
    * @generated from rpc lotsman.v1.UserSelfService.AddDevice
    */
@@ -225,6 +244,17 @@ export const UserSelfService: GenService<{
     methodKind: "unary";
     input: typeof AddSelfDeviceRequestSchema;
     output: typeof DeviceConfigSchema;
+  },
+  /**
+   * PermissionDenied without rights.edit_routes; a route naming providers is
+   * InvalidArgument without rights.show_providers.
+   *
+   * @generated from rpc lotsman.v1.UserSelfService.SetRoute
+   */
+  setRoute: {
+    methodKind: "unary";
+    input: typeof SetSelfRouteRequestSchema;
+    output: typeof DeviceSchema;
   },
   /**
    * @generated from rpc lotsman.v1.UserSelfService.RemoveDevice
@@ -235,7 +265,7 @@ export const UserSelfService: GenService<{
     output: typeof RemoveDeviceResponseSchema;
   },
   /**
-   * own peers only
+   * own devices only
    *
    * @generated from rpc lotsman.v1.UserSelfService.GetConfig
    */
@@ -245,18 +275,8 @@ export const UserSelfService: GenService<{
     output: typeof DeviceConfigSchema;
   },
   /**
-   * names only, no warnings
-   *
-   * @generated from rpc lotsman.v1.UserSelfService.ListProfiles
-   */
-  listProfiles: {
-    methodKind: "unary";
-    input: typeof ListProfilesRequestSchema;
-    output: typeof ListProfilesResponseSchema;
-  },
-  /**
-   * History of an upstream the user's profiles may use: up_ratio and latency
-   * only, no bytes. Any other upstream is NotFound.
+   * History of one of the user's allowed exits: up_ratio and latency only,
+   * no bytes. Any other upstream is NotFound.
    *
    * @generated from rpc lotsman.v1.UserSelfService.UpstreamHistory
    */
@@ -266,8 +286,8 @@ export const UserSelfService: GenService<{
     output: typeof HistoryResponseSchema;
   },
   /**
-   * History of one of the user's own peers (name = peer_id). Any other peer
-   * is NotFound.
+   * History of one of the user's own devices (name = peer_id). Any other
+   * peer is NotFound.
    *
    * @generated from rpc lotsman.v1.UserSelfService.PeerHistory
    */

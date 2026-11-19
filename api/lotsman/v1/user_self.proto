@@ -6,7 +6,6 @@ package lotsman.v1;
 
 import "google/protobuf/duration.proto";
 import "lotsman/v1/history.proto";
-import "lotsman/v1/profile.proto";
 import "lotsman/v1/status.proto";
 import "lotsman/v1/user.proto";
 
@@ -17,19 +16,24 @@ option go_package = "github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1";
 service UserSelfService {
   rpc ResolveLink(ResolveLinkRequest) returns (ResolveLinkResponse); // panel only
   rpc Get(GetSelfRequest) returns (User);
-  // Own peers and the upstreams their profiles may use. Other users show
-  // through upstreams, so for those the daemon leaves traffic, routed and
-  // active unset, and the snapshot's total covers only the user's own peers.
+  // Own devices and the user's allowed exits. Other users show through
+  // upstreams, so for those the daemon leaves traffic, routed and active
+  // unset, and the snapshot's total covers only the user's own devices.
+  // Without rights.show_providers every upstream's provider is empty.
   rpc Watch(WatchStatusRequest) returns (stream StatusSnapshot);
-  rpc AddDevice(AddSelfDeviceRequest) returns (DeviceConfig); // max_devices, rate limit
+  // max_devices, rate limit. Without rights.edit_routes the route must be
+  // unset (PermissionDenied otherwise) and the device gets the default one.
+  rpc AddDevice(AddSelfDeviceRequest) returns (DeviceConfig);
+  // PermissionDenied without rights.edit_routes; a route naming providers is
+  // InvalidArgument without rights.show_providers.
+  rpc SetRoute(SetSelfRouteRequest) returns (Device);
   rpc RemoveDevice(RemoveSelfDeviceRequest) returns (RemoveDeviceResponse);
-  rpc GetConfig(GetConfigRequest) returns (DeviceConfig); // own peers only
-  rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse); // names only, no warnings
-  // History of an upstream the user's profiles may use: up_ratio and latency
-  // only, no bytes. Any other upstream is NotFound.
+  rpc GetConfig(GetConfigRequest) returns (DeviceConfig); // own devices only
+  // History of one of the user's allowed exits: up_ratio and latency only,
+  // no bytes. Any other upstream is NotFound.
   rpc UpstreamHistory(HistoryRequest) returns (HistoryResponse);
-  // History of one of the user's own peers (name = peer_id). Any other peer
-  // is NotFound.
+  // History of one of the user's own devices (name = peer_id). Any other
+  // peer is NotFound.
   rpc PeerHistory(HistoryRequest) returns (HistoryResponse);
 }
 
@@ -42,11 +46,14 @@ message ResolveLinkResponse {
 message GetSelfRequest {}
 message AddSelfDeviceRequest {
   string device = 1;
-  string profile = 2;
+  Route route = 2; // unset: the fastest of any allowed exit
+}
+message SetSelfRouteRequest {
+  string device = 1;
+  Route route = 2;
 }
 message RemoveSelfDeviceRequest {
   string device = 1;
-  string profile = 2;
 }
 
 // The detail of a resource_exhausted AddDevice: which limit refused it.

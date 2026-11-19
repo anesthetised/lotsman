@@ -29,8 +29,14 @@ const (
 const (
 	// UserServiceListProcedure is the procedure name of the UserService's List RPC.
 	UserServiceListProcedure = "/lotsman.v1.UserService/List"
+	// UserServiceAddUserProcedure is the procedure name of the UserService's AddUser RPC.
+	UserServiceAddUserProcedure = "/lotsman.v1.UserService/AddUser"
+	// UserServiceSetRightsProcedure is the procedure name of the UserService's SetRights RPC.
+	UserServiceSetRightsProcedure = "/lotsman.v1.UserService/SetRights"
 	// UserServiceAddDeviceProcedure is the procedure name of the UserService's AddDevice RPC.
 	UserServiceAddDeviceProcedure = "/lotsman.v1.UserService/AddDevice"
+	// UserServiceSetRouteProcedure is the procedure name of the UserService's SetRoute RPC.
+	UserServiceSetRouteProcedure = "/lotsman.v1.UserService/SetRoute"
 	// UserServiceRemoveDeviceProcedure is the procedure name of the UserService's RemoveDevice RPC.
 	UserServiceRemoveDeviceProcedure = "/lotsman.v1.UserService/RemoveDevice"
 	// UserServiceRemoveUserProcedure is the procedure name of the UserService's RemoveUser RPC.
@@ -51,11 +57,32 @@ var (
 			Procedure:  UserServiceListProcedure,
 		}
 	})
+	userServiceAddUserSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_lotsman_v1_user_proto.Services().ByName("UserService").Methods().ByName("AddUser"),
+			Procedure:  UserServiceAddUserProcedure,
+		}
+	})
+	userServiceSetRightsSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_lotsman_v1_user_proto.Services().ByName("UserService").Methods().ByName("SetRights"),
+			Procedure:  UserServiceSetRightsProcedure,
+		}
+	})
 	userServiceAddDeviceSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType: connect.StreamTypeUnary,
 			Schema:     v1.File_lotsman_v1_user_proto.Services().ByName("UserService").Methods().ByName("AddDevice"),
 			Procedure:  UserServiceAddDeviceProcedure,
+		}
+	})
+	userServiceSetRouteSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_lotsman_v1_user_proto.Services().ByName("UserService").Methods().ByName("SetRoute"),
+			Procedure:  UserServiceSetRouteProcedure,
 		}
 	})
 	userServiceRemoveDeviceSpec = sync.OnceValue(func() connect.Spec {
@@ -98,7 +125,10 @@ var (
 // UserServiceClient is a client for the lotsman.v1.UserService service.
 type UserServiceClient interface {
 	List(context.Context, *v1.ListUsersRequest) (*v1.ListUsersResponse, error)
+	AddUser(context.Context, *v1.AddUserRequest) (*v1.User, error)
+	SetRights(context.Context, *v1.SetRightsRequest) (*v1.User, error)
 	AddDevice(context.Context, *v1.AddDeviceRequest) (*v1.DeviceConfig, error)
+	SetRoute(context.Context, *v1.SetRouteRequest) (*v1.Device, error)
 	RemoveDevice(context.Context, *v1.RemoveDeviceRequest) (*v1.RemoveDeviceResponse, error)
 	RemoveUser(context.Context, *v1.RemoveUserRequest) (*v1.RemoveUserResponse, error)
 	GetConfig(context.Context, *v1.GetConfigRequest) (*v1.DeviceConfig, error)
@@ -115,7 +145,10 @@ func NewUserServiceClient(client *connect.Client) UserServiceClient {
 // UserServiceHandler is an implementation of the lotsman.v1.UserService service.
 type UserServiceHandler interface {
 	List(context.Context, *v1.ListUsersRequest) (*v1.ListUsersResponse, error)
+	AddUser(context.Context, *v1.AddUserRequest) (*v1.User, error)
+	SetRights(context.Context, *v1.SetRightsRequest) (*v1.User, error)
 	AddDevice(context.Context, *v1.AddDeviceRequest) (*v1.DeviceConfig, error)
+	SetRoute(context.Context, *v1.SetRouteRequest) (*v1.Device, error)
 	RemoveDevice(context.Context, *v1.RemoveDeviceRequest) (*v1.RemoveDeviceResponse, error)
 	RemoveUser(context.Context, *v1.RemoveUserRequest) (*v1.RemoveUserResponse, error)
 	GetConfig(context.Context, *v1.GetConfigRequest) (*v1.DeviceConfig, error)
@@ -128,7 +161,10 @@ func RegisterUserServiceHandler(server *connect.Server, svc UserServiceHandler) 
 	adapter := userServiceHandler{svc: svc}
 	server.Register(
 		connect.Method{Spec: userServiceListSpec(), Handler: adapter.list},
+		connect.Method{Spec: userServiceAddUserSpec(), Handler: adapter.addUser},
+		connect.Method{Spec: userServiceSetRightsSpec(), Handler: adapter.setRights},
 		connect.Method{Spec: userServiceAddDeviceSpec(), Handler: adapter.addDevice},
+		connect.Method{Spec: userServiceSetRouteSpec(), Handler: adapter.setRoute},
 		connect.Method{Spec: userServiceRemoveDeviceSpec(), Handler: adapter.removeDevice},
 		connect.Method{Spec: userServiceRemoveUserSpec(), Handler: adapter.removeUser},
 		connect.Method{Spec: userServiceGetConfigSpec(), Handler: adapter.getConfig},
@@ -144,8 +180,20 @@ func (UnimplementedUserServiceHandler) List(context.Context, *v1.ListUsersReques
 	return nil, connect.NewError(connect.CodeUnimplemented, "lotsman.v1.UserService.List is not implemented")
 }
 
+func (UnimplementedUserServiceHandler) AddUser(context.Context, *v1.AddUserRequest) (*v1.User, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "lotsman.v1.UserService.AddUser is not implemented")
+}
+
+func (UnimplementedUserServiceHandler) SetRights(context.Context, *v1.SetRightsRequest) (*v1.User, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "lotsman.v1.UserService.SetRights is not implemented")
+}
+
 func (UnimplementedUserServiceHandler) AddDevice(context.Context, *v1.AddDeviceRequest) (*v1.DeviceConfig, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "lotsman.v1.UserService.AddDevice is not implemented")
+}
+
+func (UnimplementedUserServiceHandler) SetRoute(context.Context, *v1.SetRouteRequest) (*v1.Device, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "lotsman.v1.UserService.SetRoute is not implemented")
 }
 
 func (UnimplementedUserServiceHandler) RemoveDevice(context.Context, *v1.RemoveDeviceRequest) (*v1.RemoveDeviceResponse, error) {
@@ -180,9 +228,33 @@ func (c *userServiceClient) List(ctx context.Context, req *v1.ListUsersRequest) 
 	return &res, nil
 }
 
+func (c *userServiceClient) AddUser(ctx context.Context, req *v1.AddUserRequest) (*v1.User, error) {
+	var res v1.User
+	if err := c.client.CallUnary(ctx, userServiceAddUserSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *userServiceClient) SetRights(ctx context.Context, req *v1.SetRightsRequest) (*v1.User, error) {
+	var res v1.User
+	if err := c.client.CallUnary(ctx, userServiceSetRightsSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 func (c *userServiceClient) AddDevice(ctx context.Context, req *v1.AddDeviceRequest) (*v1.DeviceConfig, error) {
 	var res v1.DeviceConfig
 	if err := c.client.CallUnary(ctx, userServiceAddDeviceSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
+func (c *userServiceClient) SetRoute(ctx context.Context, req *v1.SetRouteRequest) (*v1.Device, error) {
+	var res v1.Device
+	if err := c.client.CallUnary(ctx, userServiceSetRouteSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -242,12 +314,48 @@ func (h userServiceHandler) list(ctx context.Context, _ connect.Spec, stream con
 	return stream.Send(res)
 }
 
+func (h userServiceHandler) addUser(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.AddUserRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.AddUser(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h userServiceHandler) setRights(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.SetRightsRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetRights(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
 func (h userServiceHandler) addDevice(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
 	var req v1.AddDeviceRequest
 	if err := stream.Receive(&req); err != nil {
 		return err
 	}
 	res, err := h.svc.AddDevice(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
+func (h userServiceHandler) setRoute(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.SetRouteRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetRoute(ctx, &req)
 	if err != nil {
 		return err
 	}

@@ -71,7 +71,7 @@ func (x SelfServiceLimit_Reason) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use SelfServiceLimit_Reason.Descriptor instead.
 func (SelfServiceLimit_Reason) EnumDescriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_self_proto_rawDescGZIP(), []int{5, 0}
+	return file_lotsman_v1_user_self_proto_rawDescGZIP(), []int{6, 0}
 }
 
 type ResolveLinkRequest struct {
@@ -201,7 +201,7 @@ func (*GetSelfRequest) Descriptor() ([]byte, []int) {
 type AddSelfDeviceRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Device        string                 `protobuf:"bytes,1,opt,name=device,proto3" json:"device,omitempty"`
-	Profile       string                 `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
+	Route         *Route                 `protobuf:"bytes,2,opt,name=route,proto3" json:"route,omitempty"` // unset: the fastest of any allowed exit
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -243,24 +243,75 @@ func (x *AddSelfDeviceRequest) GetDevice() string {
 	return ""
 }
 
-func (x *AddSelfDeviceRequest) GetProfile() string {
+func (x *AddSelfDeviceRequest) GetRoute() *Route {
 	if x != nil {
-		return x.Profile
+		return x.Route
+	}
+	return nil
+}
+
+type SetSelfRouteRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Device        string                 `protobuf:"bytes,1,opt,name=device,proto3" json:"device,omitempty"`
+	Route         *Route                 `protobuf:"bytes,2,opt,name=route,proto3" json:"route,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetSelfRouteRequest) Reset() {
+	*x = SetSelfRouteRequest{}
+	mi := &file_lotsman_v1_user_self_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetSelfRouteRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetSelfRouteRequest) ProtoMessage() {}
+
+func (x *SetSelfRouteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lotsman_v1_user_self_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetSelfRouteRequest.ProtoReflect.Descriptor instead.
+func (*SetSelfRouteRequest) Descriptor() ([]byte, []int) {
+	return file_lotsman_v1_user_self_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *SetSelfRouteRequest) GetDevice() string {
+	if x != nil {
+		return x.Device
 	}
 	return ""
+}
+
+func (x *SetSelfRouteRequest) GetRoute() *Route {
+	if x != nil {
+		return x.Route
+	}
+	return nil
 }
 
 type RemoveSelfDeviceRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Device        string                 `protobuf:"bytes,1,opt,name=device,proto3" json:"device,omitempty"`
-	Profile       string                 `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RemoveSelfDeviceRequest) Reset() {
 	*x = RemoveSelfDeviceRequest{}
-	mi := &file_lotsman_v1_user_self_proto_msgTypes[4]
+	mi := &file_lotsman_v1_user_self_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -272,7 +323,7 @@ func (x *RemoveSelfDeviceRequest) String() string {
 func (*RemoveSelfDeviceRequest) ProtoMessage() {}
 
 func (x *RemoveSelfDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_self_proto_msgTypes[4]
+	mi := &file_lotsman_v1_user_self_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -285,19 +336,12 @@ func (x *RemoveSelfDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveSelfDeviceRequest.ProtoReflect.Descriptor instead.
 func (*RemoveSelfDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_self_proto_rawDescGZIP(), []int{4}
+	return file_lotsman_v1_user_self_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *RemoveSelfDeviceRequest) GetDevice() string {
 	if x != nil {
 		return x.Device
-	}
-	return ""
-}
-
-func (x *RemoveSelfDeviceRequest) GetProfile() string {
-	if x != nil {
-		return x.Profile
 	}
 	return ""
 }
@@ -314,7 +358,7 @@ type SelfServiceLimit struct {
 
 func (x *SelfServiceLimit) Reset() {
 	*x = SelfServiceLimit{}
-	mi := &file_lotsman_v1_user_self_proto_msgTypes[5]
+	mi := &file_lotsman_v1_user_self_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -326,7 +370,7 @@ func (x *SelfServiceLimit) String() string {
 func (*SelfServiceLimit) ProtoMessage() {}
 
 func (x *SelfServiceLimit) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_self_proto_msgTypes[5]
+	mi := &file_lotsman_v1_user_self_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -339,7 +383,7 @@ func (x *SelfServiceLimit) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use SelfServiceLimit.ProtoReflect.Descriptor instead.
 func (*SelfServiceLimit) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_self_proto_rawDescGZIP(), []int{5}
+	return file_lotsman_v1_user_self_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *SelfServiceLimit) GetReason() SelfServiceLimit_Reason {
@@ -368,18 +412,20 @@ var File_lotsman_v1_user_self_proto protoreflect.FileDescriptor
 const file_lotsman_v1_user_self_proto_rawDesc = "" +
 	"\n" +
 	"\x1alotsman/v1/user_self.proto\x12\n" +
-	"lotsman.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x18lotsman/v1/history.proto\x1a\x18lotsman/v1/profile.proto\x1a\x17lotsman/v1/status.proto\x1a\x15lotsman/v1/user.proto\"*\n" +
+	"lotsman.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x18lotsman/v1/history.proto\x1a\x17lotsman/v1/status.proto\x1a\x15lotsman/v1/user.proto\"*\n" +
 	"\x12ResolveLinkRequest\x12\x14\n" +
 	"\x05token\x18\x01 \x01(\tR\x05token\")\n" +
 	"\x13ResolveLinkResponse\x12\x12\n" +
 	"\x04user\x18\x01 \x01(\tR\x04user\"\x10\n" +
-	"\x0eGetSelfRequest\"H\n" +
+	"\x0eGetSelfRequest\"W\n" +
 	"\x14AddSelfDeviceRequest\x12\x16\n" +
-	"\x06device\x18\x01 \x01(\tR\x06device\x12\x18\n" +
-	"\aprofile\x18\x02 \x01(\tR\aprofile\"K\n" +
+	"\x06device\x18\x01 \x01(\tR\x06device\x12'\n" +
+	"\x05route\x18\x02 \x01(\v2\x11.lotsman.v1.RouteR\x05route\"V\n" +
+	"\x13SetSelfRouteRequest\x12\x16\n" +
+	"\x06device\x18\x01 \x01(\tR\x06device\x12'\n" +
+	"\x05route\x18\x02 \x01(\v2\x11.lotsman.v1.RouteR\x05route\"1\n" +
 	"\x17RemoveSelfDeviceRequest\x12\x16\n" +
-	"\x06device\x18\x01 \x01(\tR\x06device\x12\x18\n" +
-	"\aprofile\x18\x02 \x01(\tR\aprofile\"\xff\x01\n" +
+	"\x06device\x18\x01 \x01(\tR\x06device\"\xff\x01\n" +
 	"\x10SelfServiceLimit\x12;\n" +
 	"\x06reason\x18\x01 \x01(\x0e2#.lotsman.v1.SelfServiceLimit.ReasonR\x06reason\x12\x1f\n" +
 	"\vmax_devices\x18\x02 \x01(\rR\n" +
@@ -389,15 +435,15 @@ const file_lotsman_v1_user_self_proto_rawDesc = "" +
 	"\x06Reason\x12\x16\n" +
 	"\x12REASON_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12REASON_MAX_DEVICES\x10\x01\x12\x17\n" +
-	"\x13REASON_RATE_LIMITED\x10\x022\xa9\x05\n" +
+	"\x13REASON_RATE_LIMITED\x10\x022\x97\x05\n" +
 	"\x0fUserSelfService\x12N\n" +
 	"\vResolveLink\x12\x1e.lotsman.v1.ResolveLinkRequest\x1a\x1f.lotsman.v1.ResolveLinkResponse\x123\n" +
 	"\x03Get\x12\x1a.lotsman.v1.GetSelfRequest\x1a\x10.lotsman.v1.User\x12E\n" +
 	"\x05Watch\x12\x1e.lotsman.v1.WatchStatusRequest\x1a\x1a.lotsman.v1.StatusSnapshot0\x01\x12G\n" +
-	"\tAddDevice\x12 .lotsman.v1.AddSelfDeviceRequest\x1a\x18.lotsman.v1.DeviceConfig\x12U\n" +
+	"\tAddDevice\x12 .lotsman.v1.AddSelfDeviceRequest\x1a\x18.lotsman.v1.DeviceConfig\x12?\n" +
+	"\bSetRoute\x12\x1f.lotsman.v1.SetSelfRouteRequest\x1a\x12.lotsman.v1.Device\x12U\n" +
 	"\fRemoveDevice\x12#.lotsman.v1.RemoveSelfDeviceRequest\x1a .lotsman.v1.RemoveDeviceResponse\x12C\n" +
-	"\tGetConfig\x12\x1c.lotsman.v1.GetConfigRequest\x1a\x18.lotsman.v1.DeviceConfig\x12Q\n" +
-	"\fListProfiles\x12\x1f.lotsman.v1.ListProfilesRequest\x1a .lotsman.v1.ListProfilesResponse\x12J\n" +
+	"\tGetConfig\x12\x1c.lotsman.v1.GetConfigRequest\x1a\x18.lotsman.v1.DeviceConfig\x12J\n" +
 	"\x0fUpstreamHistory\x12\x1a.lotsman.v1.HistoryRequest\x1a\x1b.lotsman.v1.HistoryResponse\x12F\n" +
 	"\vPeerHistory\x12\x1a.lotsman.v1.HistoryRequest\x1a\x1b.lotsman.v1.HistoryResponseB:Z8github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1b\x06proto3"
 
@@ -414,53 +460,56 @@ func file_lotsman_v1_user_self_proto_rawDescGZIP() []byte {
 }
 
 var file_lotsman_v1_user_self_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_lotsman_v1_user_self_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_lotsman_v1_user_self_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_lotsman_v1_user_self_proto_goTypes = []any{
 	(SelfServiceLimit_Reason)(0),    // 0: lotsman.v1.SelfServiceLimit.Reason
 	(*ResolveLinkRequest)(nil),      // 1: lotsman.v1.ResolveLinkRequest
 	(*ResolveLinkResponse)(nil),     // 2: lotsman.v1.ResolveLinkResponse
 	(*GetSelfRequest)(nil),          // 3: lotsman.v1.GetSelfRequest
 	(*AddSelfDeviceRequest)(nil),    // 4: lotsman.v1.AddSelfDeviceRequest
-	(*RemoveSelfDeviceRequest)(nil), // 5: lotsman.v1.RemoveSelfDeviceRequest
-	(*SelfServiceLimit)(nil),        // 6: lotsman.v1.SelfServiceLimit
-	(*durationpb.Duration)(nil),     // 7: google.protobuf.Duration
-	(*WatchStatusRequest)(nil),      // 8: lotsman.v1.WatchStatusRequest
-	(*GetConfigRequest)(nil),        // 9: lotsman.v1.GetConfigRequest
-	(*ListProfilesRequest)(nil),     // 10: lotsman.v1.ListProfilesRequest
-	(*HistoryRequest)(nil),          // 11: lotsman.v1.HistoryRequest
-	(*User)(nil),                    // 12: lotsman.v1.User
-	(*StatusSnapshot)(nil),          // 13: lotsman.v1.StatusSnapshot
-	(*DeviceConfig)(nil),            // 14: lotsman.v1.DeviceConfig
-	(*RemoveDeviceResponse)(nil),    // 15: lotsman.v1.RemoveDeviceResponse
-	(*ListProfilesResponse)(nil),    // 16: lotsman.v1.ListProfilesResponse
-	(*HistoryResponse)(nil),         // 17: lotsman.v1.HistoryResponse
+	(*SetSelfRouteRequest)(nil),     // 5: lotsman.v1.SetSelfRouteRequest
+	(*RemoveSelfDeviceRequest)(nil), // 6: lotsman.v1.RemoveSelfDeviceRequest
+	(*SelfServiceLimit)(nil),        // 7: lotsman.v1.SelfServiceLimit
+	(*Route)(nil),                   // 8: lotsman.v1.Route
+	(*durationpb.Duration)(nil),     // 9: google.protobuf.Duration
+	(*WatchStatusRequest)(nil),      // 10: lotsman.v1.WatchStatusRequest
+	(*GetConfigRequest)(nil),        // 11: lotsman.v1.GetConfigRequest
+	(*HistoryRequest)(nil),          // 12: lotsman.v1.HistoryRequest
+	(*User)(nil),                    // 13: lotsman.v1.User
+	(*StatusSnapshot)(nil),          // 14: lotsman.v1.StatusSnapshot
+	(*DeviceConfig)(nil),            // 15: lotsman.v1.DeviceConfig
+	(*Device)(nil),                  // 16: lotsman.v1.Device
+	(*RemoveDeviceResponse)(nil),    // 17: lotsman.v1.RemoveDeviceResponse
+	(*HistoryResponse)(nil),         // 18: lotsman.v1.HistoryResponse
 }
 var file_lotsman_v1_user_self_proto_depIdxs = []int32{
-	0,  // 0: lotsman.v1.SelfServiceLimit.reason:type_name -> lotsman.v1.SelfServiceLimit.Reason
-	7,  // 1: lotsman.v1.SelfServiceLimit.retry_after:type_name -> google.protobuf.Duration
-	1,  // 2: lotsman.v1.UserSelfService.ResolveLink:input_type -> lotsman.v1.ResolveLinkRequest
-	3,  // 3: lotsman.v1.UserSelfService.Get:input_type -> lotsman.v1.GetSelfRequest
-	8,  // 4: lotsman.v1.UserSelfService.Watch:input_type -> lotsman.v1.WatchStatusRequest
-	4,  // 5: lotsman.v1.UserSelfService.AddDevice:input_type -> lotsman.v1.AddSelfDeviceRequest
-	5,  // 6: lotsman.v1.UserSelfService.RemoveDevice:input_type -> lotsman.v1.RemoveSelfDeviceRequest
-	9,  // 7: lotsman.v1.UserSelfService.GetConfig:input_type -> lotsman.v1.GetConfigRequest
-	10, // 8: lotsman.v1.UserSelfService.ListProfiles:input_type -> lotsman.v1.ListProfilesRequest
-	11, // 9: lotsman.v1.UserSelfService.UpstreamHistory:input_type -> lotsman.v1.HistoryRequest
-	11, // 10: lotsman.v1.UserSelfService.PeerHistory:input_type -> lotsman.v1.HistoryRequest
-	2,  // 11: lotsman.v1.UserSelfService.ResolveLink:output_type -> lotsman.v1.ResolveLinkResponse
-	12, // 12: lotsman.v1.UserSelfService.Get:output_type -> lotsman.v1.User
-	13, // 13: lotsman.v1.UserSelfService.Watch:output_type -> lotsman.v1.StatusSnapshot
-	14, // 14: lotsman.v1.UserSelfService.AddDevice:output_type -> lotsman.v1.DeviceConfig
-	15, // 15: lotsman.v1.UserSelfService.RemoveDevice:output_type -> lotsman.v1.RemoveDeviceResponse
-	14, // 16: lotsman.v1.UserSelfService.GetConfig:output_type -> lotsman.v1.DeviceConfig
-	16, // 17: lotsman.v1.UserSelfService.ListProfiles:output_type -> lotsman.v1.ListProfilesResponse
-	17, // 18: lotsman.v1.UserSelfService.UpstreamHistory:output_type -> lotsman.v1.HistoryResponse
-	17, // 19: lotsman.v1.UserSelfService.PeerHistory:output_type -> lotsman.v1.HistoryResponse
-	11, // [11:20] is the sub-list for method output_type
-	2,  // [2:11] is the sub-list for method input_type
-	2,  // [2:2] is the sub-list for extension type_name
-	2,  // [2:2] is the sub-list for extension extendee
-	0,  // [0:2] is the sub-list for field type_name
+	8,  // 0: lotsman.v1.AddSelfDeviceRequest.route:type_name -> lotsman.v1.Route
+	8,  // 1: lotsman.v1.SetSelfRouteRequest.route:type_name -> lotsman.v1.Route
+	0,  // 2: lotsman.v1.SelfServiceLimit.reason:type_name -> lotsman.v1.SelfServiceLimit.Reason
+	9,  // 3: lotsman.v1.SelfServiceLimit.retry_after:type_name -> google.protobuf.Duration
+	1,  // 4: lotsman.v1.UserSelfService.ResolveLink:input_type -> lotsman.v1.ResolveLinkRequest
+	3,  // 5: lotsman.v1.UserSelfService.Get:input_type -> lotsman.v1.GetSelfRequest
+	10, // 6: lotsman.v1.UserSelfService.Watch:input_type -> lotsman.v1.WatchStatusRequest
+	4,  // 7: lotsman.v1.UserSelfService.AddDevice:input_type -> lotsman.v1.AddSelfDeviceRequest
+	5,  // 8: lotsman.v1.UserSelfService.SetRoute:input_type -> lotsman.v1.SetSelfRouteRequest
+	6,  // 9: lotsman.v1.UserSelfService.RemoveDevice:input_type -> lotsman.v1.RemoveSelfDeviceRequest
+	11, // 10: lotsman.v1.UserSelfService.GetConfig:input_type -> lotsman.v1.GetConfigRequest
+	12, // 11: lotsman.v1.UserSelfService.UpstreamHistory:input_type -> lotsman.v1.HistoryRequest
+	12, // 12: lotsman.v1.UserSelfService.PeerHistory:input_type -> lotsman.v1.HistoryRequest
+	2,  // 13: lotsman.v1.UserSelfService.ResolveLink:output_type -> lotsman.v1.ResolveLinkResponse
+	13, // 14: lotsman.v1.UserSelfService.Get:output_type -> lotsman.v1.User
+	14, // 15: lotsman.v1.UserSelfService.Watch:output_type -> lotsman.v1.StatusSnapshot
+	15, // 16: lotsman.v1.UserSelfService.AddDevice:output_type -> lotsman.v1.DeviceConfig
+	16, // 17: lotsman.v1.UserSelfService.SetRoute:output_type -> lotsman.v1.Device
+	17, // 18: lotsman.v1.UserSelfService.RemoveDevice:output_type -> lotsman.v1.RemoveDeviceResponse
+	15, // 19: lotsman.v1.UserSelfService.GetConfig:output_type -> lotsman.v1.DeviceConfig
+	18, // 20: lotsman.v1.UserSelfService.UpstreamHistory:output_type -> lotsman.v1.HistoryResponse
+	18, // 21: lotsman.v1.UserSelfService.PeerHistory:output_type -> lotsman.v1.HistoryResponse
+	13, // [13:22] is the sub-list for method output_type
+	4,  // [4:13] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_lotsman_v1_user_self_proto_init() }
@@ -469,7 +518,6 @@ func file_lotsman_v1_user_self_proto_init() {
 		return
 	}
 	file_lotsman_v1_history_proto_init()
-	file_lotsman_v1_profile_proto_init()
 	file_lotsman_v1_status_proto_init()
 	file_lotsman_v1_user_proto_init()
 	type x struct{}
@@ -478,7 +526,7 @@ func file_lotsman_v1_user_self_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lotsman_v1_user_self_proto_rawDesc), len(file_lotsman_v1_user_self_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   6,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
