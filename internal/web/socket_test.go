@@ -19,6 +19,7 @@ import (
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
 	"github.com/anesthetised/lotsman/internal/control"
 	"github.com/anesthetised/lotsman/internal/daemon"
+	"github.com/anesthetised/lotsman/internal/traffic"
 )
 
 // fakeSource is a daemon with one upstream.
@@ -33,6 +34,7 @@ func (fakeSource) ClientMTU() int { return 1280 }
 func (fakeSource) Status() daemon.Status {
 	return daemon.Status{Upstreams: []daemon.UpstreamStatus{{Name: "nl", Kind: "awg"}}}
 }
+func (fakeSource) Traffic() traffic.Snapshot { return traffic.Snapshot{} }
 
 // daemonSocket serves the real control API, over a fake daemon, on a unix
 // socket, as lotsman serve does.

@@ -24,6 +24,7 @@ import (
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
 	"github.com/anesthetised/lotsman/internal/control"
 	"github.com/anesthetised/lotsman/internal/daemon"
+	"github.com/anesthetised/lotsman/internal/traffic"
 )
 
 // everyoneOperator signs every caller in as an operator; TestMain installs
@@ -45,6 +46,7 @@ func (panelSource) ClientMTU() int { return 1280 }
 func (panelSource) Status() daemon.Status {
 	return daemon.Status{Upstreams: []daemon.UpstreamStatus{{Name: "nl", Kind: "awg"}}}
 }
+func (panelSource) Traffic() traffic.Snapshot { return traffic.Snapshot{} }
 
 // systemUser makes sure the system user exists, creating it with the given
 // useradd flags and removing it afterwards when the test created it.

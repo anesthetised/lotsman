@@ -25,6 +25,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/policy"
 	"github.com/anesthetised/lotsman/internal/proxy"
 	"github.com/anesthetised/lotsman/internal/store"
+	"github.com/anesthetised/lotsman/internal/traffic"
 	"github.com/anesthetised/lotsman/internal/tunnel"
 )
 
@@ -53,6 +54,7 @@ type Deps struct {
 	Probe     ProbeFunc    // AWG upstreams
 	ProbeDNS  DNSProbeFunc // proxy upstreams
 	Transfer  TransferFunc // every upstream, when health.transfer is set
+	Counters  CountersFunc // upstream interfaces' byte counters; none when nil
 	// Proxy runs proxy upstreams' stacks: proxy.InProcess when nil, as in
 	// tests on netstack TUNs, which have no descriptor to hand to a helper
 	// process; serve runs each in a helper (internal/proxy/helper).
@@ -71,6 +73,9 @@ type Daemon struct {
 	transfer TransferFunc
 	runProxy proxy.Runner
 	log      *slog.Logger
+
+	interfaceCounters CountersFunc
+	sampler           traffic.Sampler // the traffic of peers and upstreams; Run starts it
 
 	transferRuns sync.WaitGroup // transfer probes in flight; Run waits for them
 
@@ -120,6 +125,8 @@ func New(d Deps) *Daemon {
 	return &Daemon{
 		version: d.Version, cfg: d.Config, id: d.Identity, store: d.Store, dp: d.Dataplane, newTUN: d.NewTUN,
 		probe: d.Probe, probeDNS: d.ProbeDNS, transfer: d.Transfer, runProxy: runProxy, log: d.Log,
+		interfaceCounters: d.Counters,
+
 		assignments:    map[netip.Addr]string{},
 		unroutePending: map[netip.Addr]bool{},
 		devicePeers:    map[awgconf.Key]store.Peer{},
@@ -176,6 +183,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	defer d.stop()
 	// Transfer probes end once ctx is done; none may outlive the devices.
 	defer d.transferRuns.Wait()
+	defer d.sampleTraffic(ctx)() // stopped before d.stop closes the devices
 	// Stopped before d.stop, so no repair races the teardown.
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	watched := make(chan struct{})

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/netip"
 	"slices"
+	"sync"
 	"testing"
 	"time"
 
@@ -22,12 +23,16 @@ import (
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/health"
+	"github.com/anesthetised/lotsman/internal/traffic"
 )
 
-// fakeSource is a daemon with a fixed status.
+// fakeSource is a daemon with a fixed status and the traffic the test sets.
 type fakeSource struct {
 	ready chan struct{}
 	st    daemon.Status
+
+	mu sync.Mutex
+	tr traffic.Snapshot
 }
 
 func newFakeSource(st daemon.Status) *fakeSource {
@@ -40,6 +45,18 @@ func (f *fakeSource) Ready() <-chan struct{} { return f.ready }
 func (f *fakeSource) ClientMTU() int         { return 1280 }
 
 func (f *fakeSource) Status() daemon.Status { return f.st }
+
+func (f *fakeSource) Traffic() traffic.Snapshot {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.tr
+}
+
+func (f *fakeSource) setTraffic(tr traffic.Snapshot) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.tr = tr
+}
 
 func TestSnapshot(t *testing.T) {
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
@@ -60,12 +77,22 @@ func TestSnapshot(t *testing.T) {
 			{ID: 12, User: "bob", Device: "default", Profile: "eu", Address: netip.MustParseAddr("10.77.0.3")},
 		},
 	}
+	// Every field differs, so a swapped direction shows. bob's peer and
+	// every upstream but nl were not sampled yet.
+	tr := traffic.Snapshot{
+		Time:      now.Add(-time.Second),
+		Peers:     map[int64]traffic.Traffic{7: {DownBytes: 1, UpBytes: 2, DownRate: 3, UpRate: 4}},
+		Upstreams: map[string]traffic.Traffic{"nl": {DownBytes: 5, UpBytes: 6, DownRate: 7, UpRate: 8}},
+		Total:     traffic.Traffic{DownBytes: 9, UpBytes: 10, DownRate: 11, UpRate: 12},
+	}
 	want := &lotsmanv1.StatusSnapshot{
 		Time: timestamppb.New(now), ClientMtu: 1280,
+		Total: &lotsmanv1.Traffic{DownBytes: 9, UpBytes: 10, DownRate: 11, UpRate: 12},
 		Upstreams: []*lotsmanv1.UpstreamStatus{
 			{Name: "nl", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "NL", Provider: "acme", Tags: []string{"eu", "fast"},
 				State: lotsmanv1.UpstreamState_UPSTREAM_STATE_UP, Latency: durationpb.New(25 * time.Millisecond),
-				LastHandshake: timestamppb.New(handshake), Routed: 2, Active: 1},
+				LastHandshake: timestamppb.New(handshake), Routed: 2, Active: 1,
+				Traffic: &lotsmanv1.Traffic{DownBytes: 5, UpBytes: 6, DownRate: 7, UpRate: 8}},
 			{Name: "de", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_OUTLINE, State: lotsmanv1.UpstreamState_UPSTREAM_STATE_DEGRADED,
 				Latency: durationpb.New(time.Second)},
 			{Name: "fi", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_VLESS, State: lotsmanv1.UpstreamState_UPSTREAM_STATE_DOWN},
@@ -74,13 +101,18 @@ func TestSnapshot(t *testing.T) {
 		},
 		Peers: []*lotsmanv1.PeerStatus{
 			{PeerId: "p_7", User: "alice", Device: "phone", Profile: "eu", Address: "10.77.0.2", Upstream: "nl",
-				LastHandshake: timestamppb.New(handshake)},
+				LastHandshake: timestamppb.New(handshake), Traffic: &lotsmanv1.Traffic{DownBytes: 1, UpBytes: 2, DownRate: 3, UpRate: 4}},
 			// Blocked and never connected: no upstream, no handshake.
 			{PeerId: "p_12", User: "bob", Device: "default", Profile: "eu", Address: "10.77.0.3"},
 		},
 	}
-	if diff := cmp.Diff(want, snapshot(now, 1280, st), protocmp.Transform()); diff != "" {
+	if diff := cmp.Diff(want, snapshot(now, 1280, st, tr), protocmp.Transform()); diff != "" {
 		t.Errorf("snapshot (-want +got):\n%s", diff)
+	}
+
+	// Before the first sample there is no traffic at all.
+	if got := snapshot(now, 1280, st, traffic.Snapshot{}); got.Total != nil || got.Upstreams[0].Traffic != nil || got.Peers[0].Traffic != nil {
+		t.Errorf("traffic before the first sample: total %v, nl %v, alice %v", got.Total, got.Upstreams[0].Traffic, got.Peers[0].Traffic)
 	}
 }
 
@@ -169,6 +201,40 @@ func TestWatchWaitsForReady(t *testing.T) {
 	}
 	cancel()
 	<-done
+}
+
+// Every snapshot carries the sampler's latest traffic: streams share the
+// daemon's samples instead of measuring on their own.
+func TestWatchTraffic(t *testing.T) {
+	src := newFakeSource(daemon.Status{
+		Upstreams: []daemon.UpstreamStatus{{Name: "ol", Kind: "outline", State: health.Up}},
+		Peers:     []daemon.PeerStatus{{ID: 3, User: "alice", Device: "default", Profile: "p", Upstream: "ol"}},
+	})
+	sample := func(down, up uint64) traffic.Snapshot {
+		tr := traffic.Traffic{DownBytes: down, UpBytes: up, DownRate: down / 2, UpRate: up / 2}
+		return traffic.Snapshot{Time: time.Now(), Peers: map[int64]traffic.Traffic{3: tr}, Upstreams: map[string]traffic.Traffic{"ol": tr}, Total: tr}
+	}
+	src.setTraffic(sample(1000, 100))
+	client, _ := watchedServer(src)
+	stream, err := client.Watch(t.Context(), &lotsmanv1.WatchStatusRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []*lotsmanv1.Traffic{
+		{DownBytes: 1000, UpBytes: 100, DownRate: 500, UpRate: 50},
+		{DownBytes: 4000, UpBytes: 300, DownRate: 2000, UpRate: 150},
+	} {
+		got, err := stream.Receive()
+		if err != nil {
+			t.Fatal(err)
+		}
+		for what, tr := range map[string]*lotsmanv1.Traffic{"total": got.Total, "upstream": got.Upstreams[0].Traffic, "peer": got.Peers[0].Traffic} {
+			if !proto.Equal(tr, want) {
+				t.Errorf("%s traffic = %v, want %v", what, tr, want)
+			}
+		}
+		src.setTraffic(sample(4000, 300))
+	}
 }
 
 func TestWatchRejectsInvalidInterval(t *testing.T) {
