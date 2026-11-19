@@ -41,6 +41,44 @@ jobs:
       - run: go test -c -tags integration -o /tmp/e2e.test ./cmd/lotsman
       - run: sudo /tmp/e2e.test -test.v -test.run 'TestEndToEnd|TestFirewallFlushRepaired'
 
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      # The pnpm version comes from "packageManager" in web/package.json.
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: web/package.json
+          cache: true
+          cache_dependency_path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      # Go builds embed internal/web/dist without Node, so the committed copy must stay the placeholder.
+      - run: grep -q 'lotsman:placeholder' ../internal/web/dist/index.html
+      - run: pnpm typecheck
+      - run: pnpm test
+      - run: pnpm build
+      # The committed client must match api/: run `just web-gen` after changing the proto.
+      - run: |
+          pnpm gen
+          git status --porcelain -- src/gen
+          test -z "$(git status --porcelain -- src/gen)"
+      - run: pnpm exec playwright install --with-deps chromium
+      # Against `vite preview` of a production build that serves the fake daemon.
+      - run: pnpm e2e
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: web/test-results
+          if-no-files-found: ignore
+
   build:
     needs: [unit, integration]
     runs-on: ubuntu-latest

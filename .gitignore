@@ -2,3 +2,7 @@
 /dist/
 *.db
 *.db-*
+
+# Web panel build output: only the committed placeholder stays tracked.
+/internal/web/dist/*
+!/internal/web/dist/index.html

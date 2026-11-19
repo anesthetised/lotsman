@@ -1,0 +1,55 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens. Utilities such as `bg-surface` or `text-muted` read these
+ * variables, so the dark palette below only redefines the variables.
+ * Text colours meet WCAG AA (4.5:1) on both `bg` and `surface`.
+ */
+@theme {
+  --color-bg: #f5f6f8;
+  --color-surface: #ffffff;
+  --color-fg: #111827;
+  --color-muted: #4b5563;
+  --color-line: #d1d5db;
+  --color-accent: #1d4ed8;
+  --color-accent-fg: #ffffff;
+  --color-ok: #15803d;
+  --color-warn: #a16207;
+  --color-bad: #b91c1c;
+  --color-empty: #9ca3af;
+  --color-chart-down: #2563eb;
+  --color-chart-up: #c2410c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-bg: #0b0f17;
+    --color-surface: #131a26;
+    --color-fg: #f3f4f6;
+    --color-muted: #a3acb9;
+    --color-line: #334155;
+    --color-accent: #7cb2ff;
+    --color-accent-fg: #0b0f17;
+    --color-ok: #4ade80;
+    --color-warn: #facc15;
+    --color-bad: #f87171;
+    --color-empty: #4b5563;
+    --color-chart-down: #60a5fa;
+    --color-chart-up: #fb923c;
+  }
+}
+
+@layer base {
+  :root {
+    color-scheme: light dark;
+  }
+
+  body {
+    @apply bg-bg text-fg antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 2px;
+  }
+}

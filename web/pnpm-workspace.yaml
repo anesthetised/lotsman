@@ -1,0 +1,25 @@
+# pnpm settings for the web panel (pnpm 10+ reads them from this file).
+
+# Refuse any package version, direct or transitive, published less than two
+# weeks ago: a supply-chain guard against freshly compromised releases.
+minimumReleaseAge: 20160 # minutes
+
+# Install exact versions when adding packages.
+savePrefix: ""
+
+# No dependency runs install scripts. buf's postinstall only verifies the
+# platform binary that pnpm already installs as an optional dependency.
+allowBuilds:
+  "@bufbuild/buf": false
+
+# Kobalte 2.0.0-alpha.4 pins its Solid peers to exactly 2.0.0-rc.16. We run it on
+# the newer rc we pin in package.json; the spike and the tests cover that pair.
+peerDependencyRules:
+  allowedVersions:
+    "@kobalte/core>solid-js": "2.0.0-rc.21"
+    "@kobalte/core>@solidjs/web": "2.0.0-rc.21"
+    "@kobalte/utils>solid-js": "2.0.0-rc.21"
+    "@kobalte/utils>@solidjs/web": "2.0.0-rc.21"
+
+patchedDependencies:
+  '@kobalte/core@2.0.0-alpha.4': patches/@kobalte__core@2.0.0-alpha.4.patch

@@ -1,0 +1,76 @@
+diff --git a/dist/dismissable-layer/D_MF27Ne.jsx b/dist/dismissable-layer/D_MF27Ne.jsx
+index 47b820a29031ac3e8f18312aa9c6f1751dac7a7e..ae7635eeee3d52839b6baa4cb9c7c9066142b9b1 100644
+--- a/dist/dismissable-layer/D_MF27Ne.jsx
++++ b/dist/dismissable-layer/D_MF27Ne.jsx
+@@ -60,22 +60,24 @@ function DismissableLayer(props) {
+ 			}
+ 		});
+ 	}, { preventDefault: false });
+-	onSettled(() => {
+-		if (!ref()) return;
++	// lotsman patch: Solid 2 makes a signal write visible only after the flush, so
++	// onSettled read the ref as undefined and never registered the layer (no Escape,
++	// no outside click). Register once the ref signal actually holds the node.
++	createEffect(() => ref(), (node) => {
++		if (!node) return;
+ 		layerStack.addLayer({
+-			node: ref(),
+-			isPointerBlocking: isPointerBlocking(),
++			node,
++			isPointerBlocking: untrack(isPointerBlocking),
+ 			dismiss: props.onDismiss
+ 		});
+-		const unregisterFromParentLayer = parentContext?.registerNestedLayer(ref());
++		const unregisterFromParentLayer = parentContext?.registerNestedLayer(node);
+ 		layerStack.assignPointerEventToLayers();
+-		layerStack.disableBodyPointerEvents(ref());
++		layerStack.disableBodyPointerEvents(node);
+ 		return () => {
+-			if (!ref()) return;
+-			layerStack.removeLayer(ref());
++			layerStack.removeLayer(node);
+ 			unregisterFromParentLayer?.();
+ 			layerStack.assignPointerEventToLayers();
+-			layerStack.restoreBodyPointerEvents(ref());
++			layerStack.restoreBodyPointerEvents(node);
+ 		};
+ 	});
+ 	createEffect(() => ({
+diff --git a/dist/dismissable-layer/DoCcOu3x.js b/dist/dismissable-layer/DoCcOu3x.js
+index d34088dbe07ba312beace0885555547ac66669cf..745a3f32d1a825e4088975b210885b4775227870 100644
+--- a/dist/dismissable-layer/DoCcOu3x.js
++++ b/dist/dismissable-layer/DoCcOu3x.js
+@@ -62,22 +62,24 @@ function DismissableLayer(props) {
+ 			}
+ 		});
+ 	}, { preventDefault: false });
+-	onSettled(() => {
+-		if (!ref$1()) return;
++	// lotsman patch: Solid 2 makes a signal write visible only after the flush, so
++	// onSettled read the ref as undefined and never registered the layer (no Escape,
++	// no outside click). Register once the ref signal actually holds the node.
++	createEffect(() => ref$1(), (node) => {
++		if (!node) return;
+ 		layerStack.addLayer({
+-			node: ref$1(),
+-			isPointerBlocking: isPointerBlocking(),
++			node,
++			isPointerBlocking: untrack(isPointerBlocking),
+ 			dismiss: props.onDismiss
+ 		});
+-		const unregisterFromParentLayer = parentContext?.registerNestedLayer(ref$1());
++		const unregisterFromParentLayer = parentContext?.registerNestedLayer(node);
+ 		layerStack.assignPointerEventToLayers();
+-		layerStack.disableBodyPointerEvents(ref$1());
++		layerStack.disableBodyPointerEvents(node);
+ 		return () => {
+-			if (!ref$1()) return;
+-			layerStack.removeLayer(ref$1());
++			layerStack.removeLayer(node);
+ 			unregisterFromParentLayer?.();
+ 			layerStack.assignPointerEventToLayers();
+-			layerStack.restoreBodyPointerEvents(ref$1());
++			layerStack.restoreBodyPointerEvents(node);
+ 		};
+ 	});
+ 	createEffect(() => ({
