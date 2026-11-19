@@ -6,6 +6,13 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Profiles and live connections in the control API. `ProfileService` `List`, `Put` and `Delete`
+  serve the stored profiles with the checks and warnings of `lotsman profile` (#128): a profile the
+  checks refuse is `invalid_argument`, deleting one that peers use `failed_precondition`, a missing
+  one `not_found`, and other failures `internal` without detail. `ConnectionService.Watch` streams
+  a peer's or every peer's conntrack flows at once and then every `interval` (default and minimum
+  1 s), each stream with its own rates, endpoints as `IP:port` (bare IP for ICMP); an unknown
+  `peer_id` is `not_found`, a failed conntrack read `unavailable` (#131). No new dependency.
 - Web panel frontend scaffold in `web/` (#135): Solid 2, @solidjs/router, Kobalte 2 alpha (patched
   for a dismiss bug, behind `web/src/ui`), Tailwind 4, uPlot, RU and EN, light and dark themes. The
   Connect-web client is generated from `api/` (`just web-gen`); a deterministic fake daemon serves
@@ -44,14 +51,14 @@ All notable changes to Lotsman are documented here. The format follows
   missing). The socket's peer is trusted, so its file mode is the boundary. It is created after the
   instance locks, replaces one a crashed daemon left, refuses one that still answers, and is
   removed on stop. The whole agreed contract is committed in `api/lotsman/v1/` with its generated
-  Go code (`just gen`; `just lint` fails on stale code); only `StatusService.Watch` is implemented:
-  a full snapshot at once and then every `interval` (default and minimum 1 s), with each upstream's
+  Go code (`just gen`; `just lint` fails on stale code). `StatusService.Watch` sends a full
+  snapshot at once and then every `interval` (default and minimum 1 s), with each upstream's
   state, latency, handshake, `geo`, `provider`, `tags` and client counts, each peer's opaque
-  `peer_id`, tunnel address, upstream and handshake, and the client MTU. Other RPCs return
-  `unimplemented`. Install: `groupadd --system lotsman-web` and `group=lotsman-web` in the
+  `peer_id`, tunnel address, upstream and handshake, and the client MTU. RPCs whose issue has not
+  landed return `unimplemented`. Install: `groupadd --system lotsman-web` and `group=lotsman-web` in the
   manifest, which `deploy/uninstall.sh` now removes; the unit gains `RuntimeDirectory=lotsman` and
   `CAP_CHOWN`. The binary grows by about 0.7 MB. New module: `connectrpc.com/connect/v2` (#127).
-- Live connections from conntrack (core of #131; the control API wiring follows #127): the new
+- Live connections from conntrack (#131): the new
   `internal/flows` package reads the kernel's conntrack table over netlink, keeps clients' flows
   into the internet, maps each to its peer and current upstream, and computes per-flow byte rates
   from the deltas between polls (down = towards the client), at most 500 flows per snapshot,

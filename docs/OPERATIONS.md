@@ -617,8 +617,20 @@ running daemon (in another network namespace) already serves that path. Without 
 group the socket is `0600 root:root` and the daemon logs `control socket is root-only`; create the
 group and restart. The unit provides `/run/lotsman` (`RuntimeDirectory=lotsman`) and needs
 `CAP_CHOWN` in its `CapabilityBoundingSet` to hand the socket to the group, as
-`deploy/lotsman.service` does. Only `StatusService.Watch` answers so far; every other RPC returns
-`unimplemented`. Self-service RPCs act for the user named in the `Lotsman-User` request header,
+`deploy/lotsman.service` does. Answering so far:
+
+- `StatusService.Watch`: the gateway's status and traffic, at once and then every second or
+  `interval`.
+- `ProfileService` (`List`, `Put`, `Delete`): the [profiles](#profiles) of `lotsman profile`, with
+  the same checks and warnings. `Put` creates or replaces one and reroutes its clients before it
+  answers. Errors: `invalid_argument` for a profile the checks refuse (no name, no matching
+  upstream), `failed_precondition` for deleting one that peers use, `not_found` for one that does
+  not exist.
+- `ConnectionService.Watch`: [live connections](#live-connections), for one `peer_id` or every
+  peer. Errors: `not_found` for an unknown `peer_id`, `unavailable` when the kernel's table cannot
+  be read.
+
+Every other RPC returns `unimplemented`. Self-service RPCs act for the user named in the `Lotsman-User` request header,
 which only the [web panel](#web-panel) sets.
 
 ## Web panel
@@ -794,6 +806,8 @@ Who sees what:
   not set. Without it, a connection that opens while the view is open starts when it was first
   seen, and one that was already open has no start time.
 - At most 500 connections per update, fastest first; the update says when more were left out.
+- Updates come every second, or every `interval` of the watch if longer. Each viewer measures
+  rates on their own, so the first update after opening the view has bytes but no rates.
 
 Nothing is kept at rest. The table is read only while someone watches, on every update of that
 view, and each reading is dropped once it is sent: connections never reach the database, the
