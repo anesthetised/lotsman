@@ -82,9 +82,10 @@ func TestRouteCleanupRetry(t *testing.T) {
 						t.Fatal(err)
 					}
 					if reason == "upstream removed" {
-						cfg.Upstreams = cfg.Upstreams[1:]
+						// nl2 keeps the nl profile valid but never comes up.
+						cfg.Upstreams[0] = config.Upstream{Name: "nl2", Kind: config.KindAWG, Conf: providerConf(t, h.dir, "nl2", "10.8.0.3/32", 0), Geo: "NL"}
 					} else if reason == "profile removed" {
-						cfg.Profiles = cfg.Profiles[1:]
+						h.forgetProfile(t, "nl")
 					} else {
 						providerConf(t, h.dir, "nl", "10.8.0.2/32", 1300)
 					}
@@ -134,7 +135,7 @@ func TestRouteCleanupRetry(t *testing.T) {
 					}
 				}
 				if err := h.d.Reconcile(); reason == "profile removed" {
-					if err == nil || !strings.Contains(err.Error(), `profile "nl" is not in the config`) || errors.Is(err, errUnroute) {
+					if err == nil || !strings.Contains(err.Error(), `profile "nl" is not in the store`) || errors.Is(err, errUnroute) {
 						t.Fatalf("expected only a missing-profile error after cleanup, got %v", err)
 					}
 				} else if err != nil {

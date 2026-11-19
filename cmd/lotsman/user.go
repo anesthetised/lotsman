@@ -27,9 +27,6 @@ func userAdd(configPath string, args []string) error {
 		return err
 	}
 	defer e.store.Close()
-	if _, ok := e.cfg.Profile(profile); !ok {
-		return fmt.Errorf("profile %q is not in the config", profile)
-	}
 	// Everything that can fail without touching the store runs first, so a
 	// rejected command leaves neither a user nor a peer behind.
 	m, err := e.clientMTU()
@@ -39,6 +36,9 @@ func userAdd(configPath string, args []string) error {
 	peer, err := e.store.AddUserPeer(name, device, profile, e.cfg.Subnet)
 	if errors.Is(err, store.ErrExists) {
 		return fmt.Errorf("%s/%s already has profile %s; use `user show`", name, device, profile)
+	}
+	if errors.Is(err, store.ErrNoProfile) {
+		return fmt.Errorf("profile %q does not exist; see `profile list`", profile)
 	}
 	if err != nil {
 		return err
@@ -141,7 +141,7 @@ type userArgs struct {
 func parseUserArgs(cmd string, args []string, profileRequired bool) (userArgs, error) {
 	var a userArgs
 	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-	fs.StringVar(&a.profile, "profile", "", "profile name from the config")
+	fs.StringVar(&a.profile, "profile", "", "profile name, see `profile list`")
 	fs.StringVar(&a.device, "device", store.DefaultDevice, "the user's device; each device needs its own config")
 	fs.BoolVar(&a.qr, "qr", false, "also print the config as a QR code on stderr")
 	if len(args) == 0 || args[0] == "" || args[0][0] == '-' {

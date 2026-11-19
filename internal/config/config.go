@@ -4,6 +4,7 @@ package config
 import (
 	"bytes"
 	"cmp"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -26,7 +27,6 @@ type Config struct {
 	DNS       []netip.Addr `yaml:"dns"`
 	StateDir  string       `yaml:"state_dir"`
 	Upstreams []Upstream   `yaml:"upstreams"`
-	Profiles  []Profile    `yaml:"profiles"`
 	Health    Health       `yaml:"health"`
 	Metrics   Metrics      `yaml:"metrics"`
 }
@@ -71,35 +71,6 @@ func (u Upstream) Proxy() bool { return u.Kind == KindOutline || u.Kind == KindV
 
 func (u Upstream) HasTag(tag string) bool {
 	return slices.Contains(u.Tags, tag)
-}
-
-type Profile struct {
-	Name   string  `yaml:"name"`
-	Prefer []Match `yaml:"prefer"`
-}
-
-// Match selects upstreams. Empty fields match anything, so an empty Match matches all;
-// when several fields are given, all of them must match.
-type Match struct {
-	Geo      string `yaml:"geo"`
-	Provider string `yaml:"provider"`
-	Tag      string `yaml:"tag"`
-}
-
-func (m Match) Matches(u Upstream) bool {
-	return (m.Geo == "" || m.Geo == u.Geo) && (m.Provider == "" || m.Provider == u.Provider) && (m.Tag == "" || u.HasTag(m.Tag))
-}
-
-// String lists the given fields the way the config spells them, e.g. {geo: NL, tag: eu},
-// so warnings and `config check` stay short however many fields Match grows.
-func (m Match) String() string {
-	var parts []string
-	for _, f := range [...]struct{ key, val string }{{"geo", m.Geo}, {"provider", m.Provider}, {"tag", m.Tag}} {
-		if f.val != "" {
-			parts = append(parts, f.key+": "+f.val)
-		}
-	}
-	return "{" + strings.Join(parts, ", ") + "}"
 }
 
 type Health struct {
@@ -219,21 +190,51 @@ func Default() Config {
 	}
 }
 
+// ErrProfilesMoved reports a config that still has the profiles: key of
+// earlier versions. Profiles live in the store now.
+var ErrProfilesMoved = errors.New("profiles: no longer read from the config, they live in the database")
+
 func Load(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	return Parse(data)
+	cfg, profiles, err := LoadLegacy(path)
+	return checkNoProfiles(cfg, profiles, err, path)
 }
 
 func Parse(data []byte) (*Config, error) {
-	cfg := Default()
+	cfg, profiles, err := ParseLegacy(data)
+	return checkNoProfiles(cfg, profiles, err, "FILE")
+}
+
+func checkNoProfiles(cfg *Config, profiles []Profile, err error, path string) (*Config, error) {
+	if err == nil && profiles != nil {
+		return nil, fmt.Errorf("%w: copy them there once with `lotsman -config %s profile import %s`, then delete the profiles: key", ErrProfilesMoved, path, path)
+	}
+	return cfg, err
+}
+
+// LoadLegacy is Load for a config that may still carry the profiles: key. It
+// returns those profiles unvalidated, nil when the key is absent, for
+// `lotsman profile import`.
+func LoadLegacy(path string) (*Config, []Profile, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ParseLegacy(data)
+}
+
+// ParseLegacy is Parse for a config that may still carry the profiles: key;
+// see LoadLegacy.
+func ParseLegacy(data []byte) (*Config, []Profile, error) {
+	f := struct {
+		Config   `yaml:",inline"`
+		Profiles []Profile `yaml:"profiles"`
+	}{Config: Default()}
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
-	if err := dec.Decode(&cfg); err != nil {
-		return nil, fmt.Errorf("parse config: %w", err)
+	if err := dec.Decode(&f); err != nil {
+		return nil, nil, fmt.Errorf("parse config: %w", err)
 	}
+	cfg := f.Config
 	for i := range cfg.Upstreams {
 		if cfg.Upstreams[i].Kind == "" {
 			cfg.Upstreams[i].Kind = KindAWG
@@ -245,9 +246,9 @@ func Parse(data []byte) (*Config, error) {
 		t.Interval = cmp.Or(t.Interval, DefaultTransferInterval)
 	}
 	if err := cfg.Validate(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return &cfg, nil
+	return &cfg, f.Profiles, nil
 }
 
 var (
@@ -330,25 +331,6 @@ func (c *Config) Validate() error {
 			}
 		}
 	}
-	if len(c.Profiles) == 0 {
-		return fmt.Errorf("profiles: at least one is required")
-	}
-	seen = map[string]bool{}
-	for i, p := range c.Profiles {
-		if !profileNameRe.MatchString(p.Name) {
-			return fmt.Errorf("profiles[%d]: name %q must match %s", i, p.Name, profileNameRe)
-		}
-		if seen[p.Name] {
-			return fmt.Errorf("profiles[%d]: duplicate name %q", i, p.Name)
-		}
-		seen[p.Name] = true
-		// Typos in geo or provider must not pass silently, but an entry may
-		// go empty when an upstream is removed; only a profile with no
-		// usable tier at all is an error. Warnings reports the rest.
-		if len(p.Prefer) > 0 && !slices.ContainsFunc(c.preferTiers(p), func(t preferTier) bool { return t.own > 0 }) {
-			return fmt.Errorf("profile %q: prefer matches no upstream", p.Name)
-		}
-	}
 	h := c.Health
 	if h.Interval <= 0 {
 		return fmt.Errorf("health.interval: must be positive")
@@ -412,69 +394,4 @@ func (t *Transfer) validate() error {
 		return fmt.Errorf("health.transfer.timeout and health.transfer.interval: must be positive")
 	}
 	return nil
-}
-
-// preferTier describes one prefer entry of a profile. Upstreams belong to the
-// first entry that matches them, as in policy.Select.
-type preferTier struct {
-	matched   int   // upstreams the entry matches, including ones an earlier entry took
-	own       int   // upstreams for which it is the first match; the tier's size
-	shadowers []int // earlier entries that took upstreams this entry also matches
-}
-
-func (c *Config) preferTiers(p Profile) []preferTier {
-	tiers := make([]preferTier, len(p.Prefer))
-	for _, u := range c.Upstreams {
-		first := -1
-		for j, m := range p.Prefer {
-			if !m.Matches(u) {
-				continue
-			}
-			tiers[j].matched++
-			switch {
-			case first < 0:
-				first = j
-				tiers[j].own++
-			case !slices.Contains(tiers[j].shadowers, first):
-				tiers[j].shadowers = append(tiers[j].shadowers, first)
-			}
-		}
-	}
-	for j := range tiers {
-		slices.Sort(tiers[j].shadowers)
-	}
-	return tiers
-}
-
-// Warnings lists problems that do not stop the configuration from loading: a
-// prefer entry that matches no upstream, or whose upstreams all belong to
-// earlier entries, is a tier that never applies. It expects a validated
-// Config; the order is stable.
-func (c *Config) Warnings() []string {
-	var out []string
-	for _, p := range c.Profiles {
-		for j, t := range c.preferTiers(p) {
-			m := p.Prefer[j]
-			switch {
-			case t.matched == 0:
-				out = append(out, fmt.Sprintf("profile %q: prefer[%d] %v matches no upstream and is ignored", p.Name, j, m))
-			case t.own == 0:
-				var by []string
-				for _, k := range t.shadowers {
-					by = append(by, fmt.Sprintf("prefer[%d] %v", k, p.Prefer[k]))
-				}
-				out = append(out, fmt.Sprintf("profile %q: prefer[%d] %v never applies: every upstream it matches is taken by %s", p.Name, j, m, strings.Join(by, ", ")))
-			}
-		}
-	}
-	return out
-}
-
-func (c *Config) Profile(name string) (Profile, bool) {
-	for _, p := range c.Profiles {
-		if p.Name == name {
-			return p, true
-		}
-	}
-	return Profile{}, false
 }

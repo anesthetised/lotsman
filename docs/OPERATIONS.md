@@ -77,6 +77,7 @@ docker run -d --name lotsman \
   -p 51820:51820/udp \
   -v /etc/lotsman:/etc/lotsman:ro -v lotsman-state:/var/lib/lotsman \
   lotsman
+docker exec lotsman lotsman profile add nl geo=NL
 docker exec lotsman lotsman user add alice -profile nl
 ```
 
@@ -96,6 +97,9 @@ sudo cp deploy/lotsman.service /etc/systemd/system/ && sudo systemctl daemon-rel
 sudo systemctl restart lotsman              # clients reconnect on their own within seconds
 sudo lotsman upstream status
 ```
+
+Coming from a version that kept profiles in `lotsman.yaml`, `config check` fails until they are
+moved; see [Moving profiles out of lotsman.yaml](#moving-profiles-out-of-lotsmanyaml).
 
 If the new version changes the database schema, the daemon snapshots the old database to
 `state_dir/lotsman.db.v<N>-<timestamp>.bak` before migrating. To roll back: stop the service,
@@ -120,7 +124,6 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
 | `state_dir` | Server identity, SQLite database, pid, status and `serve.lock` files, cached dynamic Outline keys. |
 | `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, `outline` or `vless`), `conf` path (the provider's AmneziaWG config, for `outline` a file with the access key or its `ssconf://` URL, for `vless` a file with the `vless://` link), free-form `geo` and `provider` labels, `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates), and for the proxy kinds `outline` and `vless` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams) and [VLESS upstreams](#vless-upstreams)). |
-| `profiles[]` | `name` and `prefer`: ordered tiers of `{geo, provider, tag}` matchers (all given fields must match); empty = any upstream. Within a tier the lowest latency wins, so a tag such as `near` groups several countries into one tier. A matcher that matches no upstream, or only upstreams an earlier matcher already took, is ignored with a warning in `config check` and the reload log, so an upstream can be removed without editing every profile. A profile where no matcher matches any upstream is an error. |
 | `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline and VLESS upstream; default `1.1.1.1:53`), `down_after`, `up_after`, and the optional `transfer` block (off when absent; see [Throttled upstreams](#throttled-upstreams-transfer-probe)). |
 
 `listen` binds exactly the configured numeric address; hostnames and an omitted
@@ -176,9 +179,17 @@ rules when ownership is clear. If a legacy rule's deletion could also remove a
 foreign rule, startup stops with a manual-cleanup error. Uninstall also reports
 the collision and preserves ambiguous interfaces and routes for inspection.
 
+Profiles are not in this file: they live in the database, see [Profiles](#profiles). A config that
+still has the `profiles:` key of earlier versions fails `config check` and `serve` with the command
+that moves them.
+
 `systemctl reload lotsman` (SIGHUP) applies the file live, without dropping tunnels: upstreams are
-added, removed or replaced (a changed provider config counts as a replacement), profiles and
-`health` are swapped in, and every client is re-evaluated. A replacement is read, validated and its
+added, removed or replaced (a changed provider config counts as a replacement), `health` is swapped
+in, and every client is re-evaluated. A reload that takes the last upstream from a stored profile the
+running config serves is rejected as a whole; change the profile first. A profile that has no
+upstream anyway (say, after a restart with an upstream removed) does not stop the start or later
+reloads: it is logged as a warning and its peers stay blocked until the profile or the upstreams
+change. A replacement is read, validated and its
 endpoint resolved before the running upstream is touched (the lookup is bounded by the probe
 timeout and does not block status, metrics or client changes); if any of that fails, including an
 unreadable provider file, the old upstream keeps running and routing its clients, and the error is
@@ -191,10 +202,11 @@ blocked for a moment and rerouted on the same pass. `listen`, `subnet` and `stat
 live; a reload that touches them is rejected as a whole and logged. A config that fails validation is
 logged and ignored. A changed client MTU only reaches clients that re-import their config.
 
-Removing a profile blocks its existing clients on the next reconciliation, even if their upstream
-stays healthy and configured. Their routes and flow pins are removed and their current assignment
-is cleared; reconciliation still reports the missing profile until it is restored or those peers
-are removed.
+A peer whose profile is missing from the database (only possible for a database from before
+profiles moved there, until they are imported) is blocked on the next reconciliation, even if an
+upstream it used stays healthy. Its routes and flow pins are removed and its current assignment is
+cleared; reconciliation reports the missing profile until it is added or the peer is removed, and
+`config check` and `profile list` warn about it.
 
 If route cleanup fails, the daemon logs the error and retries on subsequent reconciliations.
 It retains the previous assignment in status until cleanup succeeds, and finishes removing old
@@ -481,6 +493,51 @@ A helper that stops answering the daemon for 2 s is killed and handled the same 
 stack stopped because reading its TUN failed exits with status 1 (`read tun, the upstream stops`
 just before) and is restarted too.
 
+## Profiles
+
+A profile is what a client's traffic prefers: an ordered list of tiers. The first tier with a
+healthy upstream wins, and within a tier the lowest latency, so a tag such as `near` groups several
+countries into one tier. Profiles live in the database and change without a restart:
+
+```bash
+lotsman profile add nl geo=NL                       # one tier
+lotsman profile add eu tag=near tag=eu any          # near, else eu, else anything
+lotsman profile add de geo=DE,provider=acme geo=DE  # an upstream must match every key of a tier
+lotsman profile add auto                            # no tiers: any upstream
+lotsman profile set eu tag=eu                       # replaces every tier
+lotsman profile list
+lotsman profile rm de                               # refused while a peer uses it
+```
+
+Each argument after the name is one tier, best first, so no quoting is needed: `key=value` pairs
+joined by commas, with keys `geo`, `provider` and `tag`, or `any` for every upstream. `profile list`
+prints tiers in the same form. Names are lowercase letters, digits and `-`, up to 32 characters.
+
+`profile add` and `set` check the profile against the upstreams in `lotsman.yaml`: a profile whose
+tiers match no upstream at all is refused. A tier that
+matches no upstream, or only upstreams an earlier tier already took, is stored with a warning
+(also in `config check` and the start and reload logs), so an upstream can be removed without
+editing every profile. The daemon checks the stored profiles again at start and on every reload
+against the config it applies. A change applies at once when the daemon is running: like `user
+add`, the command sends SIGUSR1 and the daemon reroutes the clients of that profile on the spot,
+keeping their open connections pinned to an upstream that is still alive. `user add -profile`
+must name a stored profile.
+
+### Moving profiles out of lotsman.yaml
+
+Earlier versions kept profiles under `profiles:` in `lotsman.yaml`. After upgrading, `config
+check` names the command that copies them into the database; run it once, then delete the key:
+
+```bash
+sudo lotsman -config /etc/lotsman/lotsman.yaml profile import /etc/lotsman/lotsman.yaml
+sudoedit /etc/lotsman/lotsman.yaml   # delete profiles:
+sudo lotsman config check
+```
+
+`profile import FILE` reads the `profiles:` key of FILE, validates every profile before storing
+any, and skips profiles already in the database, so running it again is harmless. Until the
+profiles are imported, existing clients are blocked.
+
 ## Users
 
 ```bash
@@ -504,8 +561,8 @@ WireGuard binds one key to one endpoint, so a config must never be active on two
 same time — give each device its own with `-device`. A device has one config per profile; which
 config is active decides where the traffic exits. The config goes to stdout (redirect it to a
 file), the QR code to stderr. Adding or removing takes effect immediately when the daemon is
-running: the CLI sends it SIGUSR1, which reconciles the user database but does not re-read
-`lotsman.yaml` (use `systemctl reload lotsman` for that). Before signalling, the CLI checks that the
+running: the CLI sends it SIGUSR1, which reconciles users and profiles from the database but does
+not re-read `lotsman.yaml` (use `systemctl reload lotsman` for that). Before signalling, the CLI checks that the
 pid in `lotsman.pid` belongs to this same `lotsman` executable; otherwise it signals nothing, says
 why on stderr, and the change applies on the next reconcile or start. After replacing the binary,
 restart the daemon. Run these commands as the daemon's user (normally root).

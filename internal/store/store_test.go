@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
+	"github.com/anesthetised/lotsman/internal/config"
 )
 
 func open(t *testing.T) *Store {
@@ -23,6 +24,16 @@ func open(t *testing.T) *Store {
 }
 
 var subnet = netip.MustParsePrefix("10.77.0.0/16")
+
+// addProfiles stores profiles without tiers: peers need one to exist.
+func addProfiles(t *testing.T, s *Store, names ...string) {
+	t.Helper()
+	for _, name := range names {
+		if err := s.AddProfile(config.Profile{Name: name}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 func TestUsers(t *testing.T) {
 	s := open(t)
@@ -49,6 +60,7 @@ func TestUsers(t *testing.T) {
 
 func TestPeers(t *testing.T) {
 	s := open(t)
+	addProfiles(t, s, "nl", "de")
 	if _, err := s.AddPeer("alice", DefaultDevice, "nl", subnet); !errors.Is(err, ErrNotFound) {
 		t.Errorf("peer for missing user: %v", err)
 	}
@@ -105,6 +117,7 @@ func TestPeers(t *testing.T) {
 
 func TestDevices(t *testing.T) {
 	s := open(t)
+	addProfiles(t, s, "nl", "eu")
 	s.CreateUser("alice")
 	if _, err := s.AddPeer("alice", "phone", "nl", subnet); err != nil {
 		t.Fatal(err)
@@ -170,6 +183,7 @@ func TestMigrateFromVersion1(t *testing.T) {
 	if err != nil || p.PrivateKey != key || p.IP.String() != "10.77.0.2" {
 		t.Fatalf("migrated peer = %+v, %v", p, err)
 	}
+	addProfiles(t, s, "nl")
 	if _, err := s.AddPeer("alice", "phone", "nl", subnet); err != nil {
 		t.Errorf("new schema not in effect after migration: %v", err)
 	}
@@ -218,6 +232,7 @@ func TestFreshDatabaseMakesNoBackup(t *testing.T) {
 
 func TestSubnetFull(t *testing.T) {
 	s := open(t)
+	addProfiles(t, s, "a", "b", "c", "d", "e", "f")
 	s.CreateUser("u")
 	tiny := netip.MustParsePrefix("10.0.0.0/29") // .0 net, .1 gw, .2-.6 usable, .7 broadcast
 	for i, profile := range []string{"a", "b", "c", "d", "e"} {
@@ -262,6 +277,7 @@ func TestReopenKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	addProfiles(t, s, "nl")
 	s.CreateUser("alice")
 	p, _ := s.AddPeer("alice", DefaultDevice, "nl", subnet)
 	s.Close()
@@ -309,6 +325,7 @@ func TestOpenCreatesPrivateFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	addProfiles(t, s, "nl")
 	s.CreateUser("alice")
 	if _, err := s.AddPeer("alice", DefaultDevice, "nl", subnet); err != nil {
 		t.Fatal(err)
@@ -389,6 +406,7 @@ func TestMigrationBackupIsPrivateAndRestorable(t *testing.T) {
 
 func TestCorruptTimestampIsReported(t *testing.T) {
 	s := open(t)
+	addProfiles(t, s, "nl")
 	if _, err := s.CreateUser("alice"); err != nil {
 		t.Fatal(err)
 	}
@@ -411,6 +429,7 @@ func TestCorruptTimestampIsReported(t *testing.T) {
 
 func TestAddUserPeerIsAtomic(t *testing.T) {
 	s := open(t)
+	addProfiles(t, s, "nl")
 	tiny := netip.MustParsePrefix("10.0.0.0/30") // .0 net, .1 gw, .2 usable, .3 broadcast
 	if _, err := s.AddUserPeer("alice", DefaultDevice, "nl", tiny); err != nil {
 		t.Fatal(err)
@@ -424,5 +443,33 @@ func TestAddUserPeerIsAtomic(t *testing.T) {
 	users, err := s.ListUsers()
 	if err != nil || len(users) != 1 || users[0].Name != "alice" {
 		t.Errorf("a failed AddUserPeer left a user behind: %+v, %v", users, err)
+	}
+}
+
+// A peer's id is its API identifier, so deleting the newest peer must not
+// hand its id to the next one.
+func TestPeerIDsAreNeverReused(t *testing.T) {
+	s := open(t)
+	if err := s.AddProfile(config.Profile{Name: "eu"}); err != nil {
+		t.Fatal(err)
+	}
+	subnet := netip.MustParsePrefix("10.77.0.0/24")
+	a, err := s.AddUserPeer("alice", "phone", "eu", subnet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.AddUserPeer("alice", "laptop", "eu", subnet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeletePeer("alice", "laptop", "eu"); err != nil {
+		t.Fatal(err)
+	}
+	c, err := s.AddUserPeer("alice", "tablet", "eu", subnet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ID <= b.ID || c.ID == a.ID {
+		t.Errorf("ids %d, %d (deleted), then %d: a deleted id was reused", a.ID, b.ID, c.ID)
 	}
 }

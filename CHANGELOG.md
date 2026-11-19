@@ -26,6 +26,14 @@ All notable changes to Lotsman are documented here. The format follows
   logs a warning and carries on without it; `deploy/uninstall.sh` restores the
   `nf_conntrack_acct_before=` value of the manifest. Connections are live only: never stored or
   logged, numeric destinations, no reverse DNS. No new dependency.
+- `lotsman profile list|add|set|rm|import`: profiles live in the database and change without a
+  restart. Each argument after the name is one preference tier, best first: `key=value` pairs
+  joined by commas (`geo`, `provider`, `tag`) or `any`; no tiers means any upstream. `add` and
+  `set` validate against the upstreams in `lotsman.yaml` as the config did and report the same
+  warnings; the running daemon reroutes the profile's clients at once (SIGUSR1, as for `user add`).
+  `rm` refuses while peers use the profile. `import FILE` copies the `profiles:` key of an older
+  config, all or nothing, and skips profiles already stored. Schema migration 3 adds the
+  `profiles` and `profile_tiers` tables (#128).
 - VLESS over gRPC: a `vless` upstream's link may use `type=grpc` with `security=reality` and no
   `flow` (Vision runs over TCP only; a grpc link with a flow is refused). `serviceName` (also
   Xray's `/<service>/<stream>` form), `mode` (`gun`, the default, or `multi`) and `authority` are
@@ -99,6 +107,13 @@ All notable changes to Lotsman are documented here. The format follows
   timer (three times that) overflows and wipes every session's keys at once (#76).
 
 ### Changed
+- Breaking: profiles moved from `lotsman.yaml` into the database (#128). A config with a
+  `profiles:` key fails `config check` and `serve` with the `lotsman profile import` command to
+  run; existing peers stay blocked until their profiles are imported. `user add -profile` must name
+  a stored profile. `config check` validates the stored profiles against the upstreams and prints
+  their warnings, in the CLI's tier syntax (`tier 2 geo=FI`). A reload that takes the last upstream
+  from a stored profile the running config serves is rejected; a profile without any upstream at
+  start only warns and its peers stay blocked, so the gateway still comes up.
 - amneziawg-go moves to `amneziawg-go/v3 v3.1.20261116`, which re-checks S4 when a packet reaches
   encryption, so the first packet of a device configured after creation is padded without help.
   Lotsman's TUN wrapper that held the first read until the first configuration is removed;
@@ -140,6 +155,8 @@ All notable changes to Lotsman are documented here. The format follows
   load; a 200 MiB limit about halves the peak for at most a 20% loss in the slowest case (#106).
 
 ### Fixed
+- A deleted peer's id is never given to a new peer (`peers.id` is `AUTOINCREMENT`), so the API's
+  `peer_id` and the history it keys stay unique.
 - `status.json` follows the daemon's health rounds instead of a timer started with the daemon, so
   after a reload that shortens `health.interval` `upstream status` and `user list` no longer lag by
   the old interval (#117). `serve` also waits for the status file to be removed before it releases

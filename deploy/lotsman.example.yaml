@@ -47,17 +47,16 @@ upstreams:
   #   geo: NL
   #   tags: [eu]
 
-# A user gets one client config per profile. `prefer` is an ordered list of
-# tiers; the first tier with a healthy upstream wins, lowest latency within a
-# tier. A tier is one matcher on geo, provider and/or tag; when it gives several,
-# an upstream must match all of them. Empty means any upstream.
-profiles:
-  - name: nl
-    prefer: [{geo: NL}]
-  - name: eu
-    prefer: [{tag: near}, {tag: eu}]
-  - name: auto
-    prefer: []
+# Profiles are not part of this file: they live in the database and are managed
+# with `lotsman profile add|set|rm|list`, which apply without a restart. A user
+# gets one client config per profile. Each argument after the name is one
+# preference tier; the first tier with a healthy upstream wins, lowest latency
+# within a tier. A tier matches on geo, provider and/or tag (`geo=NL,tag=eu`: an
+# upstream must match all of them); `any` matches every upstream, and no tiers
+# at all means any upstream. For the upstreams above:
+#   lotsman profile add nl geo=NL
+#   lotsman profile add eu tag=near tag=eu
+#   lotsman profile add auto
 
 health:
   interval: 15s

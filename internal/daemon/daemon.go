@@ -219,7 +219,9 @@ func (d *Daemon) start(ctx context.Context) error {
 	d.mu.Lock()
 	cfg := d.cfg
 	d.mu.Unlock()
-	d.logWarnings(cfg)
+	if err := d.checkProfiles(cfg, nil); err != nil {
+		return err
+	}
 	// Provider configs are loaded and resolved before d.mu is taken, so slow
 	// DNS never blocks Status or Metrics. The serve loop delivers SIGHUP only
 	// after Ready, so no reload or reconcile races a half-started daemon.
@@ -384,12 +386,16 @@ func (d *Daemon) teardown() []link {
 // Reload applies a new configuration without dropping anyone's tunnel.
 // Upstreams are matched by name; one whose provider config changed is
 // replaced once the new config loads and resolves, otherwise the running one
-// stays and the error is returned. Profiles and health settings are swapped
-// in and every peer is re-evaluated. Settings that need a restart reject the
-// whole reload.
+// stays and the error is returned. Health settings are swapped in and every
+// peer is re-evaluated against the stored profiles. Settings that need a restart, or
+// removing the last upstream of a stored profile the running config serves,
+// reject the whole reload.
 func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	d.mu.Lock()
 	err := restartRequired(d.cfg, cfg)
+	if err == nil {
+		err = d.checkProfiles(cfg, d.cfg)
+	}
 	if err != nil {
 		d.reloads[1]++
 	}
@@ -401,7 +407,6 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return err
 	}
-	d.logWarnings(cfg)
 
 	// Provider configs are read, and changed ones resolved, without d.mu, so
 	// slow DNS never blocks Status or Reconcile. A loaded upstream is private
@@ -564,7 +569,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.log.Info("configuration reloaded", "upstreams", len(d.ups), "profiles", len(cfg.Profiles), "client_mtu", d.clientMTU())
+	d.log.Info("configuration reloaded", "upstreams", len(d.ups), "client_mtu", d.clientMTU())
 	select {
 	case d.wake <- struct{}{}:
 	default:
@@ -594,13 +599,6 @@ func (d *Daemon) dropUpstream(u *Upstream) link {
 	delete(d.failures, failure{"up", u.Name})
 	delete(d.transfers, u)
 	return u.link
-}
-
-// logWarnings reports configuration problems that do not stop it from loading.
-func (d *Daemon) logWarnings(cfg *config.Config) {
-	for _, w := range cfg.Warnings() {
-		d.log.Warn("config warning", "detail", w)
-	}
 }
 
 // loadResolved loads a provider config and, unless it matches the running
@@ -1190,6 +1188,16 @@ func (d *Daemon) reconcile() error {
 	if err != nil {
 		return err
 	}
+	// Read every pass, so a profile edited in the store applies on the next
+	// reconcile, as a new peer does.
+	stored, err := d.store.ListProfiles()
+	if err != nil {
+		return err
+	}
+	profiles := map[string]config.Profile{}
+	for _, p := range stored {
+		profiles[p.Name] = p
+	}
 	var errs []error
 	wanted := map[awgconf.Key]bool{}
 	for _, p := range peers {
@@ -1225,17 +1233,17 @@ func (d *Daemon) reconcile() error {
 			}
 			d.devicePeers[p.PublicKey] = p
 		}
-		errs = append(errs, d.route(p))
+		errs = append(errs, d.route(p, profiles))
 	}
 	d.syncAlive()
 	return errors.Join(errs...)
 }
 
-func (d *Daemon) route(p store.Peer) error {
-	profile, ok := d.cfg.Profile(p.Profile)
+func (d *Daemon) route(p store.Peer, profiles map[string]config.Profile) error {
+	profile, ok := profiles[p.Profile]
 	if !ok {
 		return errors.Join(
-			fmt.Errorf("peer %s/%s/%s: profile %q is not in the config", p.User, p.Device, p.Profile, p.Profile),
+			fmt.Errorf("peer %s/%s/%s: profile %q is not in the store (lotsman profile add or import)", p.User, p.Device, p.Profile, p.Profile),
 			d.unroute(p.IP),
 		)
 	}

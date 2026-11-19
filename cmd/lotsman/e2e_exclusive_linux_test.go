@@ -65,14 +65,13 @@ endpoint: ` + listen + `
 state_dir: ` + stateDir + `
 upstreams:
   - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, geo: NL}
-profiles:
-  - {name: nl, prefer: [{geo: NL}]}
 health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 `
 	}
 	stateDir := filepath.Join(dir, "state")
 	cfgPath := filepath.Join(dir, "lotsman.yaml")
 	os.WriteFile(cfgPath, []byte(config("127.0.0.1:51820", stateDir)), 0o600)
+	mustRun(t, "-config", cfgPath, "profile", "add", "nl", "geo=NL")
 	// Same network namespace, another state_dir and listen port.
 	otherState := filepath.Join(dir, "other-state")
 	otherCfg := filepath.Join(dir, "other.yaml")

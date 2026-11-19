@@ -1,7 +1,10 @@
 package config
 
 import (
+	"errors"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -19,11 +22,6 @@ upstreams:
     conf: /etc/lotsman/upstreams/ac-de.conf
     geo: DE
     provider: acme
-profiles:
-  - name: nl
-    prefer: [{geo: NL}]
-  - name: auto
-    prefer: []
 `
 
 func TestParseAppliesDefaults(t *testing.T) {
@@ -42,9 +40,6 @@ func TestParseAppliesDefaults(t *testing.T) {
 	}
 	if cfg.Health.Interval != 15*time.Second || cfg.Health.DownAfter != 3 || cfg.Health.UpAfter != 2 {
 		t.Errorf("health defaults = %+v", cfg.Health)
-	}
-	if p, ok := cfg.Profile("nl"); !ok || len(p.Prefer) != 1 || p.Prefer[0].Geo != "NL" {
-		t.Errorf("profile nl = %+v, %v", p, ok)
 	}
 }
 
@@ -158,11 +153,8 @@ func TestValidationErrors(t *testing.T) {
 		"upstream name too long": {"upstreams", "upstreams: [{name: acmecorp-nl, conf: /x}]\n", "upstreams[0]: name"},
 		"duplicate upstream":     {"upstreams", "upstreams: [{name: a, conf: /x}, {name: a, conf: /y}]\n", "duplicate name"},
 		"upstream without conf":  {"upstreams", "upstreams: [{name: a}]\n", "conf path is required"},
-		"no profiles":            {"profiles", "profiles: []\n", "profiles: at least one"},
-		"bad profile name":       {"profiles", "profiles: [{name: 'Bad Name'}]\n", "profiles[0]: name"},
-		"duplicate profile":      {"profiles", "profiles: [{name: p}, {name: p}]\n", "duplicate name"},
-		"prefer matches nothing": {"profiles", "profiles: [{name: p, prefer: [{geo: XX}]}]\n", "matches no upstream"},
-		"prefer tag nobody has":  {"profiles", "profiles: [{name: p, prefer: [{tag: asia}]}]\n", "matches no upstream"},
+		"profiles key":           {"profiles", "profiles: [{name: p}]\n", "profile import FILE"},
+		"empty profiles key":     {"profiles", "profiles: []\n", "profile import FILE"},
 		"bad tag":                {"upstreams", "upstreams: [{name: a, conf: /x, tags: ['Bad Tag']}]\n", `tag "Bad Tag" must match`},
 		"empty tag":              {"upstreams", "upstreams: [{name: a, conf: /x, tags: ['']}]\n", `tag "" must match`},
 		"duplicate tag":          {"upstreams", "upstreams: [{name: a, conf: /x, tags: [eu, near, eu]}]\n", `duplicate tag "eu"`},
@@ -238,27 +230,80 @@ func replaceTopLevelField(yaml, field, replacement string) string {
 }
 
 func TestTags(t *testing.T) {
-	cfg, err := Parse([]byte(tagsConfig(`  - {name: near, prefer: [{tag: near}]}
-  - {name: eu, prefer: [{tag: near}, {tag: eu}]}
-`)))
+	cfg, profiles, err := ParseLegacy([]byte(tagsConfig("  - {name: near, prefer: [{tag: near}]}\n")))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got := cfg.Upstreams[0].Tags; !slices.Equal(got, []string{"near", "eu"}) {
 		t.Errorf("tags = %q", got)
 	}
-	near, _ := cfg.Profile("near")
-	if !near.Prefer[0].Matches(cfg.Upstreams[0]) || near.Prefer[0].Matches(cfg.Upstreams[1]) || near.Prefer[0].Matches(cfg.Upstreams[2]) {
+	near := profiles[0].Prefer[0]
+	if !near.Matches(cfg.Upstreams[0]) || near.Matches(cfg.Upstreams[1]) || near.Matches(cfg.Upstreams[2]) {
 		t.Error("tag tier matches the wrong upstreams")
+	}
+}
+
+// Profiles moved to the store; a config that still has the key must say
+// what to run instead, naming the file it was loaded from.
+func TestProfilesKeyIsRejected(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lotsman.yaml")
+	if err := os.WriteFile(path, []byte(minimal+"profiles: [{name: nl, prefer: [{geo: NL}]}]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Load(path)
+	if !errors.Is(err, ErrProfilesMoved) || !strings.Contains(err.Error(), "`lotsman -config "+path+" profile import "+path+"`") {
+		t.Fatalf("Load error = %v", err)
+	}
+	cfg, profiles, err := LoadLegacy(path)
+	if err != nil || len(cfg.Upstreams) != 2 || len(profiles) != 1 || profiles[0].Name != "nl" || profiles[0].Prefer[0].Geo != "NL" {
+		t.Fatalf("LoadLegacy = %+v, %+v, %v", cfg, profiles, err)
+	}
+	if _, profiles, err := ParseLegacy([]byte(minimal)); err != nil || profiles != nil {
+		t.Errorf("ParseLegacy without the key = %+v, %v; want nil profiles", profiles, err)
+	}
+	if _, _, err := ParseLegacy([]byte(minimal + "profiles: [{name: p, bogus: 1}]\n")); err == nil {
+		t.Error("ParseLegacy accepted an unknown profile field")
+	}
+}
+
+func TestValidateProfile(t *testing.T) {
+	cfg, err := Parse([]byte(minimal))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []Profile{
+		{Name: "auto"},
+		{Name: "nl", Prefer: []Match{{Geo: "NL"}}},
+		{Name: "a-1", Prefer: []Match{{Geo: "XX"}, {Provider: "acme"}}},
+		{Name: "any", Prefer: []Match{{}}},
+	} {
+		if err := cfg.ValidateProfile(p); err != nil {
+			t.Errorf("%+v: %v", p, err)
+		}
+	}
+	for _, tc := range []struct {
+		p    Profile
+		want string
+	}{
+		{Profile{Name: "Bad Name"}, `profile name "Bad Name" must match`},
+		{Profile{Name: ""}, `profile name "" must match`},
+		{Profile{Name: "-nl"}, `profile name "-nl" must match`},
+		{Profile{Name: strings.Repeat("a", 33)}, "must match"},
+		{Profile{Name: "p", Prefer: []Match{{Geo: "XX"}}}, `profile "p": prefer matches no upstream`},
+		{Profile{Name: "p", Prefer: []Match{{Tag: "asia"}}}, `profile "p": prefer matches no upstream`},
+	} {
+		if err := cfg.ValidateProfile(tc.p); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%+v: error = %v, want %q", tc.p, err, tc.want)
+		}
 	}
 }
 
 func TestMatchString(t *testing.T) {
 	for m, want := range map[Match]string{
-		{}:                                     "{}",
-		{Geo: "NL"}:                            "{geo: NL}",
-		{Tag: "eu"}:                            "{tag: eu}",
-		{Geo: "NL", Provider: "rs", Tag: "eu"}: "{geo: NL, provider: rs, tag: eu}",
+		{}:                                     "any",
+		{Geo: "NL"}:                            "geo=NL",
+		{Tag: "eu"}:                            "tag=eu",
+		{Geo: "NL", Provider: "rs", Tag: "eu"}: "geo=NL,provider=rs,tag=eu",
 	} {
 		if got := m.String(); got != want {
 			t.Errorf("%#v.String() = %q, want %q", m, got, want)
@@ -267,14 +312,19 @@ func TestMatchString(t *testing.T) {
 }
 
 // The shipped example is the first thing an operator copies; it must load,
-// show tags, and raise no warnings.
+// show tags, and the profiles its comments suggest must raise no warnings.
 func TestExampleConfigIsValid(t *testing.T) {
 	cfg, err := Load("../../deploy/lotsman.example.yaml")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := cfg.Warnings(); len(got) != 0 {
-		t.Errorf("Warnings = %q, want none", got)
+	suggested := []Profile{
+		{Name: "nl", Prefer: []Match{{Geo: "NL"}}},
+		{Name: "eu", Prefer: []Match{{Tag: "near"}, {Tag: "eu"}}},
+		{Name: "auto"},
+	}
+	if got, err := cfg.CheckProfiles(suggested); err != nil || len(got) != 0 {
+		t.Errorf("CheckProfiles = %q, %v; want no warnings", got, err)
 	}
 	tagged := false
 	for _, u := range cfg.Upstreams {

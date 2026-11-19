@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -233,7 +234,7 @@ func TestIdentity(t *testing.T) {
 }
 
 func TestClientConfig(t *testing.T) {
-	cfg, err := config.Parse([]byte("endpoint: vpn.example.org:51820\nupstreams: [{name: a, conf: /x}]\nprofiles: [{name: p}]\n"))
+	cfg, err := config.Parse([]byte("endpoint: vpn.example.org:51820\nupstreams: [{name: a, conf: /x}]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -282,11 +283,14 @@ state_dir: %s
 upstreams:
   - {name: nl, conf: %s/nl.conf, geo: NL}
   - {name: de, conf: %s/de.conf, geo: DE}
-profiles:
-  - {name: nl, prefer: [{geo: NL}]}
-  - {name: eu, prefer: [{geo: NL}, {geo: DE}]}
 health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 2, up_after: 1}
 `
+
+// The harness store starts with these profiles.
+var (
+	nlProfile = config.Profile{Name: "nl", Prefer: []config.Match{{Geo: "NL"}}}
+	euProfile = config.Profile{Name: "eu", Prefer: []config.Match{{Geo: "NL"}, {Geo: "DE"}}}
+)
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
@@ -309,6 +313,11 @@ func newHarness(t *testing.T) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
+	for _, p := range []config.Profile{nlProfile, euProfile} {
+		if err := st.AddProfile(p); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	h := &harness{st: st, dp: fake.New(), cfg: cfg, dir: dir, healthy: map[string]bool{}, dnsDown: map[string]bool{}, probed: map[string]int{}}
 	h.setHealthy("lm-up-nl", true)
@@ -362,6 +371,20 @@ func (h *harness) run(t *testing.T) (stop func()) {
 	}
 	t.Cleanup(stop)
 	return stop
+}
+
+// forgetProfile deletes a profile behind the store's back, leaving its
+// peers in place, as in a database from before profiles moved to the store.
+func (h *harness) forgetProfile(t *testing.T, name string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", filepath.Join(h.dir, "lotsman.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	if _, err := db.Exec(`DELETE FROM profile_tiers WHERE profile = ?; DELETE FROM profiles WHERE name = ?`, name, name); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func (h *harness) setHealthy(iface string, ok bool) {
@@ -541,7 +564,11 @@ func TestProbeFailureReresolvesEndpoint(t *testing.T) {
 func TestReconcileUnknownProfile(t *testing.T) {
 	h := newHarness(t)
 	h.st.CreateUser("bob")
-	h.st.AddPeer("bob", store.DefaultDevice, "gone", h.cfg.Subnet)
+	h.st.AddProfile(config.Profile{Name: "gone"})
+	if _, err := h.st.AddPeer("bob", store.DefaultDevice, "gone", h.cfg.Subnet); err != nil {
+		t.Fatal(err)
+	}
+	h.forgetProfile(t, "gone")
 	h.run(t)
 	eventually(t, "start", h.dp.Ready)
 	if err := h.d.Reconcile(); err == nil || !strings.Contains(err.Error(), `profile "gone"`) {
@@ -602,11 +629,16 @@ state_dir: %s
 upstreams:
   - {name: de, conf: %s/de.conf, geo: DE}
   - {name: fi, conf: %s/fi.conf, geo: FI}
-profiles:
-  - {name: eu, prefer: [{geo: FI}, {geo: DE}]}
 health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 1, up_after: 1}
 `, h.dir, h.dir, h.dir)))
 	if err != nil {
+		t.Fatal(err)
+	}
+	// Without NL the nl profile would have nothing to use; it goes first.
+	if err := h.st.DeleteProfile("nl"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.st.SetProfile(config.Profile{Name: "eu", Prefer: []config.Match{{Geo: "FI"}, {Geo: "DE"}}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.d.Reload(ctx, cfg2); err != nil {
@@ -640,13 +672,20 @@ health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 1, up_after: 1}
 		t.Errorf("mtu after replacing fi = %d", h.dp.MTU)
 	}
 
-	// The peer's profile vanished from the config: it is reported, not routed blindly.
-	cfg3, _ := config.Parse([]byte(fmt.Sprintf("endpoint: vpn.example.org:51820\nstate_dir: %s\nupstreams: [{name: de, conf: %s/de.conf, geo: DE}]\nprofiles: [{name: other}]\n", h.dir, h.dir)))
-	if err := h.d.Reload(ctx, cfg3); err != nil {
+	// A reload that leaves a stored profile no upstream at all is refused
+	// whole, as a config whose profile matched nothing was.
+	cfg3, err := config.Parse([]byte(fmt.Sprintf("endpoint: vpn.example.org:51820\nstate_dir: %s\nupstreams: [{name: de, conf: %s/de.conf, geo: DE}]\n", h.dir, h.dir)))
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.d.Reconcile(); err == nil || !strings.Contains(err.Error(), `profile "eu"`) {
-		t.Errorf("expected profile error after reload, got %v", err)
+	if err := h.st.AddProfile(config.Profile{Name: "fi", Prefer: []config.Match{{Geo: "FI"}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.d.Reload(ctx, cfg3); err == nil || !strings.Contains(err.Error(), `profile "fi": prefer matches no upstream`) {
+		t.Fatalf("reload stranding a profile: %v", err)
+	}
+	if st := h.d.Status(); len(st.Upstreams) != 2 || st.Upstreams[1].Name != "fi" {
+		t.Errorf("a refused reload changed the upstreams: %+v", st.Upstreams)
 	}
 }
 

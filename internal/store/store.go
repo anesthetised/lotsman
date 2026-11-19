@@ -1,4 +1,4 @@
-// Package store persists users and their peers in SQLite.
+// Package store persists users, their peers and the profiles peers use in SQLite.
 package store
 
 import (
@@ -22,6 +22,8 @@ var (
 	ErrNotFound   = errors.New("not found")
 	ErrExists     = errors.New("already exists")
 	ErrSubnetFull = errors.New("no free address in subnet")
+	ErrNoProfile  = errors.New("no such profile")
+	ErrInUse      = errors.New("in use")
 )
 
 // DefaultDevice is used when a user does not name their device.
@@ -58,6 +60,36 @@ var migrations = []string{
 	);
 	INSERT INTO peers_new (id, user_id, device, profile, private_key, public_key, ip, created_at)
 		SELECT id, user_id, '` + DefaultDevice + `', profile, private_key, public_key, ip, created_at FROM peers;
+	DROP TABLE peers;
+	ALTER TABLE peers_new RENAME TO peers;`,
+	// Profiles moved here from lotsman.yaml, so they can change at runtime.
+	// Peers still name their profile; the store checks the reference, as
+	// earlier databases hold peers whose profiles are imported only later.
+	`CREATE TABLE profiles (
+		name TEXT PRIMARY KEY
+	);
+	CREATE TABLE profile_tiers (
+		profile  TEXT NOT NULL REFERENCES profiles(name) ON DELETE CASCADE,
+		position INTEGER NOT NULL,
+		geo      TEXT NOT NULL,
+		provider TEXT NOT NULL,
+		tag      TEXT NOT NULL,
+		PRIMARY KEY (profile, position)
+	);`,
+	// A peer's id is its API identifier (peer_id) and keys its history, so
+	// a deleted peer's id must never go to a new one: AUTOINCREMENT.
+	`CREATE TABLE peers_new (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		device      TEXT NOT NULL,
+		profile     TEXT NOT NULL,
+		private_key TEXT NOT NULL,
+		public_key  TEXT NOT NULL UNIQUE,
+		ip          TEXT NOT NULL UNIQUE,
+		created_at  TEXT NOT NULL,
+		UNIQUE (user_id, device, profile)
+	);
+	INSERT INTO peers_new SELECT id, user_id, device, profile, private_key, public_key, ip, created_at FROM peers;
 	DROP TABLE peers;
 	ALTER TABLE peers_new RENAME TO peers;`,
 }
@@ -245,7 +277,7 @@ func (s *Store) ListUsers() ([]User, error) {
 
 // AddPeer generates a key pair and allocates the next free address in subnet.
 // The network address and the first host (the gateway) are never handed out.
-// The user must exist.
+// The user and the profile must exist.
 func (s *Store) AddPeer(user, device, profile string, subnet netip.Prefix) (Peer, error) {
 	return s.addPeer(user, device, profile, subnet, false)
 }
@@ -272,6 +304,9 @@ func (s *Store) addPeer(user, device, profile string, subnet netip.Prefix, creat
 		if _, err := tx.Exec(`INSERT INTO users (name, created_at) VALUES (?, ?) ON CONFLICT (name) DO NOTHING`, user, now.Format(time.RFC3339)); err != nil {
 			return Peer{}, err
 		}
+	}
+	if err := profileExists(tx, profile); err != nil {
+		return Peer{}, err
 	}
 	var userID int64
 	if err := tx.QueryRow(`SELECT id FROM users WHERE name = ?`, user).Scan(&userID); err != nil {
