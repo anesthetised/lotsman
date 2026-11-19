@@ -29,6 +29,7 @@ test("devices, profiles and configs of the ordinary user", async () => {
     ["default", 0],
     ["streaming", 0],
     ["backup", 0],
+    ["fi", 0],
   ]);
 
   const peerId = user.devices[0]!.peers[0]!.peerId;

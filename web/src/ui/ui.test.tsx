@@ -5,6 +5,7 @@ import { i18n, I18nContext } from "../i18n";
 import { AvailabilityBar, availabilityLevel } from "./AvailabilityBar";
 import { ChoiceMenu } from "./ChoiceMenu";
 import { Dialog } from "./Dialog";
+import { QrCode, qrCode } from "./QrCode";
 import { sparklinePath } from "./Sparkline";
 
 describe("Dialog", () => {
@@ -73,4 +74,40 @@ test("availability levels and segments", () => {
   render(() => <AvailabilityBar ratios={[1, 0.5, undefined]} label="lv-1: 50 %" />);
   const bar = screen.getByRole("img", { name: "lv-1: 50 %" });
   expect([...bar.querySelectorAll("rect")].map((r) => r.getAttribute("class"))).toEqual(["fill-ok", "fill-bad", "fill-empty"]);
+});
+
+test("QR codes are inline SVG paths, and too long a text says so", () => {
+  const code = qrCode("[Interface]\nPrivateKey = x\n");
+  expect(code?.size).toBe(25); // version 2: 26 bytes
+  expect(code?.path).toMatch(/^M[\d ]+L/);
+  expect(qrCode("x".repeat(3000))).toBeUndefined();
+
+  render(() => <QrCode text="hello" label="QR of hello" tooLong="too long" />);
+  const svg = screen.getByRole("img", { name: "QR of hello" });
+  expect(svg.tagName).toBe("svg");
+  expect(svg.querySelector("path")?.getAttribute("d")).toBe(qrCode("hello")?.path);
+  expect(document.querySelector("img")).toBeNull();
+});
+
+test("a config of the size the daemon issues takes the smallest symbol, drawn inside a white quiet zone", () => {
+  const code = qrCode(`[Interface]\n${"x".repeat(600)}`)!;
+  // ECC L sets the version: 17 (85 modules) holds 612 bytes, where M would need version 19 (93).
+  expect(code.size).toBe(85);
+  const xy = [...code.path.matchAll(/[ML](\d+) (\d+)/g)].flatMap((m) => [Number(m[1]), Number(m[2])]);
+  expect(Math.min(...xy)).toBe(0);
+  expect(Math.max(...xy)).toBe(85);
+
+  render(() => <QrCode text="hello" label="QR" tooLong="too long" class="max-w-[24rem]" />);
+  const svg = screen.getByRole("img", { name: "QR" });
+  expect(svg.getAttribute("viewBox")).toBe("-4 -4 29 29"); // 21 modules and 4 on each side
+  const rect = svg.querySelector("rect")!;
+  expect([rect.getAttribute("x"), rect.getAttribute("width"), rect.getAttribute("fill")]).toEqual(["-4", "29", "#fff"]);
+  expect(svg.getAttribute("class")).toContain("max-w-[24rem]");
+  expect(svg.getAttribute("class")).not.toContain("max-w-64");
+});
+
+test("a QR code that does not fit shows the fallback", () => {
+  render(() => <QrCode text={"x".repeat(3000)} label="QR" tooLong="too long" />);
+  expect(screen.queryByRole("img")).toBeNull();
+  expect(screen.getByText("too long")).toBeTruthy();
 });

@@ -15,18 +15,22 @@ export interface ChartSeries {
 }
 
 export interface LineChartProps {
-  /** Columns in uPlot's layout: `[unix seconds, ...one array per series]`. */
-  data: number[][];
+  /** Columns in uPlot's layout: `[unix seconds, ...one array per series]`; null is a gap. */
+  data: (number | null)[][];
   series: readonly ChartSeries[];
   /** Formats y values on the axis. */
   format: (value: number) => string;
   caption: JSX.Element;
   height?: number;
+  /** "clock": a live window of seconds to minutes (the default); "date": history over hours to months. */
+  axis?: "clock" | "date";
 }
 
 export function LineChart(props: LineChartProps) {
   const { locale } = useI18n();
   const clock = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+  const hours = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" });
+  const days = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" });
   let el!: HTMLDivElement;
   let plot: uPlot | undefined;
 
@@ -38,6 +42,12 @@ export function LineChart(props: LineChartProps) {
       grid: { stroke: token("--color-line"), width: 1 },
       ticks: { stroke: token("--color-line"), width: 1 },
     };
+    // History: ticks a day or more apart show the date, closer ones the time
+    // of day. Live: whole-second ticks in the user's clock format.
+    const timeAxis: uPlot.Axis =
+      props.axis === "date"
+        ? { values: (_u, ticks, _i, _space, incr) => ticks.map((s) => (incr >= 86_400 ? days : hours).format(s * 1000)) }
+        : { incrs: [1, 5, 10, 15, 30, 60, 120, 300, 600, 900], values: (_u, ticks) => ticks.map((s) => clock.format(s * 1000)) };
     return {
       width,
       height: props.height ?? 200,
@@ -45,8 +55,7 @@ export function LineChart(props: LineChartProps) {
       cursor: { show: false },
       scales: { y: { range: (_u, _min, max) => [0, Math.max(max, 1)] } },
       axes: [
-        // Whole-second ticks in the user's clock format.
-        { ...axis, incrs: [1, 5, 10, 15, 30, 60, 120, 300, 600, 900], values: (_u, ticks) => ticks.map((s) => clock.format(s * 1000)) },
+        { ...axis, ...timeAxis },
         { ...axis, size: 96, values: (_u, ticks) => ticks.map(props.format) },
       ],
       series: [{}, ...props.series.map((s) => ({ label: s.label, stroke: token(s.color), width: 1.5, points: { show: false } }))],

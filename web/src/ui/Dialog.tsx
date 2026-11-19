@@ -18,6 +18,8 @@ export interface DialogProps {
   variant?: ButtonVariant;
   /** Extra classes for the trigger, such as a larger touch target. */
   triggerClass?: string;
+  /** A wider dialog, for forms and configs. */
+  wide?: boolean;
   /** Controlled open state, for content that closes the dialog itself. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -31,7 +33,9 @@ export function Dialog(props: DialogProps) {
       <Kobalte.Portal>
         <Kobalte.Overlay class="fixed inset-0 z-40 bg-black/50" />
         <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <Kobalte.Content class="max-h-full w-full max-w-lg overflow-auto rounded-lg border border-line bg-surface p-5 shadow-xl">
+          <Kobalte.Content
+            class={["max-h-full w-full overflow-auto rounded-lg border border-line bg-surface p-5 shadow-xl", props.wide ? "max-w-2xl" : "max-w-lg"]}
+          >
             <div class="flex items-start justify-between gap-4">
               <Kobalte.Title class="text-lg font-semibold">{props.title}</Kobalte.Title>
               <Kobalte.CloseButton class={buttonClass("ghost")} aria-label={t.common.close}>

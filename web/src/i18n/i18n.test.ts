@@ -1,4 +1,6 @@
 import { describe, expect, test } from "vitest";
+import { consoleDictionaries } from "./console";
+import { consoleEn } from "./console.en";
 import { en } from "./en";
 import { formatters } from "./format";
 import { i18n, locales, pickLocale } from "./index";
@@ -25,6 +27,17 @@ function shape(value: unknown, path = ""): string[] {
 test("every dictionary has the shape of the English one", () => {
   // The Dict type checks this at compile time; this guards against casts.
   for (const locale of locales) expect(shape(i18n(locale).t)).toEqual(shape(en));
+});
+
+test("the console's dictionaries cover every language with the English shape", () => {
+  expect(Object.keys(consoleDictionaries).sort()).toEqual([...locales].sort());
+  for (const locale of locales) expect(shape(consoleDictionaries[locale])).toEqual(shape(consoleEn));
+});
+
+test("Russian counts take the right form", () => {
+  const count = consoleDictionaries.ru.connections.count;
+  expect([1, 2, 5, 11, 21, 24].map(count)).toEqual(["1 соединение", "2 соединения", "5 соединений", "11 соединений", "21 соединение", "24 соединения"]);
+  expect(consoleDictionaries.en.connections.count(1)).toBe("1 connection");
 });
 
 describe("formatters", () => {

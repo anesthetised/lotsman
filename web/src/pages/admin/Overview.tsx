@@ -1,14 +1,15 @@
-// Placeholder operator overview (#136 builds the real console): live upstream
-// table, a total-rate chart, per-upstream sparklines and 7-day availability.
+// The operator overview: gateway totals, a total-rate chart, and the live
+// upstream table with per-upstream sparklines and 7-day availability. Each
+// upstream's name leads to its own page.
 
 import { durationMs, timestampMs } from "@bufbuild/protobuf/wkt";
 import { createMemo, createSignal, Errored, For, Loading, Show } from "solid-js";
 import { api } from "../../api/client";
 import { appendKeyed, appendRow, createLive, num } from "../../api/live";
-import type { PeerStatus, UpstreamStatus } from "../../gen/lotsman/v1/status_pb";
+import type { StatusSnapshot, UpstreamStatus } from "../../gen/lotsman/v1/status_pb";
 import { useI18n } from "../../i18n";
+import { useConsoleI18n } from "../../i18n/console";
 import { ChoiceMenu } from "../../ui/ChoiceMenu";
-import { Dialog } from "../../ui/Dialog";
 import { LineChart } from "../../ui/LineChart";
 import { Sparkline } from "../../ui/Sparkline";
 import { StateBadge } from "../../ui/StateBadge";
@@ -45,10 +46,11 @@ function LiveOverview() {
   const trends = createMemo<Record<string, number[]>>((prev) =>
     appendKeyed(prev, Object.fromEntries(snapshot().upstreams.map((u) => [u.name, num(u.traffic?.downRate)])), 60),
   );
-  const peersByUpstream = createMemo(() => Object.groupBy(snapshot().peers, (p) => p.upstream));
 
   return (
     <div class="space-y-4">
+      <Totals snapshot={snapshot()} />
+
       <div class="flex items-center justify-between gap-4">
         <h1 class="text-lg font-semibold">{t.admin.upstreams}</h1>
         <ChoiceMenu
@@ -100,20 +102,11 @@ function LiveOverview() {
               <th scope="col" class="px-3 py-2 text-right font-medium">{t.traffic.up}</th>
               <th scope="col" class="px-3 py-2 font-medium">{t.admin.lastMinute}</th>
               <th scope="col" class="px-3 py-2 font-medium">{t.admin.availability}</th>
-              <th scope="col" class="px-3 py-2">
-                <span class="sr-only">{t.admin.details}</span>
-              </th>
             </tr>
           </thead>
           <tbody>
             <For each={snapshot().upstreams} keyed={(u) => u.name}>
-              {(u) => (
-                <UpstreamRow
-                  upstream={u()}
-                  trend={trends()[u().name] ?? []}
-                  peers={peersByUpstream()[u().name] ?? []}
-                />
-              )}
+              {(u) => <UpstreamRow upstream={u()} trend={trends()[u().name] ?? []} />}
             </For>
           </tbody>
         </table>
@@ -122,13 +115,45 @@ function LiveOverview() {
   );
 }
 
-function UpstreamRow(props: { upstream: UpstreamStatus; trend: readonly number[]; peers: readonly PeerStatus[] }) {
+/** The gateway as a whole: every peer's traffic, removed peers' bytes included. */
+function Totals(props: { snapshot: StatusSnapshot }) {
+  const { t, fmt, c } = useConsoleI18n();
+  const s = () => props.snapshot;
+  const active = () => s().upstreams.reduce((n, u) => n + u.active, 0);
+  const blocked = () => s().peers.filter((p) => p.upstream === "").length;
+  const tile = (label: string, value: string, detail?: string) => (
+    <div class="rounded-lg border border-line bg-surface px-3 py-2">
+      <dt class="text-xs text-muted">{label}</dt>
+      <dd class="text-lg font-semibold tabular-nums">{value}</dd>
+      <Show when={detail}>
+        <dd class="text-xs text-muted">{detail}</dd>
+      </Show>
+    </div>
+  );
+  return (
+    <section aria-labelledby="totals">
+      <h2 id="totals" class="sr-only">
+        {c.overview.totals}
+      </h2>
+      <dl class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {tile(c.upstream.downNow, fmt.rate(num(s().total?.downRate)), c.overview.sinceStart(fmt.bytes(num(s().total?.downBytes))))}
+        {tile(c.upstream.upNow, fmt.rate(num(s().total?.upRate)), c.overview.sinceStart(fmt.bytes(num(s().total?.upBytes))))}
+        {tile(t.admin.peers, t.admin.activePeers(active(), s().peers.length), blocked() > 0 ? c.overview.blocked(blocked()) : undefined)}
+        {tile(c.overview.clientMtu, fmt.count(s().clientMtu))}
+      </dl>
+    </section>
+  );
+}
+
+function UpstreamRow(props: { upstream: UpstreamStatus; trend: readonly number[] }) {
   const { t, fmt } = useI18n();
   const u = () => props.upstream;
   return (
     <tr class="border-t border-line">
       <th scope="row" class="px-3 py-1.5 text-left font-medium">
-        {u().name}
+        <a href={`/admin/upstreams/${encodeURIComponent(u().name)}`} class="text-accent underline-offset-2 hover:underline">
+          {u().name}
+        </a>
         <div class="text-xs font-normal text-muted">
           {kindLabel(u().kind)} · {u().geo}
         </div>
@@ -150,52 +175,6 @@ function UpstreamRow(props: { upstream: UpstreamStatus; trend: readonly number[]
       <td class="w-44 px-3 py-1.5">
         <Availability name={u().name} label={t.admin.availabilityLabel(u().name)} load={api.history.upstream} />
       </td>
-      <td class="px-3 py-1.5 text-right">
-        <Dialog
-          trigger={
-            <>
-              {t.admin.details}
-              <span class="sr-only"> {u().name}</span>
-            </>
-          }
-          title={t.admin.detailsTitle(u().name)}
-          description={t.admin.detailsDescription}
-        >
-          <PeerTable peers={props.peers} />
-        </Dialog>
-      </td>
     </tr>
-  );
-}
-
-function PeerTable(props: { peers: readonly PeerStatus[] }) {
-  const { t, fmt } = useI18n();
-  return (
-    <Show when={props.peers.length > 0} fallback={<p class="text-sm text-muted">{t.admin.noPeers}</p>}>
-      <table class="w-full text-sm">
-        <thead class="text-left text-xs text-muted">
-          <tr>
-            <th scope="col" class="py-1 pr-3 font-medium">{t.admin.user}</th>
-            <th scope="col" class="py-1 pr-3 font-medium">{t.admin.device}</th>
-            <th scope="col" class="py-1 pr-3 font-medium">{t.admin.profile}</th>
-            <th scope="col" class="py-1 pr-3 font-medium">{t.admin.address}</th>
-            <th scope="col" class="py-1 text-right font-medium">{t.traffic.down}</th>
-          </tr>
-        </thead>
-        <tbody>
-          <For each={props.peers} keyed={(p) => p.peerId}>
-            {(p) => (
-              <tr class="border-t border-line">
-                <td class="py-1 pr-3">{p().user}</td>
-                <td class="py-1 pr-3">{p().device}</td>
-                <td class="py-1 pr-3">{p().profile}</td>
-                <td class="py-1 pr-3 font-mono text-xs">{p().address}</td>
-                <td class="py-1 text-right tabular-nums">{fmt.rate(num(p().traffic?.downRate))}</td>
-              </tr>
-            )}
-          </For>
-        </tbody>
-      </table>
-    </Show>
   );
 }

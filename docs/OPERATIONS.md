@@ -689,6 +689,19 @@ reach their page through their [link](#user-links). A binary built without the f
 (`go build`, `just build` without `just web-build`) serves a page saying so, and the panel logs a
 warning at start.
 
+The operator console is under `/admin`. **Upstreams** lists each upstream's state, latency, live
+rate and 7-day availability; an upstream's own page adds the peers routed through it, the last 5
+minutes' rate and its history over 1 hour to 90 days (availability, average rate, latency).
+**Profiles** creates, edits and deletes profiles, with the daemon's warnings and the matching
+`lotsman profile set` command; a profile that devices use cannot be deleted. **Users** lists users
+with their devices and profiles: add a device (which creates its user), remove devices or whole
+users, show a device's config as a QR code, as text or as a `.conf` download, and issue or revoke a
+user's [link](#user-links). A link is shown once, when it is issued: only its hash is kept, so to
+see it again, issue a new one, which ends the old one. **Connections** shows the open connections
+of one peer or of all peers, live from conntrack: nothing is stored, destinations are `IP:port`
+without reverse DNS, and at most 500 are sent at once (the fastest). **Passkeys** is described
+below.
+
 Install, after the gateway itself:
 
 ```bash

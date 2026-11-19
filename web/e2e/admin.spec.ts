@@ -1,4 +1,4 @@
-import { expect, test } from "./fixtures";
+import { expect, pressIn, test } from "./fixtures";
 
 test("the operator overview shows live data", async ({ page }) => {
   await page.goto("/admin");
@@ -14,25 +14,33 @@ test("the operator overview shows live data", async ({ page }) => {
   await expect(page.getByRole("img", { name: /Availability of lv-1 over 7 days: \d/ })).toBeVisible();
 });
 
-test("the details dialog works from the keyboard", async ({ page }) => {
+test("the gateway totals and an upstream's page", async ({ page }) => {
   await page.goto("/admin");
-  const trigger = page.getByRole("button", { name: "Details lv-1" });
-  await trigger.focus();
-  await page.keyboard.press("Enter");
-  const dialog = page.getByRole("dialog", { name: "Upstream lv-1" });
-  await expect(dialog).toBeVisible();
-  await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
-  await expect(dialog.getByRole("row")).toHaveCount(3); // header + alice's phone and laptop
+  const totals = page.getByRole("region", { name: "Gateway" });
+  await expect(totals).toContainText("Down now");
+  await expect(totals).toContainText("since start");
+  await expect(totals).toContainText("of 6 active");
+  await expect(totals).toContainText("1 blocked");
+  const before = await totals.textContent();
+  await expect(totals).not.toHaveText(before!, { timeout: 5000 });
 
-  await page.keyboard.press("Escape");
-  await expect(dialog).toBeHidden();
-  await expect(trigger).toBeFocused();
+  await page.getByRole("link", { name: "lv-1" }).click();
+  await expect(page).toHaveURL("/admin/upstreams/lv-1");
+  await expect(page.getByRole("heading", { name: "Upstream lv-1" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Upstreams", exact: true })).toHaveAttribute("aria-current", "page");
+  // The live chart and the two history charts.
+  await expect(page.locator("figure canvas")).toHaveCount(3);
+  await expect(page.getByRole("img", { name: /^Availability over 24 hours: \d/ })).toBeVisible();
 
-  // A click outside dismisses it too.
-  await trigger.click();
-  await expect(dialog).toBeVisible();
-  await page.mouse.click(5, 5);
-  await expect(dialog).toBeHidden();
+  const peers = page.getByRole("region", { name: "Routed peers" });
+  await expect(peers.getByRole("row")).toHaveCount(3); // header + alice's phone and laptop
+
+  await page.getByRole("button", { name: "Range: 24 hours" }).click();
+  await page.getByRole("menuitemradio", { name: "90 days" }).click();
+  await expect(page.getByRole("img", { name: /^Availability over 90 days: \d/ })).toBeVisible();
+
+  await page.goto("/admin/upstreams/xx-9");
+  await expect(page.getByText("The gateway has no upstream of this name.")).toBeVisible();
 });
 
 test("the window menu works from the keyboard", async ({ page }) => {
@@ -41,7 +49,7 @@ test("the window menu works from the keyboard", async ({ page }) => {
   await trigger.focus();
   await page.keyboard.press("Enter");
   await expect(page.getByRole("menuitemradio", { name: "1 min" })).toHaveAttribute("aria-checked", "true");
-  await page.keyboard.press("ArrowDown");
+  await pressIn(page.getByRole("menu"), "ArrowDown");
   await page.keyboard.press("Enter");
   await expect(page.getByRole("menu")).toBeHidden();
   await expect(page.getByRole("button", { name: "Window: 5 min" })).toBeFocused();

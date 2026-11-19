@@ -2,10 +2,14 @@
 // descriptors served by Connect's router transport from a Simulation.
 // Methods without a fake answer Unimplemented, like the daemon before their issue lands.
 
-import { durationMs, timestampMs } from "@bufbuild/protobuf/wkt";
+import { create } from "@bufbuild/protobuf";
+import { type Duration, durationMs, timestampMs } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, createRouterTransport, type Interceptor, type Transport } from "@connectrpc/connect";
+import { type ConnectionSnapshot, ConnectionService } from "../gen/lotsman/v1/connection_pb";
 import { type HistoryRequest, HistoryService } from "../gen/lotsman/v1/history_pb";
-import { type StatusSnapshot, StatusService, type WatchStatusRequest } from "../gen/lotsman/v1/status_pb";
+import { ProfileService } from "../gen/lotsman/v1/profile_pb";
+import { StatusService, TrafficSchema } from "../gen/lotsman/v1/status_pb";
+import { UserService } from "../gen/lotsman/v1/user_pb";
 import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
 import { createSelfService, type FakeSelfOptions } from "./fakeSelf";
 import { Simulation } from "./simulation";
@@ -43,8 +47,35 @@ export function createFakeTransport(options: FakeOptions = {}): Transport {
     service(StatusService, {
       watch: (req, ctx) => {
         operator();
-        return watch(req, ctx.signal, () => sim.snapshot());
+        return watch(req.interval, ctx.signal, () => sim.snapshot());
       },
+    });
+    service(ConnectionService, {
+      watch: (req, ctx) => {
+        operator();
+        // Like the daemon, each stream meters on its own: its first snapshot has bytes but no rates.
+        let first = true;
+        return watch(req.interval, ctx.signal, () => {
+          const s = sim.connections(req.peerId);
+          if (first) withoutRates(s);
+          first = false;
+          return s;
+        });
+      },
+    });
+    service(ProfileService, {
+      list: () => (operator(), sim.listProfiles()),
+      put: (req) => (operator(), { warnings: sim.putProfile({ name: req.profile?.name ?? "", prefer: req.profile?.prefer ?? [] }) }),
+      delete: (req) => (operator(), sim.deleteProfile(req.name), {}),
+    });
+    service(UserService, {
+      list: () => (operator(), { users: sim.listUsers() }),
+      addDevice: (req) => (operator(), sim.addDevice(req.user, req.device, req.profile)),
+      removeDevice: (req) => (operator(), sim.removeDevice(req.user, req.device, req.profile), {}),
+      removeUser: (req) => (operator(), sim.removeUser(req.user), {}),
+      getConfig: (req) => (operator(), { peerId: req.peerId, config: sim.config(req.peerId) }),
+      issueLink: (req) => (operator(), { token: sim.issueLink(req.user) }),
+      revokeLink: (req) => (operator(), sim.revokeLink(req.user), {}),
     });
     service(UserSelfService, createSelfService(sim, clock, watch, history, options.self));
     service(HistoryService, {
@@ -54,9 +85,14 @@ export function createFakeTransport(options: FakeOptions = {}): Transport {
   }, { transport: { interceptors: options.interceptors } });
 }
 
+/** A connections snapshot as the first of a stream has it: no rates yet. */
+function withoutRates(s: ConnectionSnapshot): void {
+  for (const c of s.connections) c.traffic = create(TrafficSchema, { downBytes: c.traffic?.downBytes, upBytes: c.traffic?.upBytes });
+}
+
 /** A snapshot now and then every interval (at least 1 s, as the daemon does), until aborted. */
-async function* watch(req: WatchStatusRequest, signal: AbortSignal, snapshot: () => StatusSnapshot) {
-  const interval = Math.max(1000, req.interval ? durationMs(req.interval) : 1000);
+async function* watch<T>(every: Duration | undefined, signal: AbortSignal, snapshot: () => T) {
+  const interval = Math.max(1000, every ? durationMs(every) : 1000);
   while (!signal.aborted) {
     yield snapshot();
     await sleep(interval, signal);

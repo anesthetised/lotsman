@@ -5,13 +5,14 @@ import tailwindcss from "@tailwindcss/vite";
 import type { Plugin } from "vite";
 import { defineConfig } from "vitest/config";
 
-// The CSP the panel should send. `vite preview` sends it too, so the
-// Playwright smoke test fails if the build ever needs inline script or style.
+// The CSP the panel sends (internal/web/headers.go), spelled out. `vite
+// preview` sends it too, so the Playwright tests fail if the build ever needs
+// inline script or style, or a data: image (QR codes are inline SVG).
 const csp = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self'",
-  "img-src 'self' data:",
+  "img-src 'self'",
   "connect-src 'self'",
   "object-src 'none'",
   "base-uri 'none'",

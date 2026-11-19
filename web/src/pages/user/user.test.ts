@@ -10,7 +10,6 @@ import { confFilename } from "./config";
 import { failureOf, failureText } from "./errors";
 import { chartPaths, mergeHistory } from "./history";
 import { changeProfile, ProfileChangeError } from "./profileChange";
-import { qrShape } from "./qr";
 
 const failure = (code: Code, message = "") => failureOf(new ConnectError(message, code));
 
@@ -120,28 +119,6 @@ describe("confFilename", () => {
     ["телефон", "профиль", "lotsman.conf"],
   ])("%s / %s → %s", (device, profile, want) => {
     expect(confFilename(device, profile)).toBe(want);
-  });
-});
-
-describe("qrShape", () => {
-  test("draws a config of the size the daemon issues as one path inside a quiet zone", () => {
-    const text = `[Interface]\n${"x".repeat(600)}`;
-    const { size, path } = qrShape(text);
-    // Version 20 holds 858 bytes at the lowest correction level: 97 modules, plus 4 on each side.
-    expect(size).toBeGreaterThan(8);
-    expect((size - 8 - 17) % 4).toBe(0);
-    expect(path).toMatch(/^M\d+ \d+h\d+v1h-\d+z/);
-    const xs = [...path.matchAll(/M(\d+) (\d+)h(\d+)/g)].map((m) => [Number(m[1]), Number(m[2]), Number(m[3])] as const);
-    for (const [x, y, w] of xs) {
-      expect(x).toBeGreaterThanOrEqual(4);
-      expect(y).toBeGreaterThanOrEqual(4);
-      expect(x + w).toBeLessThanOrEqual(size - 4);
-      expect(y).toBeLessThan(size - 4);
-    }
-  });
-
-  test("throws for text that no QR code holds", () => {
-    expect(() => qrShape("x".repeat(4000))).toThrow();
   });
 });
 

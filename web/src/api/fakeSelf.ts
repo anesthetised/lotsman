@@ -7,7 +7,8 @@ import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, type HandlerContext, type ServiceImpl, type Transport } from "@connectrpc/connect";
 import { type HistoryRequest, type HistoryResponse, HistoryResponseSchema, SampleSchema } from "../gen/lotsman/v1/history_pb";
 import { ListProfilesResponseSchema, ProfileSchema } from "../gen/lotsman/v1/profile_pb";
-import type { StatusSnapshot, WatchStatusRequest } from "../gen/lotsman/v1/status_pb";
+import type { Duration } from "@bufbuild/protobuf/wkt";
+import type { StatusSnapshot } from "../gen/lotsman/v1/status_pb";
 import { DeviceConfigSchema } from "../gen/lotsman/v1/user_pb";
 import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
 import type { Simulation } from "./simulation";
@@ -17,8 +18,11 @@ export const FAKE_USER = "alice";
 
 const token = (name: string) => `fake-${name}`.padEnd(43, "_");
 
-/** Links with a scenario of their own; the fake takes any other token as the ordinary user. */
-export const FAKE_LINKS = {
+/**
+ * Links with a scenario of their own; the fake takes any other token as the ordinary user.
+ * A pure IIFE, so a production build drops it with the rest of the fake.
+ */
+export const FAKE_LINKS = /* @__PURE__ */ (() => ({
   ordinary: token("ordinary"),
   /** A link that was revoked or rotated: every call is Unauthenticated. */
   revoked: token("revoked"),
@@ -28,7 +32,7 @@ export const FAKE_LINKS = {
   empty: token("empty"),
   /** The panel cannot reach the daemon. */
   unavailable: token("unavailable"),
-} as const;
+}) as const)();
 
 const NAME_LIMIT = 64; // bytes
 
@@ -61,7 +65,7 @@ interface Acting {
 export function createSelfService(
   sim: Simulation,
   clock: () => number,
-  watch: (req: WatchStatusRequest, signal: AbortSignal, snapshot: () => StatusSnapshot) => AsyncIterable<StatusSnapshot>,
+  watch: (every: Duration | undefined, signal: AbortSignal, snapshot: () => StatusSnapshot) => AsyncIterable<StatusSnapshot>,
   history: (kind: "upstream" | "peer", req: HistoryRequest, allowed: boolean) => HistoryResponse,
   options: FakeSelfOptions = {},
 ): Partial<ServiceImpl<typeof UserSelfService>> {
@@ -100,7 +104,7 @@ export function createSelfService(
 
   return {
     get: (_, ctx) => sim.user(acting(ctx).user),
-    watch: (req, ctx) => watch(req, ctx.signal, () => sim.snapshot(acting(ctx).user)),
+    watch: (req, ctx) => watch(req.interval, ctx.signal, () => sim.snapshot(acting(ctx).user)),
 
     addDevice: (req, ctx) => {
       const { user, maxDevices } = acting(ctx);
