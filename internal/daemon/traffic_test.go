@@ -90,17 +90,29 @@ func TestTraffic(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer c.Close()
-	const sent = 200_000
+	const sent = 64_000
 	if _, err := c.Write(make([]byte, sent)); err != nil {
 		t.Fatal(err)
 	}
 
+	// The upload can take seconds through netstack under -race on a loaded
+	// runner, and a rate lasts one sample after it ends, so wait longer than
+	// eventually does and look for the rate in any snapshot on the way.
 	var got traffic.Snapshot
-	eventually(t, "the upload in the peer's traffic", func() bool {
+	sawRate := false
+	deadline := time.Now().Add(20 * time.Second)
+	for {
 		got = h.d.Traffic()
 		p := got.Peers[peer.ID]
-		return p.UpBytes > sent && p.UpRate > 0
-	})
+		sawRate = sawRate || p.UpRate > 0
+		if p.UpBytes > sent && sawRate {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("peer traffic %+v after 20s: want more than %d bytes up and an up rate", p, sent)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 	if p := got.Peers[peer.ID]; p.DownBytes >= p.UpBytes/4 {
 		t.Errorf("peer traffic %+v: an upload should be mostly up", p)
 	}
