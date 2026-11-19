@@ -16,6 +16,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/dataplane/linux"
+	"github.com/anesthetised/lotsman/internal/flows"
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/metrics"
 	"github.com/anesthetised/lotsman/internal/proxy/helper"
@@ -68,6 +69,7 @@ func serve(ctx context.Context, configPath string, level slog.Level) error {
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 	go handleSignals(ctx, d, configPath, hup, usr1, log)
+	go enableAccounting(ctx, d, log)
 	// serve returns only after the publisher has removed the status file, so
 	// the locks are not released while it can still delete a successor's.
 	published := make(chan struct{})
@@ -136,6 +138,20 @@ func handleSignals(ctx context.Context, d *daemon.Daemon, configPath string, hup
 				log.Error("reconcile after SIGUSR1", "err", err)
 			}
 		}
+	}
+}
+
+// enableAccounting turns on conntrack's byte counters, which live connections
+// need, once the daemon's firewall has loaded nf_conntrack. The gateway works
+// without them; connections then show no bytes.
+func enableAccounting(ctx context.Context, d *daemon.Daemon, log *slog.Logger) {
+	select {
+	case <-ctx.Done():
+		return
+	case <-d.Ready():
+	}
+	if err := flows.EnableAccounting(); err != nil {
+		log.Warn("live connections will show no traffic", "err", err)
 	}
 }
 

@@ -6,6 +6,14 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Live connections from conntrack (core of #131; the control API wiring follows #127): the new
+  `internal/flows` package reads the kernel's conntrack table over netlink, keeps clients' flows
+  into the internet, maps each to its peer and current upstream, and computes per-flow byte rates
+  from the deltas between polls (down = towards the client), at most 500 flows per snapshot,
+  fastest first. `serve` turns on `net.netfilter.nf_conntrack_acct` once its firewall is up, and
+  logs a warning and carries on without it; `deploy/uninstall.sh` restores the
+  `nf_conntrack_acct_before=` value of the manifest. Connections are live only: never stored or
+  logged, numeric destinations, no reverse DNS. No new dependency.
 - VLESS over gRPC: a `vless` upstream's link may use `type=grpc` with `security=reality` and no
   `flow` (Vision runs over TCP only; a grpc link with a flow is refused). `serviceName` (also
   Xray's `/<service>/<stream>` form), `mode` (`gun`, the default, or `multi`) and `authority` are

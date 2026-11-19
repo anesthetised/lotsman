@@ -111,6 +111,13 @@ fi
 if ipf=$(sed -n 's/^ip_forward_before=//p' "$manifest") && [ -n "$ipf" ]; then
 	sysctl -qw net.ipv4.ip_forward="$ipf"
 fi
+# Conntrack byte accounting, which the daemon turns on for live connections.
+# The key exists only while nf_conntrack is loaded; a fresh load starts at 0.
+if acct=$(sed -n 's/^nf_conntrack_acct_before=//p' "$manifest") && [ -n "$acct" ] &&
+	[ -e /proc/sys/net/netfilter/nf_conntrack_acct ]; then
+	sysctl -qw net.netfilter.nf_conntrack_acct="$acct" ||
+		echo "cannot restore net.netfilter.nf_conntrack_acct=$acct: set it by hand" >&2
+fi
 
 # Every path the install created, deepest first.
 sed -n 's/^path=//p' "$manifest" | awk '{print length, $0}' | sort -rn | cut -d' ' -f2- | while read -r p; do

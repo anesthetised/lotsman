@@ -44,12 +44,18 @@ before the install. It reads `/etc/lotsman/INSTALLED`, a manifest you write at i
 
 ```
 ip_forward_before=0
+nf_conntrack_acct_before=0
 path=/usr/local/bin/lotsman
 path=/etc/systemd/system/lotsman.service
 path=/etc/lotsman
 path=/var/lib/lotsman
 user=lotsman-proxy
 ```
+
+Take the two `_before` values from `sysctl -n net.ipv4.ip_forward` and
+`sysctl -n net.netfilter.nf_conntrack_acct` before the first start. Leave
+`nf_conntrack_acct_before=` empty when the second prints nothing: `nf_conntrack` is not loaded
+yet, and a fresh load starts at 0 (see [Live connections](#live-connections)).
 
 Add `user=lotsman-proxy` only if your install created that user (the `useradd` above ran): the
 script removes each `user=` entry with `userdel`, so a user that existed before Lotsman is left
@@ -69,7 +75,9 @@ docker exec lotsman lotsman user add alice -profile nl
 ```
 
 The two `--sysctl` flags matter: `/proc/sys` is read-only inside the container, so Lotsman can
-only verify them, not set them.
+only verify them, not set them. For byte counts in [live connections](#live-connections), also
+pass `--sysctl net.netfilter.nf_conntrack_acct=1`; the container may fail to start with it
+when the host has no `nf_conntrack` loaded.
 
 ## Upgrading
 
@@ -569,6 +577,40 @@ scrape_configs:
     static_configs:
       - targets: ["10.77.0.1:9100"]
 ```
+
+## Live connections
+
+The operator's live connections view shows the connections each client has open through the
+gateway, with their throughput. Forwarding happens in the kernel, so the daemon reads them from the
+kernel's connection tracking table (conntrack), in its own network namespace.
+
+Byte counts need `net.netfilter.nf_conntrack_acct=1`. `serve` sets it once it is up, after its
+firewall has loaded `nf_conntrack`; it does not reset it on exit, and
+[uninstall](#removing-it) restores the value the manifest recorded. The setting is per network
+namespace, and only connections opened after it was turned on are counted. If it cannot be set (no
+`nf_conntrack`, a read-only `/proc/sys`), the daemon logs "live connections will show no traffic"
+and the gateway works as before; the connections are listed with zero bytes.
+
+Who sees what:
+
+- Operators only. Every operator sees every client's connections; a user's own page never shows
+  connections, not even their own.
+- Per connection: the client (peer), protocol, the client's tunnel IP and port, the destination IP
+  and port, the client's current upstream, when it started, and bytes and rate in each direction
+  (down is towards the client). Destinations are numeric: no reverse DNS, no hostnames, no SNI, no
+  payload. A client's DNS queries appear as UDP connections to its resolver.
+- The upstream is the one the client's new connections take now. A connection that stayed on the
+  previous upstream after a failover (see [How failover behaves](#how-failover-behaves)) shows the
+  new one.
+- The start time is the kernel's with `net.netfilter.nf_conntrack_timestamp=1`, which Lotsman does
+  not set. Without it, a connection that opens while the view is open starts when it was first
+  seen, and one that was already open has no start time.
+- At most 500 connections per update, fastest first; the update says when more were left out.
+
+Nothing is kept at rest. The table is read only while someone watches, on every update of that
+view, and each reading is dropped once it is sent: connections never reach the database, the
+status file, the metrics or the logs. The kernel's own table is short-lived and visible to root on
+the host anyway (`conntrack -L`); Lotsman adds no record of it.
 
 ## How failover behaves
 
