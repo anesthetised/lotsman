@@ -59,6 +59,31 @@ func TestProfileEditReroutesPeers(t *testing.T) {
 	}
 }
 
+// A renamed profile keeps its peers on their upstream, and the status names
+// the new profile.
+func TestProfileRenameKeepsPeersRouted(t *testing.T) {
+	h := newHarness(t)
+	h.st.CreateUser("alice")
+	peer, _ := h.st.AddPeer("alice", store.DefaultDevice, "eu", h.cfg.Subnet)
+	h.run(t)
+	routedVia := func() string { got, _ := h.dp.RouteOf(peer.IP); return got }
+	eventually(t, "initial routing", func() bool { return routedVia() == "lm-up-nl" })
+
+	if err := h.st.RenameProfile("eu", "Europe"); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.d.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if got := routedVia(); got != "lm-up-nl" {
+		t.Errorf("peer routed via %q after the rename, want lm-up-nl", got)
+	}
+	st := h.d.Status()
+	if len(st.Peers) != 1 || st.Peers[0].Profile != "Europe" || st.Peers[0].Upstream != "nl" {
+		t.Errorf("status peers = %+v, want one on nl with profile Europe", st.Peers)
+	}
+}
+
 func TestPutProfileValidatesAgainstRunningUpstreams(t *testing.T) {
 	h := newHarness(t)
 	before, _ := h.st.ListProfiles()

@@ -47,8 +47,8 @@ func (m Match) String() string {
 // removed; only a profile with no usable tier at all is an error. Warnings
 // reports the rest.
 func (c *Config) ValidateProfile(p Profile) error {
-	if !profileNameRe.MatchString(p.Name) {
-		return fmt.Errorf("profile name %q must match %s", p.Name, profileNameRe)
+	if err := ValidateProfileName(p.Name); err != nil {
+		return err
 	}
 	if len(p.Prefer) > 0 && !slices.ContainsFunc(c.preferTiers(p), func(t preferTier) bool { return t.own > 0 }) {
 		return fmt.Errorf("profile %q: prefer matches no upstream", p.Name)
@@ -69,8 +69,8 @@ var matchValueRe = regexp.MustCompile(`^[^\s,=]{1,64}$`)
 func (c *Config) ValidateProfileWrite(p Profile) error {
 	// Every tier matching implies the usable tier ValidateProfile wants, so
 	// only the name is checked here, before the more precise tier errors.
-	if !profileNameRe.MatchString(p.Name) {
-		return fmt.Errorf("profile name %q must match %s", p.Name, profileNameRe)
+	if err := ValidateProfileName(p.Name); err != nil {
+		return err
 	}
 	for j, m := range p.Prefer {
 		for _, f := range [...]struct{ key, val string }{{"geo", m.Geo}, {"provider", m.Provider}} {
@@ -78,14 +78,22 @@ func (c *Config) ValidateProfileWrite(p Profile) error {
 				return fmt.Errorf("profile %q: tier %d: %s %q must be at most 64 characters without spaces, commas or =", p.Name, j+1, f.key, f.val)
 			}
 		}
-		if m.Tag != "" && !profileNameRe.MatchString(m.Tag) {
-			return fmt.Errorf("profile %q: tier %d: tag %q must match %s", p.Name, j+1, m.Tag, profileNameRe)
+		if m.Tag != "" && !tagRe.MatchString(m.Tag) {
+			return fmt.Errorf("profile %q: tier %d: tag %q must match %s", p.Name, j+1, m.Tag, tagRe)
 		}
 	}
 	for j, t := range c.preferTiers(p) {
 		if t.matched == 0 {
 			return fmt.Errorf("profile %q: tier %d %v matches no upstream", p.Name, j+1, p.Prefer[j])
 		}
+	}
+	return nil
+}
+
+// ValidateProfileName checks a profile's name, as for a rename.
+func ValidateProfileName(name string) error {
+	if !profileNameRe.MatchString(name) {
+		return fmt.Errorf("profile name %q must match %s", name, profileNameRe)
 	}
 	return nil
 }

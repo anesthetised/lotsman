@@ -527,12 +527,22 @@ lotsman profile add de geo=DE,provider=acme geo=DE  # an upstream must match eve
 lotsman profile add auto                            # no tiers: any upstream
 lotsman profile set eu tag=eu                       # replaces every tier
 lotsman profile list
+lotsman profile rename nl Netherlands               # its peers follow
 lotsman profile rm de                               # refused while a peer uses it
 ```
 
 Each argument after the name is one tier, best first, so no quoting is needed: `key=value` pairs
 joined by commas, with keys `geo`, `provider` and `tag`, or `any` for every upstream. `profile list`
-prints tiers in the same form. Names are lowercase letters, digits and `-`, up to 32 characters.
+prints tiers in the same form. Names are Latin letters, digits and `-`, up to 32 characters, and
+users see them, so `Netherlands` reads better than `nl`. Names are unique ignoring case: with
+`Netherlands` stored, `netherlands` is refused.
+
+`profile rename OLD NEW` renames a profile and moves its peers to the new name in one transaction.
+Nothing a client holds changes: a peer keeps its keys, address and traffic history, so its config
+stays valid and its tunnel stays up. Afterwards `user show`, `user rm` and `user add` take the new
+name; the `profile` label of the peer metrics changes with it. A config saved from the web panel
+after the rename gets a file name from the new profile name, and the Amnezia apps take the tunnel's
+name from that file name, cut to 15 characters.
 
 `profile add` and `set` check the profile against the upstreams in `lotsman.yaml`: every tier must
 match at least one upstream, so a typo in a geo or provider is refused, and a `geo` or `provider`

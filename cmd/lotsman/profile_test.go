@@ -12,6 +12,44 @@ import (
 	"github.com/anesthetised/lotsman/internal/config"
 )
 
+// A renamed profile takes its peers along; their configs do not change.
+func TestProfileRenameCLI(t *testing.T) {
+	cfg := testConfig(t) // profiles nl (geo=NL) and auto
+	conf, err := capture(t, "-config", cfg, "user", "add", "alice", "-profile", "nl")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := capture(t, "-config", cfg, "profile", "rename", "nl", "Netherlands"); err != nil || out != "" {
+		t.Fatalf("profile rename: %v, %q", err, out)
+	}
+	list, _ := capture(t, "-config", cfg, "profile", "list")
+	if got := tableRow(list, "Netherlands"); !reflect.DeepEqual(got, []string{"Netherlands", "1", "geo=NL"}) {
+		t.Errorf("profile list row = %q\n%s", got, list)
+	}
+	if again, err := capture(t, "-config", cfg, "user", "show", "alice", "-profile", "Netherlands"); err != nil || again != conf {
+		t.Errorf("config after rename: %v\n%s\nwant\n%s", err, again, conf)
+	}
+
+	before := profilesOf(t, cfg)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"profile", "rename", "nl", "fi"}, `profile "nl": not found`},
+		{[]string{"profile", "rename", "auto", "NETHERLANDS"}, "the name is taken, ignoring case"},
+		{[]string{"profile", "rename", "auto", "Bad Name"}, `profile name "Bad Name" must match`},
+		{[]string{"profile", "rename", "auto"}, "want OLD NEW"},
+		{[]string{"profile", "rename", "auto", "-x"}, "want OLD NEW"},
+	} {
+		if _, err := capture(t, append([]string{"-config", cfg}, tc.args...)...); err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%q: err = %v, want %q", tc.args, err, tc.want)
+		}
+		if after := profilesOf(t, cfg); !reflect.DeepEqual(after, before) {
+			t.Fatalf("%q changed the profiles:\nbefore %+v\nafter  %+v", tc.args, before, after)
+		}
+	}
+}
+
 // profilesOf reads the test config's profiles back from the store.
 func profilesOf(t *testing.T, cfg string) []config.Profile {
 	t.Helper()
@@ -75,7 +113,8 @@ func TestProfileCLI(t *testing.T) {
 		{[]string{"profile", "set", "fi", "geo=NL"}, "use `profile add`"},
 		{[]string{"profile", "add", "fi", "geo=FI"}, `profile "fi": tier 1 geo=FI matches no upstream`},
 		{[]string{"profile", "set", "nl", "geo=NL", "geo=FI"}, `profile "nl": tier 2 geo=FI matches no upstream`},
-		{[]string{"profile", "add", "Bad", "geo=NL"}, `profile name "Bad" must match`},
+		{[]string{"profile", "add", "Bad Name", "geo=NL"}, `profile name "Bad Name" must match`},
+		{[]string{"profile", "add", "NL", "geo=NL"}, "names are unique ignoring case"},
 		{[]string{"profile", "add"}, "NAME is required"},
 		{[]string{"profile", "add", "-h"}, "NAME is required"},
 		{[]string{"profile", "add", "fi", "country=NL"}, `tier "country=NL": want key=value pairs`},

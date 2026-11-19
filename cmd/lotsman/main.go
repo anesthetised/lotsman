@@ -29,6 +29,7 @@ Commands:
   profile list                list profiles, their peers and preference tiers
   profile add NAME [TIER...]  create profile NAME; each TIER is one preference, best first
   profile set NAME [TIER...]  replace the tiers of profile NAME
+  profile rename OLD NEW      rename a profile; its peers follow and their configs stay valid
   profile rm NAME             remove a profile no peer uses
   profile import FILE         copy the profiles: key of an older lotsman.yaml into the store
   user add NAME -profile P [-device D] [-qr]
@@ -119,6 +120,8 @@ func run(args []string) error {
 		return profileList(*configPath)
 	case "profile add", "profile set":
 		return profilePut(*configPath, cmd, rest)
+	case "profile rename":
+		return profileRename(*configPath, rest)
 	case "profile rm":
 		return profileRemove(*configPath, rest)
 	case "profile import":

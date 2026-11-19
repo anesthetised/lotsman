@@ -59,7 +59,7 @@ func profilePut(configPath, cmd string, args []string) error {
 	if err := e.cfg.ValidateProfileWrite(p); err != nil {
 		return err
 	}
-	put, hint := e.store.AddProfile, "use `profile set` to change it"
+	put, hint := e.store.AddProfile, "names are unique ignoring case; use `profile set` to change it"
 	if cmd == "profile set" {
 		put, hint = e.store.SetProfile, "use `profile add` to create it"
 	}
@@ -88,6 +88,32 @@ func profileRemove(configPath string, args []string) error {
 	if err != nil {
 		return fmt.Errorf("profile %q: %w", name, err)
 	}
+	return nil
+}
+
+// profileRename renames a profile and moves its peers to the new name. Their
+// clients keep working: a peer's keys and address do not change.
+func profileRename(configPath string, args []string) error {
+	if len(args) != 2 || slices.ContainsFunc(args, func(a string) bool { return a == "" || a[0] == '-' }) {
+		return errors.New("profile rename: want OLD NEW")
+	}
+	from, to := args[0], args[1]
+	if err := config.ValidateProfileName(to); err != nil {
+		return err
+	}
+	e, err := openEnv(configPath)
+	if err != nil {
+		return err
+	}
+	defer e.store.Close()
+	err = e.store.RenameProfile(from, to)
+	if errors.Is(err, store.ErrExists) {
+		return fmt.Errorf("profile %q: the name is taken, ignoring case; see `profile list`", to)
+	}
+	if err != nil {
+		return fmt.Errorf("profile %q: %w", from, err)
+	}
+	nudgeDaemon(e)
 	return nil
 }
 

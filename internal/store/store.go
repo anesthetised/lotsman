@@ -16,6 +16,7 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
+	"github.com/anesthetised/lotsman/internal/config"
 )
 
 var (
@@ -454,13 +455,42 @@ func (s *Store) ListPeers() ([]Peer, error) {
 	return s.queryPeers("")
 }
 
+// PeersAndProfiles reads every peer and every profile in one transaction,
+// so a profile renamed in between cannot leave a peer naming a profile the
+// other list lacks.
+func (s *Store) PeersAndProfiles() ([]Peer, []config.Profile, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	peers, err := queryPeers(tx, "")
+	if err != nil {
+		return nil, nil, err
+	}
+	profiles, err := listProfiles(tx)
+	if err != nil {
+		return nil, nil, err
+	}
+	return peers, profiles, nil
+}
+
 // UserPeers returns every peer of one user, by device and profile.
 func (s *Store) UserPeers(user string) ([]Peer, error) {
 	return s.queryPeers(`WHERE u.name = ?`, user)
 }
 
 func (s *Store) queryPeers(where string, args ...any) ([]Peer, error) {
-	rows, err := s.db.Query(`SELECT p.id, u.name, p.device, p.profile, p.private_key, p.public_key, p.ip, p.created_at
+	return queryPeers(s.db, where, args...)
+}
+
+// querier is a *sql.DB or a *sql.Tx.
+type querier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+func queryPeers(q querier, where string, args ...any) ([]Peer, error) {
+	rows, err := q.Query(`SELECT p.id, u.name, p.device, p.profile, p.private_key, p.public_key, p.ip, p.created_at
 		FROM peers p JOIN users u ON u.id = p.user_id `+where+` ORDER BY u.name, p.device, p.profile`, args...)
 	if err != nil {
 		return nil, err

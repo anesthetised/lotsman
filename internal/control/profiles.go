@@ -68,6 +68,8 @@ func profileError(name string, err error) error {
 	switch {
 	case errors.Is(err, daemon.ErrInvalidProfile):
 		return connect.NewError(connect.CodeInvalidArgument, err.Error())
+	case errors.Is(err, store.ErrExists):
+		return connect.NewError(connect.CodeAlreadyExists, fmt.Sprintf("profile %q: another profile has this name, ignoring case", name))
 	case errors.Is(err, store.ErrInUse):
 		return connect.NewError(connect.CodeFailedPrecondition, fmt.Sprintf("profile %q is in use: remove its peers first", name))
 	case errors.Is(err, store.ErrNotFound):

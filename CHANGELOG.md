@@ -6,6 +6,11 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `lotsman profile rename OLD NEW`: renames a profile and moves its peers with it in one
+  transaction; their keys, addresses and history stay, so their configs keep working. Profile names
+  may now be capitalized (`Netherlands`) and are unique ignoring case; tags stay lowercase. The
+  daemon reads peers and profiles in one transaction, so a rename never leaves a peer unrouted for a
+  pass, and its status shows the new name at once.
 - Web panel deployment guide (#138): the operations guide covers the install permissions
   (`/etc/lotsman` `0750 root:lotsman-web`; the base install now creates `lotsman.yaml` `0600` and
   `upstreams/` `0700`), recovering a unit stopped by

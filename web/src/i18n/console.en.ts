@@ -50,10 +50,10 @@ export const consoleEn = {
     formDescription: "Saving applies at once: the devices that use the profile move to the upstream it now picks.",
     nameProblem: {
       required: "Give the profile a name.",
-      pattern: "Lowercase letters, digits and -, up to 32 characters, starting with a letter or digit.",
-      taken: "A profile of this name exists. Edit that one instead.",
+      pattern: "Latin letters, digits and -, up to 32 characters, starting with a letter or digit.",
+      taken: "A profile of this name exists, ignoring case. Edit that one instead.",
     },
-    nameHint: "Lowercase letters, digits and -.",
+    nameHint: "Latin letters, digits and -, e.g. Albania.",
     nameFixed: "The name cannot change; create a new profile instead.",
     tiersHint: "An upstream must match every field of a tier; an empty field matches anything, so a tier with no fields is any.",
     noTiers: "No tiers: any upstream, lowest latency first.",

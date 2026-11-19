@@ -26,10 +26,10 @@ test("the profile form checks the name and the tiers, suggests upstream labels, 
   await waitFor(() => expect(name.getAttribute("aria-invalid")).toBe("true"));
   expect(dialog.getByText("Give the profile a name.").id).toBe(name.getAttribute("aria-describedby"));
 
-  input(name, "EU");
-  await dialog.findByText(/^Lowercase letters, digits and -, up to 32 characters/);
+  input(name, "Bad Name");
+  await dialog.findByText(/^Latin letters, digits and -, up to 32 characters/);
   input(name, "default");
-  await dialog.findByText("A profile of this name exists. Edit that one instead.");
+  await dialog.findByText("A profile of this name exists, ignoring case. Edit that one instead.");
 
   input(name, "eu");
   await waitFor(() => expect(name.getAttribute("aria-invalid")).toBeNull());
