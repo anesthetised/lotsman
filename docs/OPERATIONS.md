@@ -14,8 +14,8 @@
 ```bash
 just build
 sudo install -m 0755 dist/lotsman-linux-amd64 /usr/local/bin/lotsman
-sudo mkdir -p /etc/lotsman/upstreams
-sudo cp deploy/lotsman.example.yaml /etc/lotsman/lotsman.yaml
+sudo install -d -m 0700 /etc/lotsman /etc/lotsman/upstreams
+sudo install -m 0600 deploy/lotsman.example.yaml /etc/lotsman/lotsman.yaml
 sudo cp deploy/lotsman.service /etc/systemd/system/
 getent passwd lotsman-proxy >/dev/null || sudo useradd --system --user-group --no-create-home \
   --shell /usr/sbin/nologin lotsman-proxy
@@ -71,6 +71,19 @@ Add `user=lotsman-proxy` only if your install created that user (the `useradd` a
 `group=lotsman-web` only if it created that group: the script removes each `user=` entry with
 `userdel` and then each `group=` entry with `groupdel`, so a user or group that existed before
 Lotsman is left alone. If either fails, the script says so and carries on.
+
+If you installed Caddy for the [web panel](#reverse-proxy) from Caddy's apt repository, add:
+
+```
+package=caddy
+path=/etc/apt/sources.list.d/caddy-stable.list
+path=/usr/share/keyrings/caddy-stable-archive-keyring.gpg
+```
+
+The script removes the `path=` entries with the rest and then runs `apt-get purge -y` on every
+`package=` entry (Debian and Ubuntu only). Record `package=caddy` only if the install put Caddy
+there for the panel: a Caddy that was already on the host, serving other sites, would be purged
+too.
 
 ### Docker
 
@@ -713,17 +726,35 @@ Install, after the gateway itself:
 ```bash
 getent passwd lotsman-web >/dev/null || sudo useradd --system --gid lotsman-web --no-create-home \
   --shell /usr/sbin/nologin lotsman-web
+sudo chgrp lotsman-web /etc/lotsman && sudo chmod 0750 /etc/lotsman
+sudo chmod 0600 /etc/lotsman/lotsman.yaml && sudo chmod 0700 /etc/lotsman/upstreams  # older installs
 sudo install -m 0640 -g lotsman-web deploy/web.example.yaml /etc/lotsman/web.yaml
 sudoedit /etc/lotsman/web.yaml               # public_url at least
 sudo cp deploy/lotsman-web.service /etc/systemd/system/
 sudo systemctl daemon-reload && sudo systemctl enable --now lotsman-web
 ```
 
+The panel must be able to read `web.yaml`, so `/etc/lotsman` is `0750 root:lotsman-web` and
+`web.yaml` `0640 root:lotsman-web`. With the directory `0700 root` the panel cannot read its
+config and fails at start. The group must not read anything else there: the install above makes
+`lotsman.yaml` `0600` and `upstreams/` `0700`, and the second line fixes an older install that
+copied `lotsman.yaml` with `cp` (`0644`).
+
 Record `user=lotsman-web` and the unit and state paths in the [manifest](#removing-it). If the
 daemon was already running when the group was created, restart it once so the socket gets the
 group.
 
-Then enroll the first operator's passkey, as below.
+If the panel fails to start several times in a row (a config it cannot read, a bad key), systemd
+stops retrying: the unit allows 5 starts within 300 seconds (`StartLimitBurst=5`,
+`StartLimitIntervalSec=300` in `deploy/lotsman-web.service`). Read the cause with `journalctl -u
+lotsman-web`, fix it, then clear the counter before starting again:
+
+```bash
+sudo systemctl reset-failed lotsman-web && sudo systemctl start lotsman-web
+```
+
+Then set up the [reverse proxy](#reverse-proxy), enroll the first operator's passkey, as below,
+and run through [Checking it](#checking-it).
 
 ### Panel configuration
 
@@ -756,7 +787,7 @@ The first operator, or anyone locked out, gets in from the server:
 sudo lotsman web enroll
 ```
 
-It prints a one-time link, such as `https://vpn.example.com/enroll#…`, valid for 15 minutes. Open
+It prints a one-time link, such as `https://panel.example.com/enroll#…`, valid for 15 minutes. Open
 it in the browser that will keep the passkey, name the passkey (`laptop`), and follow the
 browser's prompt; the browser is then signed in. The command writes `web.db` directly, so the
 panel need not be running; run it as root or as `lotsman-web` (`sudo -u lotsman-web lotsman web
@@ -781,10 +812,34 @@ address (from `trusted_proxies`, see above; an IPv6 /64 counts as one): ten at o
 name (the RP ID) and will not offer it to another. Enroll again with `lotsman web enroll` after the
 change and revoke the old entries. A change of port or of the proxy alone keeps them.
 
-**Back up `web.db`** (in `state_dir`, with its `-wal` file if present, or with `sqlite3 web.db
-".backup web.db.bak"`) along with `lotsman.db`. It holds the passkeys' public keys and the
+The same change moves every [user link](#user-links): the tokens stay valid, because only their
+hashes are stored and the host is no part of them, but the links already sent say
+`https://old-host/u#…`, which the new setup does not serve. Issue each user's link again
+(`lotsman user link NAME`) and send it; that also ends the old one. Enrollment links are
+one-time and short-lived, so print new ones after the change.
+
+**Back up `web.db`** (in `state_dir`, `/var/lib/lotsman-web`; it is the panel's own state, the
+daemon's is `lotsman.db`) along with `lotsman.db`. It holds the passkeys' public keys and the
 sessions; it holds no private key, so a copy cannot sign anyone in, but losing it means
 enrolling every operator again with `lotsman web enroll`. Keep it `0600 lotsman-web`.
+
+The panel opens `web.db` in SQLite's WAL mode, so while it runs, recent changes live in
+`web.db-wal` and copying `web.db` alone can lose them or give an inconsistent file. Either take
+the copy with SQLite, which is safe while the panel runs (needs the `sqlite3` command line tool;
+run it as `lotsman-web` so no root-owned `-wal` or `-shm` file is left behind):
+
+```bash
+sudo -u lotsman-web sqlite3 /var/lib/lotsman-web/web.db ".backup /var/lib/lotsman-web/web.db.bak"
+```
+
+then move `web.db.bak` out of the state directory, or stop the panel first and copy the file
+with any `-wal` and `-shm` beside it:
+
+```bash
+sudo systemctl stop lotsman-web
+sudo cp -p /var/lib/lotsman-web/web.db* /root/backup/    # a directory only root can read
+sudo systemctl start lotsman-web
+```
 
 ### Reverse proxy
 
@@ -793,22 +848,33 @@ server-streaming calls that stay open for as long as the page is, so the proxy m
 response chunk on as it arrives (no response buffering) and must not time out an open response
 after a minute or two. It should set `X-Forwarded-For` and keep the browser's `Origin`.
 
-Caddy (it sets `X-Forwarded-For` itself; `flush_interval -1` turns response buffering off):
+Caddy gets and renews the certificate itself, provided `panel.example.com` resolves to this host
+and ports 80 and 443 reach it. It sets `X-Forwarded-For` itself. `flush_interval -1` turns response
+buffering off; without it the live views stall, because Caddy may hold back the chunks of a
+streaming response:
 
 ```
-vpn.example.com {
+panel.example.com {
 	reverse_proxy 127.0.0.1:8080 {
 		flush_interval -1
 	}
 }
 ```
 
-nginx:
+If your distribution's `caddy` package is old or missing, Debian and Ubuntu hosts can use Caddy's
+own apt repository (see Caddy's installation page for the current commands); it adds
+`/etc/apt/sources.list.d/caddy-stable.list` and
+`/usr/share/keyrings/caddy-stable-archive-keyring.gpg` and installs the `caddy` package, which
+runs as its own service from `/etc/caddy/Caddyfile`. Record all three in the
+[manifest](#removing-it) if you installed Caddy for the panel.
+
+nginx, not tested on the test gateway (the directives are the standard ones for streaming
+responses; the panel speaks HTTP/1.1, so the upstream needs nothing more):
 
 ```nginx
 server {
     listen 443 ssl;
-    server_name vpn.example.com;
+    server_name panel.example.com;
     # ssl_certificate ... as usual
 
     location / {
@@ -816,16 +882,45 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Connection "";
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
         proxy_buffering off;
         proxy_read_timeout 1h;
     }
 }
 ```
 
-Set `trusted_proxies: [127.0.0.1, "::1"]` with either. Add HSTS at the proxy if you want it; the
-panel sets its own security headers on every response (a `default-src 'self'` CSP with nothing
-inline, `frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, `nosniff`) and `no-store` on
-API responses.
+`proxy_http_version 1.1` with an empty `Connection` keeps the upstream connection a plain
+HTTP/1.1 one, `proxy_buffering off` passes each chunk on at once, and `proxy_read_timeout 1h`
+keeps a quiet stream from being cut at nginx's default 60 seconds. The panel does not use
+`X-Forwarded-Proto` (its origin comes from `public_url`); the header does no harm.
+
+List the proxy's address in `trusted_proxies`: `[127.0.0.1, "::1"]` for a proxy on the same host
+(either of the above), its own address or prefix otherwise. The panel believes
+`X-Forwarded-For` only from those peers. If the proxy is not listed, every request counts as
+coming from the proxy: the sign-in and link limits are then shared by all clients, so one client's
+failed attempts throttle the others, and the logs show the proxy's address. List only proxies you
+run; a client in a listed prefix can name any address it likes.
+
+Add HSTS at the proxy if you want it; the panel sets its own security headers on every response (a
+`default-src 'self'` CSP with nothing inline, `frame-ancestors 'none'`, `Referrer-Policy:
+no-referrer`, `nosniff`) and `no-store` on API responses.
+
+### Checking it
+
+After the install, the proxy and the first enrollment:
+
+```bash
+systemctl is-active lotsman-web                                      # active
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8080/      # 200
+journalctl -u lotsman-web -n 20 --no-pager                           # no "daemon unreachable"
+```
+
+- The console opens at `https://panel.example.com/admin` once you are signed in (a signed-out
+  browser is sent to `/login`).
+- A live view updates: on **Upstreams**, the rate and latency change every second or so. If the
+  page loads but the numbers stay still, the proxy is buffering the stream; check
+  `flush_interval -1` or `proxy_buffering off`.
+- A user's link, from `lotsman user link NAME`, opens that user's page.
 
 ### What the panel forwards
 
