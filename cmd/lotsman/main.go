@@ -39,12 +39,14 @@ Commands:
   user rm NAME [-device D] [-profile P]
                               remove one config, every config of a device, or the whole user
   upstream status             show upstream health as last written by the daemon
+  web                         run the web panel (as the lotsman-web user)
 
 A TIER is key=value pairs joined by commas, with keys geo, provider and tag, all of
 which an upstream must match (geo=NL,provider=acme), or "any". No TIER means any upstream.
 
 Config file: -config, or $LOTSMAN_CONFIG, or /etc/lotsman/lotsman.yaml
-Log level (serve): -log-level, or $LOTSMAN_LOG_LEVEL, or info; one of debug, info, warn, error
+  for web: -config, or $LOTSMAN_WEB_CONFIG, or /etc/lotsman/web.yaml
+Log level (serve, web): -log-level, or $LOTSMAN_LOG_LEVEL, or info; one of debug, info, warn, error
 `
 
 func main() {
@@ -62,7 +64,7 @@ func main() {
 func run(args []string) error {
 	fs := flag.NewFlagSet("lotsman", flag.ContinueOnError)
 	fs.Usage = func() { fmt.Fprint(os.Stderr, usage) }
-	configPath := fs.String("config", defaultConfigPath(), "path to lotsman.yaml")
+	configPath := fs.String("config", defaultConfigPath(), "path to lotsman.yaml (web.yaml for web)")
 	logLevel := fs.String("log-level", "", "log level: debug, info, warn or error (default $LOTSMAN_LOG_LEVEL, then info)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -84,7 +86,7 @@ func run(args []string) error {
 	rest = rest[1:]
 
 	switch cmd {
-	case "version", "serve", "config check", "user list", "profile list", "upstream status":
+	case "version", "serve", "config check", "user list", "profile list", "upstream status", "web":
 		if len(rest) > 0 {
 			return fmt.Errorf("%s: unexpected argument %q", cmd, rest[0])
 		}
@@ -116,6 +118,15 @@ func run(args []string) error {
 		return profileImport(*configPath, rest)
 	case "upstream status":
 		return upstreamStatus(*configPath)
+	case "web":
+		// The panel has its own config: lotsman.yaml is root's alone.
+		path := defaultWebConfigPath()
+		fs.Visit(func(f *flag.Flag) {
+			if f.Name == "config" {
+				path = *configPath
+			}
+		})
+		return runWeb(context.Background(), path, level)
 	}
 	fs.Usage()
 	return fmt.Errorf("unknown command %q", cmd)

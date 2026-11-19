@@ -294,6 +294,7 @@ func TestCLIRejectsArgumentsOnArgumentlessCommands(t *testing.T) {
 		{"config", "check", "extra"},
 		{"user", "list", "alice"},
 		{"upstream", "status", "-json"},
+		{"web", "extra"},
 	} {
 		_, err := capture(t, append([]string{"-config", cfg}, args...)...)
 		if err == nil || !strings.Contains(err.Error(), "unexpected argument") {

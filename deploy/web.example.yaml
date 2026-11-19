@@ -1,0 +1,22 @@
+# /etc/lotsman/web.yaml: the web panel, `lotsman web`. Keep it
+# 0640 root:lotsman-web; the panel runs as lotsman-web and cannot read
+# lotsman.yaml.
+
+# Numeric TCP address. Keep it on loopback and put the reverse proxy, which
+# terminates TLS, in front; 0.0.0.0 and [::] are refused.
+listen: 127.0.0.1:8080
+
+# The address browsers use, scheme://host[:port] with no path. Every API call
+# must carry this exact Origin, and passkeys are bound to its host, so changing
+# it later means enrolling them again. https only (plain http on loopback).
+public_url: https://vpn.example.com
+
+# Proxies whose X-Forwarded-For is believed, as addresses or prefixes. The
+# panel uses the client address for rate limits and logs; from any other peer
+# the header is ignored.
+trusted_proxies: [127.0.0.1, "::1"]
+
+# The daemon's control socket, and the panel's own state (web.db). The unit's
+# StateDirectory= creates the default.
+# socket: /run/lotsman/control.sock
+# state_dir: /var/lib/lotsman-web

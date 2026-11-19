@@ -26,6 +26,7 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 | Host firewalls | Accept rules inserted into foreign forward chains | Docker's `FORWARD DROP` and ufw would otherwise silently drop forwarded traffic; same approach as Tailscale. |
 | Proxy upstreams | A userspace TCP/IP stack per upstream on its own TUN, flows re-originated through a pluggable dialer (Shadowsocks, VLESS + REALITY through embedded xray-core), each in its own unprivileged helper process | Keeps kernel routing, pinning and fail-closed identical for every upstream kind; a panic in the stack takes down one upstream, not the gateway; see [Proxy upstreams](#proxy-upstreams-outline). |
 | Control API | `lotsman.v1` over Connect on a root-owned unix socket, `/run/lotsman/control.sock` | One typed API for the web panel and, through it, the browser; the socket's file mode is the only boundary, so the daemon needs no authentication of its own; see [Control API](#control-api-127). |
+| Web panel | `lotsman web`, a separate unprivileged process that forwards the same API with a scope per RPC | A bug in the browser-facing code runs as `lotsman-web`, not root, and never sees `lotsman.db`; see [Web panel](#web-panel-132). |
 
 ## AmneziaWG implementation notes (verified 2026-09-17)
 
@@ -467,6 +468,74 @@ between RPCs. The TypeScript client (#135) is another plugin in `buf.gen.yaml`.
 Cost: the static linux/amd64 binary grows from 30.3 MB to 31.0 MB (+0.7 MB, +2.3%; 30,265,504 to
 30,970,016 bytes, `just build`). One new module, `connectrpc.com/connect/v2` (Apache-2.0);
 `google.golang.org/protobuf` was already linked.
+
+## Web panel (#132)
+
+`lotsman web` runs as the system user `lotsman-web` (unit `deploy/lotsman-web.service`: no
+capabilities, `ProtectSystem=strict`, `StateDirectory=lotsman-web`). Its primary group is
+`lotsman-web`, which is what lets it connect to the control socket; it cannot read `lotsman.yaml`
+or `lotsman.db`. It listens on loopback behind the operator's TLS reverse proxy.
+
+```
+browser ──https──▶ reverse proxy ──http──▶ lotsman web ──Connect, unix socket──▶ lotsman serve
+                                           scopes, origin,          (trusts its peer)
+                                           sessions (#133),
+                                           links (#134), UI
+```
+
+- Forwarding: `/api/<procedure>` goes to `<procedure>` on the socket through
+  `httputil.ReverseProxy` over a unix-socket transport, with `FlushInterval: -1` so each stream
+  message is passed on at once. The panel forwards bytes, not messages: it needs no code per RPC,
+  and the daemon stays the only place that decodes and validates them. The scope table
+  (`internal/web.Scopes`) is keyed by procedure name; a test compares it with the descriptors, so
+  a new RPC without a scope fails CI, and a procedure missing from the table is refused at run time.
+- Scopes: operator (every service but `UserSelfService`), user (`UserSelfService`), internal
+  (`UserSelfService.ResolveLink`: the panel resolves links itself; a browser never reaches it) and
+  public (none yet). An `Authenticator` interface decides operator and user; until #133 and #134 it
+  is `NoAuth`, which refuses both with `unauthenticated`. There is no bypass flag: integration
+  tests replace the authenticator inside their own test binary.
+- What reaches the daemon: only the RPC protocol headers (`Content-Type`, `Content-Encoding`,
+  `Accept-Encoding`, `Te`, `Connect-*`, `Grpc-*`, `X-Grpc-Web`). Cookies, credentials, forwarded
+  addresses and any `Lotsman-*` header from the browser are dropped; for user-scope calls the panel
+  then sets `Lotsman-User` to the user it resolved. It is an allowlist rather than stripping
+  `Lotsman-*` alone, so a future trusted header cannot leak through by default.
+- Browser checks: API calls and every non-GET/HEAD request need `Origin` equal to `public_url`'s
+  origin; `Host` is never used, so DNS rebinding and a spoofed `Host` get nowhere. Plain page loads
+  carry no `Origin` and serve only the public UI. `X-Forwarded-For` is read only when the peer is in
+  `trusted_proxies`, walking back from the last hop to the first untrusted address; the result is
+  in the request context for rate limits (#133, #134) and logs. Every response carries a
+  `default-src 'self'` CSP with nothing inline and `frame-ancestors 'none'`, `X-Frame-Options:
+  DENY`, `Referrer-Policy: no-referrer`, `nosniff` and `Cross-Origin-Opener-Policy: same-origin`;
+  API responses are `no-store`.
+- Limits: only POST reaches the API (no RPC is marked idempotent, so Connect never uses GET); a
+  request body is read whole, at most 64 KiB within 10 s, before forwarding (the API has no client
+  streams). The server has `ReadHeaderTimeout` 10 s and `IdleTimeout` 2 min but no `ReadTimeout`
+  or `WriteTimeout`: on HTTP/1 either would end long-running `Watch` streams, so the body read and
+  each static file write get their own deadlines instead.
+- UI: `internal/web/dist` is embedded with `//go:embed all:dist`; git tracks only its `.gitkeep`.
+  Without `index.html` every page is a placeholder generated in Go, so `go build` needs no Node.
+  An existing file is served as is (`assets/` with a one-year immutable cache, as Vite hashes those
+  names); any other path without an extension gets `index.html` (`no-cache`), so client routes such
+  as `/u/<token>` load the app; a missing path with an extension is a 404 rather than HTML in place
+  of a script.
+- State: `web.db` (SQLite, `0600`) in the state directory; the first migration creates the
+  `passkeys`, `sessions` and `enrollments` tables for #133, which may reshape them freely before
+  the first release. A database from a newer panel is refused rather than misread.
+
+| Option | For | Against |
+|---|---|---|
+| **A. Reverse proxy of the HTTP stream (chosen)** | No code per RPC; protocol-agnostic (Connect, gRPC-Web); the daemon's errors and streams pass through unchanged | The panel cannot filter inside messages; the daemon must enforce per-user limits, as #134 plans anyway |
+| B. Re-implementing each service as a Connect client of the daemon | Could reshape or filter responses in the panel | One handler per RPC, written twice; a second place to validate; stream plumbing per RPC |
+
+| Config option | For | Against |
+|---|---|---|
+| **A. `/etc/lotsman/web.yaml`, `0640 root:lotsman-web` (chosen)** | The panel sees only its own settings; same format and strict parsing as `lotsman.yaml`; room for #133's session settings | A second file to install |
+| B. A `web:` section in `lotsman.yaml`, given to the panel with systemd `LoadCredential=` | One file | The panel would read the daemon's whole config, which is root's alone on purpose; couples the two parsers |
+| C. Flags in the unit | No file | Lists such as `trusted_proxies` in a command line; every setting change edits the unit |
+
+Cost: the static linux/amd64 binary grows by about 0.2 MB (30,982,304 to 31,174,816 bytes, +0.6%,
+without a built UI). No new module: `net/http/httputil`, `embed` and the already linked
+`modernc.org/sqlite` and `connectrpc.com/connect/v2`.
 
 ## Open items
 
