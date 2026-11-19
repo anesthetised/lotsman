@@ -5,7 +5,7 @@
 // the panel resolves it and scopes UserSelfService to that user.
 
 import { create } from "@bufbuild/protobuf";
-import { createMemo, createSignal, Errored, Loading, refresh, Show } from "solid-js";
+import { createMemo, createSignal, Errored, Loading, refresh, Show, untrack } from "solid-js";
 import { selfApi } from "../../api/client";
 import { linkToken } from "../../api/link";
 import { createLive, num } from "../../api/live";
@@ -68,11 +68,12 @@ function FailureView(props: { failure: Failure; retry: () => void }) {
 
 function LiveUser(props: { token: string }) {
   const { t } = useI18n();
-  const self = selfApi(props.token);
+  // The token is fixed for the page's life: read once, on purpose untracked.
+  const self = selfApi(untrack(() => props.token));
   const user = createMemo(() => self.get({}));
   // The daemon always sends the rights; without them, the defaults.
   const rights = createMemo(() => user().rights ?? create(RightsSchema, { editRoutes: true, showProviders: true }));
-  const snapshot = createLive(() => self.watch({}));
+  const snapshot = createLive((signal) => self.watch({}, { signal }));
   const trend = createMemo<number[]>((prev = []) => [...prev, num(snapshot().total?.downRate)].slice(-60));
   const peers = createMemo(() => new Map(snapshot().peers.map((p) => [p.peerId, p])));
   const upstreams = createMemo(() => new Map(snapshot().upstreams.map((u) => [u.name, u])));

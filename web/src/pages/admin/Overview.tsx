@@ -33,7 +33,7 @@ export default function Overview() {
 
 function LiveOverview() {
   const { t, fmt } = useI18n();
-  const snapshot = createLive(() => api.status.watch({}));
+  const snapshot = createLive((signal) => api.status.watch({}, { signal }));
   const [window, setWindow] = createSignal<Window>("1");
 
   // Keep the longest window; the chart shows its tail.

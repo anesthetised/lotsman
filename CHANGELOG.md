@@ -281,6 +281,12 @@ All notable changes to Lotsman are documented here. The format follows
   load; a 200 MiB limit about halves the peak for at most a 20% loss in the slowest case (#106).
 
 ### Fixed
+- Web panel: live pages reopen their Watch stream when it drops or ends, instead of replacing the
+  page with "Load failed". A phone suspending the page in the background (iOS Safari), a network
+  switch or a panel restart now only pauses the live numbers; reopening backs off from 1 s to 30 s
+  and goes at once when the page is back in the foreground or the device online. Only errors a new
+  stream cannot fix (a revoked link, a signed-out operator, a removed peer) still show. Leaving a
+  page aborts its stream at once.
 - A deleted peer's id is never given to a new peer (`peers.id` is `AUTOINCREMENT`), so the API's
   `peer_id` and the history it keys stay unique.
 - `status.json` follows the daemon's health rounds instead of a timer started with the daemon, so

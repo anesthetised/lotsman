@@ -44,7 +44,7 @@ function Detail(props: { name: string }) {
   const { t, c } = useConsoleI18n();
   const navigate = useNavigate();
   const list = createMemo(() => admin.users.list({}));
-  const snapshot = createLive(() => api.status.watch({}));
+  const snapshot = createLive((signal) => api.status.watch({}, { signal }));
   const user = () => list().users.find((u) => u.name === props.name);
   return (
     <div class="space-y-4">
