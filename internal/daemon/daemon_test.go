@@ -234,7 +234,7 @@ func TestIdentity(t *testing.T) {
 }
 
 func TestClientConfig(t *testing.T) {
-	cfg, err := config.Parse([]byte("endpoint: vpn.example.org:51820\nupstreams: [{name: a, conf: /x, geo: NL, provider: acme}]\n"))
+	cfg, err := config.Parse([]byte("endpoint: 203.0.113.10:51820\nupstreams: [{name: a, conf: /x, geo: NL, provider: acme}]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +258,7 @@ func TestClientConfig(t *testing.T) {
 		t.Errorf("client junk missing: %+v", i.Params)
 	}
 	p := parsed.Peers[0]
-	if p.PublicKey != id.PrivateKey.Public() || p.Endpoint != "vpn.example.org:51820" || p.AllowedIPs[0].String() != "0.0.0.0/0" || p.PersistentKeepalive != (awgconf.Range{Lo: 25, Hi: 25}) {
+	if p.PublicKey != id.PrivateKey.Public() || p.Endpoint != "203.0.113.10:51820" || p.AllowedIPs[0].String() != "0.0.0.0/0" || p.PersistentKeepalive != (awgconf.Range{Lo: 25, Hi: 25}) {
 		t.Errorf("peer = %+v", p)
 	}
 }
@@ -278,7 +278,7 @@ type harness struct {
 }
 
 const harnessConfig = `
-endpoint: vpn.example.org:51820
+endpoint: 203.0.113.10:51820
 state_dir: %s
 upstreams:
   - {name: nl, conf: %s/nl.conf, geo: NL, provider: acme}
@@ -652,7 +652,7 @@ func TestReload(t *testing.T) {
 	providerConf(t, h.dir, "fi", "10.10.0.2/32", 0)
 	h.setHealthy("lm-up-fi", true)
 	cfg2, err := config.Parse([]byte(fmt.Sprintf(`
-endpoint: vpn.example.org:51820
+endpoint: 203.0.113.10:51820
 state_dir: %s
 upstreams:
   - {name: de, conf: %s/de.conf, geo: DE, provider: acme}
@@ -698,7 +698,7 @@ health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 1, up_after: 1}
 
 	// Removing the last upstream a route names is no error: the route
 	// matches less, and a device left without an exit is blocked.
-	cfg3, err := config.Parse([]byte(fmt.Sprintf("endpoint: vpn.example.org:51820\nstate_dir: %s\nupstreams: [{name: de, conf: %s/de.conf, geo: DE, provider: acme}]\n", h.dir, h.dir)))
+	cfg3, err := config.Parse([]byte(fmt.Sprintf("endpoint: 203.0.113.10:51820\nstate_dir: %s\nupstreams: [{name: de, conf: %s/de.conf, geo: DE, provider: acme}]\n", h.dir, h.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}

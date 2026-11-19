@@ -216,6 +216,10 @@ All notable changes to Lotsman are documented here. The format follows
   timer (three times that) overflows and wipes every session's keys at once (#76).
 
 ### Changed
+- **Breaking:** `endpoint` must be an IP address and port; a hostname fails `config check` and
+  `serve`. Client configs carry it as written, and a client would resolve a name before its tunnel
+  is up, through DNS that may be blocked or poisoned, or reach an HTTP-only proxy such as a CDN in
+  front of the web panel.
 - Web panel: a new device's route is set in the same controls as an existing device's, instead
   of copying another device's route; with devices already there the form waits behind an "Add a
   device" button. The user page's Exits section lists every allowed exit, saying which devices use

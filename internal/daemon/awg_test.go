@@ -55,7 +55,7 @@ func TestClientConfigLevels(t *testing.T) {
 		{"awg: 2\n", nil},
 	} {
 		t.Run(fmt.Sprintf("%q", tc.awg), func(t *testing.T) {
-			cfg, err := config.Parse([]byte(tc.awg + "endpoint: vpn.example.org:51820\nupstreams: [{name: a, conf: /x, geo: NL, provider: acme}]\n"))
+			cfg, err := config.Parse([]byte(tc.awg + "endpoint: 203.0.113.10:51820\nupstreams: [{name: a, conf: /x, geo: NL, provider: acme}]\n"))
 			if err != nil {
 				t.Fatal(err)
 			}
