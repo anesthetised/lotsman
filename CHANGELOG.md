@@ -19,6 +19,9 @@ All notable changes to Lotsman are documented here. The format follows
   open connections live, never stored. RU and EN, keyboard accessible, 1280 px down to tablet
   width. New frontend dependency `lean-qr` 2.7.4 (about 4 KB gzipped), which also draws the user
   page's QR codes in place of `uqr`; only the pages that show QR codes load it.
+- `UserSelfService.AddDevice` refusals with `resource_exhausted` carry a `SelfServiceLimit` detail
+  (`REASON_MAX_DEVICES` with `max_devices`, or `REASON_RATE_LIMITED` with `retry_after`), so clients
+  tell the two limits apart without reading the message; the user page says how long to wait.
 - Profiles and live connections in the control API. `ProfileService` `List`, `Put` and `Delete`
   serve the stored profiles with the checks and warnings of `lotsman profile` (#128): a profile the
   checks refuse is `invalid_argument`, deleting one that peers use `failed_precondition`, a missing

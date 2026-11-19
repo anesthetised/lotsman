@@ -5,8 +5,10 @@
 // @generated from file lotsman/v1/user_self.proto (package lotsman.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Duration } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_duration } from "@bufbuild/protobuf/wkt";
 import type { HistoryRequestSchema, HistoryResponseSchema } from "./history_pb";
 import { file_lotsman_v1_history } from "./history_pb";
 import type { ListProfilesRequestSchema, ListProfilesResponseSchema } from "./profile_pb";
@@ -21,7 +23,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file lotsman/v1/user_self.proto.
  */
 export const file_lotsman_v1_user_self: GenFile = /*@__PURE__*/
-  fileDesc("Chpsb3RzbWFuL3YxL3VzZXJfc2VsZi5wcm90bxIKbG90c21hbi52MSIjChJSZXNvbHZlTGlua1JlcXVlc3QSDQoFdG9rZW4YASABKAkiIwoTUmVzb2x2ZUxpbmtSZXNwb25zZRIMCgR1c2VyGAEgASgJIhAKDkdldFNlbGZSZXF1ZXN0IjcKFEFkZFNlbGZEZXZpY2VSZXF1ZXN0Eg4KBmRldmljZRgBIAEoCRIPCgdwcm9maWxlGAIgASgJIjoKF1JlbW92ZVNlbGZEZXZpY2VSZXF1ZXN0Eg4KBmRldmljZRgBIAEoCRIPCgdwcm9maWxlGAIgASgJMqkFCg9Vc2VyU2VsZlNlcnZpY2USTgoLUmVzb2x2ZUxpbmsSHi5sb3RzbWFuLnYxLlJlc29sdmVMaW5rUmVxdWVzdBofLmxvdHNtYW4udjEuUmVzb2x2ZUxpbmtSZXNwb25zZRIzCgNHZXQSGi5sb3RzbWFuLnYxLkdldFNlbGZSZXF1ZXN0GhAubG90c21hbi52MS5Vc2VyEkUKBVdhdGNoEh4ubG90c21hbi52MS5XYXRjaFN0YXR1c1JlcXVlc3QaGi5sb3RzbWFuLnYxLlN0YXR1c1NuYXBzaG90MAESRwoJQWRkRGV2aWNlEiAubG90c21hbi52MS5BZGRTZWxmRGV2aWNlUmVxdWVzdBoYLmxvdHNtYW4udjEuRGV2aWNlQ29uZmlnElUKDFJlbW92ZURldmljZRIjLmxvdHNtYW4udjEuUmVtb3ZlU2VsZkRldmljZVJlcXVlc3QaIC5sb3RzbWFuLnYxLlJlbW92ZURldmljZVJlc3BvbnNlEkMKCUdldENvbmZpZxIcLmxvdHNtYW4udjEuR2V0Q29uZmlnUmVxdWVzdBoYLmxvdHNtYW4udjEuRGV2aWNlQ29uZmlnElEKDExpc3RQcm9maWxlcxIfLmxvdHNtYW4udjEuTGlzdFByb2ZpbGVzUmVxdWVzdBogLmxvdHNtYW4udjEuTGlzdFByb2ZpbGVzUmVzcG9uc2USSgoPVXBzdHJlYW1IaXN0b3J5EhoubG90c21hbi52MS5IaXN0b3J5UmVxdWVzdBobLmxvdHNtYW4udjEuSGlzdG9yeVJlc3BvbnNlEkYKC1BlZXJIaXN0b3J5EhoubG90c21hbi52MS5IaXN0b3J5UmVxdWVzdBobLmxvdHNtYW4udjEuSGlzdG9yeVJlc3BvbnNlQjpaOGdpdGh1Yi5jb20vYW5lc3RoZXRpc2VkL2xvdHNtYW4vYXBpL2xvdHNtYW4vdjE7bG90c21hbnYxYgZwcm90bzM", [file_lotsman_v1_history, file_lotsman_v1_profile, file_lotsman_v1_status, file_lotsman_v1_user]);
+  fileDesc("Chpsb3RzbWFuL3YxL3VzZXJfc2VsZi5wcm90bxIKbG90c21hbi52MSIjChJSZXNvbHZlTGlua1JlcXVlc3QSDQoFdG9rZW4YASABKAkiIwoTUmVzb2x2ZUxpbmtSZXNwb25zZRIMCgR1c2VyGAEgASgJIhAKDkdldFNlbGZSZXF1ZXN0IjcKFEFkZFNlbGZEZXZpY2VSZXF1ZXN0Eg4KBmRldmljZRgBIAEoCRIPCgdwcm9maWxlGAIgASgJIjoKF1JlbW92ZVNlbGZEZXZpY2VSZXF1ZXN0Eg4KBmRldmljZRgBIAEoCRIPCgdwcm9maWxlGAIgASgJIt8BChBTZWxmU2VydmljZUxpbWl0EjMKBnJlYXNvbhgBIAEoDjIjLmxvdHNtYW4udjEuU2VsZlNlcnZpY2VMaW1pdC5SZWFzb24SEwoLbWF4X2RldmljZXMYAiABKA0SLgoLcmV0cnlfYWZ0ZXIYAyABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iUQoGUmVhc29uEhYKElJFQVNPTl9VTlNQRUNJRklFRBAAEhYKElJFQVNPTl9NQVhfREVWSUNFUxABEhcKE1JFQVNPTl9SQVRFX0xJTUlURUQQAjKpBQoPVXNlclNlbGZTZXJ2aWNlEk4KC1Jlc29sdmVMaW5rEh4ubG90c21hbi52MS5SZXNvbHZlTGlua1JlcXVlc3QaHy5sb3RzbWFuLnYxLlJlc29sdmVMaW5rUmVzcG9uc2USMwoDR2V0EhoubG90c21hbi52MS5HZXRTZWxmUmVxdWVzdBoQLmxvdHNtYW4udjEuVXNlchJFCgVXYXRjaBIeLmxvdHNtYW4udjEuV2F0Y2hTdGF0dXNSZXF1ZXN0GhoubG90c21hbi52MS5TdGF0dXNTbmFwc2hvdDABEkcKCUFkZERldmljZRIgLmxvdHNtYW4udjEuQWRkU2VsZkRldmljZVJlcXVlc3QaGC5sb3RzbWFuLnYxLkRldmljZUNvbmZpZxJVCgxSZW1vdmVEZXZpY2USIy5sb3RzbWFuLnYxLlJlbW92ZVNlbGZEZXZpY2VSZXF1ZXN0GiAubG90c21hbi52MS5SZW1vdmVEZXZpY2VSZXNwb25zZRJDCglHZXRDb25maWcSHC5sb3RzbWFuLnYxLkdldENvbmZpZ1JlcXVlc3QaGC5sb3RzbWFuLnYxLkRldmljZUNvbmZpZxJRCgxMaXN0UHJvZmlsZXMSHy5sb3RzbWFuLnYxLkxpc3RQcm9maWxlc1JlcXVlc3QaIC5sb3RzbWFuLnYxLkxpc3RQcm9maWxlc1Jlc3BvbnNlEkoKD1Vwc3RyZWFtSGlzdG9yeRIaLmxvdHNtYW4udjEuSGlzdG9yeVJlcXVlc3QaGy5sb3RzbWFuLnYxLkhpc3RvcnlSZXNwb25zZRJGCgtQZWVySGlzdG9yeRIaLmxvdHNtYW4udjEuSGlzdG9yeVJlcXVlc3QaGy5sb3RzbWFuLnYxLkhpc3RvcnlSZXNwb25zZUI6WjhnaXRodWIuY29tL2FuZXN0aGV0aXNlZC9sb3RzbWFuL2FwaS9sb3RzbWFuL3YxO2xvdHNtYW52MWIGcHJvdG8z", [file_google_protobuf_duration, file_lotsman_v1_history, file_lotsman_v1_profile, file_lotsman_v1_status, file_lotsman_v1_user]);
 
 /**
  * @generated from message lotsman.v1.ResolveLinkRequest
@@ -113,6 +115,69 @@ export type RemoveSelfDeviceRequest = Message<"lotsman.v1.RemoveSelfDeviceReques
  */
 export const RemoveSelfDeviceRequestSchema: GenMessage<RemoveSelfDeviceRequest> = /*@__PURE__*/
   messageDesc(file_lotsman_v1_user_self, 4);
+
+/**
+ * The detail of a resource_exhausted AddDevice: which limit refused it.
+ *
+ * @generated from message lotsman.v1.SelfServiceLimit
+ */
+export type SelfServiceLimit = Message<"lotsman.v1.SelfServiceLimit"> & {
+  /**
+   * @generated from field: lotsman.v1.SelfServiceLimit.Reason reason = 1;
+   */
+  reason: SelfServiceLimit_Reason;
+
+  /**
+   * with REASON_MAX_DEVICES
+   *
+   * @generated from field: uint32 max_devices = 2;
+   */
+  maxDevices: number;
+
+  /**
+   * with REASON_RATE_LIMITED: until the next addition is allowed
+   *
+   * @generated from field: google.protobuf.Duration retry_after = 3;
+   */
+  retryAfter?: Duration | undefined;
+};
+
+/**
+ * Describes the message lotsman.v1.SelfServiceLimit.
+ * Use `create(SelfServiceLimitSchema)` to create a new message.
+ */
+export const SelfServiceLimitSchema: GenMessage<SelfServiceLimit> = /*@__PURE__*/
+  messageDesc(file_lotsman_v1_user_self, 5);
+
+/**
+ * @generated from enum lotsman.v1.SelfServiceLimit.Reason
+ */
+export enum SelfServiceLimit_Reason {
+  /**
+   * @generated from enum value: REASON_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * the user has max_devices devices already
+   *
+   * @generated from enum value: REASON_MAX_DEVICES = 1;
+   */
+  MAX_DEVICES = 1,
+
+  /**
+   * too many additions lately
+   *
+   * @generated from enum value: REASON_RATE_LIMITED = 2;
+   */
+  RATE_LIMITED = 2,
+}
+
+/**
+ * Describes the enum lotsman.v1.SelfServiceLimit.Reason.
+ */
+export const SelfServiceLimit_ReasonSchema: GenEnum<SelfServiceLimit_Reason> = /*@__PURE__*/
+  enumDesc(file_lotsman_v1_user_self, 5, 0);
 
 /**
  * The acting user comes from the `Lotsman-User` request header, which only

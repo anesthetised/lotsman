@@ -1,9 +1,10 @@
-import { create } from "@bufbuild/protobuf";
+import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { durationFromMs, timestampFromMs } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { describe, expect, test, vi } from "vitest";
 import { HistoryResponseSchema, SampleSchema } from "../../gen/lotsman/v1/history_pb";
 import { DeviceConfigSchema } from "../../gen/lotsman/v1/user_pb";
+import { SelfServiceLimit_Reason, SelfServiceLimitSchema } from "../../gen/lotsman/v1/user_self_pb";
 import { en } from "../../i18n/en";
 import { ru } from "../../i18n/ru";
 import { confFilename } from "./config";
@@ -18,13 +19,15 @@ describe("failureOf", () => {
     expect(failure(Code.Unauthenticated, "unknown link")).toEqual({ kind: "revoked" });
   });
 
-  test("the daemon's two limits are told apart by their wording", () => {
-    expect(failure(Code.ResourceExhausted, "at most 5 devices; remove one first or ask the operator")).toEqual({ kind: "maxDevices", limit: 5 });
-    expect(failure(Code.ResourceExhausted, "at most 1 device; remove one first")).toEqual({ kind: "maxDevices", limit: 1 });
-    expect(failure(Code.ResourceExhausted, "too many devices added lately; try again in a few minutes")).toEqual({ kind: "rateLimited" });
-    // The panel's own limit, or wording we do not know: still a limit, not a failure.
+  test("the daemon's two limits are told apart by their detail, not their wording", () => {
+    const limited = (value: MessageInitShape<typeof SelfServiceLimitSchema>) =>
+      failureOf(new ConnectError("anything", Code.ResourceExhausted, undefined, [{ desc: SelfServiceLimitSchema, value }]));
+    expect(limited({ reason: SelfServiceLimit_Reason.MAX_DEVICES, maxDevices: 5 })).toEqual({ kind: "maxDevices", limit: 5 });
+    expect(limited({ reason: SelfServiceLimit_Reason.RATE_LIMITED, retryAfter: { seconds: 90n } })).toEqual({ kind: "rateLimited", retryAfterSeconds: 90 });
+    expect(limited({ reason: SelfServiceLimit_Reason.RATE_LIMITED })).toEqual({ kind: "rateLimited" });
+    // The panel's own limit, or no detail: still a limit, not a failure.
+    expect(failure(Code.ResourceExhausted, "at most 5 devices; remove one first")).toEqual({ kind: "exhausted" });
     expect(failure(Code.ResourceExhausted, "too many unknown links from this address; try again later")).toEqual({ kind: "exhausted" });
-    expect(failure(Code.ResourceExhausted, "the gateway's subnet has no free address")).toEqual({ kind: "exhausted" });
   });
 
   test.each([
@@ -54,8 +57,8 @@ describe("failureOf", () => {
       { kind: "unavailable" },
       { kind: "denied" },
       { kind: "maxDevices", limit: 5 },
-      { kind: "maxDevices" },
       { kind: "rateLimited" },
+      { kind: "rateLimited", retryAfterSeconds: 90 },
       { kind: "exhausted" },
       { kind: "exists" },
       { kind: "notFound" },
@@ -68,6 +71,7 @@ describe("failureOf", () => {
     }
     expect(failureText(en, { kind: "maxDevices", limit: 5 })).toContain("(5)");
     expect(failureText(ru, { kind: "maxDevices", limit: 5 })).toContain("(5)");
+    expect(failureText(en, { kind: "rateLimited", retryAfterSeconds: 90 })).toContain("2 min");
     expect(failureText(en, { kind: "invalid", message: "why" })).toContain("why");
   });
 });

@@ -166,7 +166,7 @@ test("too many additions are told apart from the device limit", async ({ page })
   }
   await page.getByLabel("Device name").fill("loop");
   await page.getByRole("button", { name: "Add device" }).click();
-  await expect(page.getByRole("alert")).toHaveText("You added too many devices lately. Try again in a few minutes.");
+  await expect(page.getByRole("alert")).toHaveText("You added too many devices lately. Try again in 6 min.");
 });
 
 test("a revoked link says it no longer works", async ({ page }) => {

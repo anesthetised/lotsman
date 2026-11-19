@@ -10,7 +10,7 @@ import { ListProfilesResponseSchema, ProfileSchema } from "../gen/lotsman/v1/pro
 import type { Duration } from "@bufbuild/protobuf/wkt";
 import type { StatusSnapshot } from "../gen/lotsman/v1/status_pb";
 import { DeviceConfigSchema } from "../gen/lotsman/v1/user_pb";
-import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
+import { SelfServiceLimit_Reason, SelfServiceLimitSchema, UserSelfService } from "../gen/lotsman/v1/user_self_pb";
 import type { Simulation } from "./simulation";
 
 /** The user every ordinary fake `/u#<token>` link resolves to. */
@@ -116,10 +116,14 @@ export function createSelfService(
       if (maxDevices === 0) throw new ConnectError("adding devices is turned off; ask the operator", Code.PermissionDenied);
       const devices = sim.devicesOf(user);
       if (!devices.includes(req.device) && devices.length >= maxDevices) {
-        throw new ConnectError(`at most ${maxDevices} devices; remove one first or ask the operator`, Code.ResourceExhausted);
+        throw new ConnectError(`at most ${maxDevices} devices; remove one first or ask the operator`, Code.ResourceExhausted, undefined, [
+          { desc: SelfServiceLimitSchema, value: { reason: SelfServiceLimit_Reason.MAX_DEVICES, maxDevices } },
+        ]);
       }
       if (!allowAddition(user)) {
-        throw new ConnectError("too many devices added lately; try again in a few minutes", Code.ResourceExhausted);
+        throw new ConnectError("too many devices added lately; try again in a few minutes", Code.ResourceExhausted, undefined, [
+          { desc: SelfServiceLimitSchema, value: { reason: SelfServiceLimit_Reason.RATE_LIMITED, retryAfter: { seconds: 360n } } },
+        ]);
       }
       if (!sim.profileNames().includes(req.profile)) throw new ConnectError(`no such profile: ${req.profile}`, Code.InvalidArgument);
       const peer = sim.addPeer(user, req.device, req.profile);

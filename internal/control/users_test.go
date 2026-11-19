@@ -2,6 +2,7 @@ package control
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connectinprocess"
+	"connectrpc.com/connect/v2/connectproto"
 	"github.com/google/go-cmp/cmp"
 	"google.golang.org/protobuf/testing/protocmp"
 	"google.golang.org/protobuf/types/known/durationpb"
@@ -278,6 +280,9 @@ func TestUserSelfMaxDevices(t *testing.T) {
 	}
 	_, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "tablet", Profile: "eu"})
 	wantCode(t, "a third device", err, connect.CodeResourceExhausted)
+	if l := limitOf(t, err); l.GetReason() != lotsmanv1.SelfServiceLimit_REASON_MAX_DEVICES || l.GetMaxDevices() != 2 {
+		t.Errorf("a third device: detail %v, want max_devices 2", l)
+	}
 	// Another profile is no new device: switching profiles stays possible.
 	if _, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "phone", Profile: "nl"}); err != nil {
 		t.Errorf("another profile on a device at the limit: %v", err)
@@ -345,7 +350,11 @@ func TestUserSelfAddRateLimit(t *testing.T) {
 			t.Fatalf("add %d of the burst: %v", i+1, err)
 		}
 	}
-	wantCode(t, "an add past the burst", add("alice", "extra"), connect.CodeResourceExhausted)
+	err := add("alice", "extra")
+	wantCode(t, "an add past the burst", err, connect.CodeResourceExhausted)
+	if l := limitOf(t, err); l.GetReason() != lotsmanv1.SelfServiceLimit_REASON_RATE_LIMITED || l.GetRetryAfter().AsDuration() != AddEvery {
+		t.Errorf("an add past the burst: detail %v, want rate limited, retry after %s", l, AddEvery)
+	}
 	if err := add("bob", "phone"); err != nil {
 		t.Errorf("alice's limit applied to bob: %v", err)
 	}
@@ -555,4 +564,22 @@ func TestUserSelfHistory(t *testing.T) {
 	wantCode(t, "no user", err, connect.CodeUnauthenticated)
 	_, err = self.PeerHistory(as(t.Context(), "carol"), req(peer))
 	wantCode(t, "an unknown user", err, connect.CodeUnauthenticated)
+}
+
+// limitOf is the SelfServiceLimit detail of err.
+func limitOf(t *testing.T, err error) *lotsmanv1.SelfServiceLimit {
+	t.Helper()
+	var cerr *connect.Error
+	if !errors.As(err, &cerr) {
+		t.Fatalf("%v is not a connect error", err)
+	}
+	for _, d := range cerr.Details() {
+		if m, derr := connectproto.UnmarshalErrorDetail(d); derr == nil {
+			if l, ok := m.(*lotsmanv1.SelfServiceLimit); ok {
+				return l
+			}
+		}
+	}
+	t.Fatalf("%v has no SelfServiceLimit detail", err)
+	return nil
 }

@@ -4,6 +4,7 @@ syntax = "proto3";
 
 package lotsman.v1;
 
+import "google/protobuf/duration.proto";
 import "lotsman/v1/history.proto";
 import "lotsman/v1/profile.proto";
 import "lotsman/v1/status.proto";
@@ -46,4 +47,16 @@ message AddSelfDeviceRequest {
 message RemoveSelfDeviceRequest {
   string device = 1;
   string profile = 2;
+}
+
+// The detail of a resource_exhausted AddDevice: which limit refused it.
+message SelfServiceLimit {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    REASON_MAX_DEVICES = 1; // the user has max_devices devices already
+    REASON_RATE_LIMITED = 2; // too many additions lately
+  }
+  Reason reason = 1;
+  uint32 max_devices = 2; // with REASON_MAX_DEVICES
+  google.protobuf.Duration retry_after = 3; // with REASON_RATE_LIMITED: until the next addition is allowed
 }
