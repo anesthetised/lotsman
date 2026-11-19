@@ -82,9 +82,17 @@ func userList(configPath string) error {
 		return err
 	}
 	defer e.store.Close()
+	users, err := e.store.ListUsers()
+	if err != nil {
+		return err
+	}
 	peers, err := e.store.ListPeers()
 	if err != nil {
 		return err
+	}
+	byUser := map[string][]store.Peer{}
+	for _, p := range peers {
+		byUser[p.User] = append(byUser[p.User], p)
 	}
 	// Live data comes from the daemon's status file; without a daemon the columns stay "-".
 	live := map[[3]string]daemon.PeerStatus{}
@@ -95,15 +103,21 @@ func userList(configPath string) error {
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "USER\tDEVICE\tPROFILE\tADDRESS\tUPSTREAM\tLAST HANDSHAKE\tCREATED")
-	for _, p := range peers {
-		upstream, handshake := "-", "-"
-		if ps, ok := live[[3]string{p.User, p.Device, p.Profile}]; ok {
-			upstream, handshake = ps.Upstream, ago(ps.LastHandshake)
-			if upstream == "" {
-				upstream = "blocked"
-			}
+	for _, u := range users {
+		// A user whose last device was removed keeps their link, so list them too.
+		if len(byUser[u.Name]) == 0 {
+			fmt.Fprintf(w, "%s\t-\t-\t-\t-\t-\t%s\n", u.Name, u.CreatedAt.Format("2006-01-02"))
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.User, p.Device, p.Profile, p.IP, upstream, handshake, p.CreatedAt.Format("2006-01-02"))
+		for _, p := range byUser[u.Name] {
+			upstream, handshake := "-", "-"
+			if ps, ok := live[[3]string{p.User, p.Device, p.Profile}]; ok {
+				upstream, handshake = ps.Upstream, ago(ps.LastHandshake)
+				if upstream == "" {
+					upstream = "blocked"
+				}
+			}
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.User, p.Device, p.Profile, p.IP, upstream, handshake, p.CreatedAt.Format("2006-01-02"))
+		}
 	}
 	return w.Flush()
 }
