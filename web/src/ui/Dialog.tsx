@@ -5,7 +5,7 @@ import { Dialog as Kobalte } from "@kobalte/core/dialog";
 import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
 import { useI18n } from "../i18n";
-import { buttonClass } from "./button";
+import { buttonClass, type ButtonVariant } from "./button";
 import { CloseIcon } from "./icons";
 
 export interface DialogProps {
@@ -14,13 +14,18 @@ export interface DialogProps {
   title: string;
   description?: string;
   children?: JSX.Element;
+  /** Style of the trigger button. */
+  variant?: ButtonVariant;
+  /** Controlled open state, for content that closes the dialog itself. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function Dialog(props: DialogProps) {
   const { t } = useI18n();
   return (
-    <Kobalte>
-      <Kobalte.Trigger class={buttonClass()}>{props.trigger}</Kobalte.Trigger>
+    <Kobalte open={props.open} onOpenChange={(open) => props.onOpenChange?.(open)}>
+      <Kobalte.Trigger class={buttonClass(props.variant)}>{props.trigger}</Kobalte.Trigger>
       <Kobalte.Portal>
         <Kobalte.Overlay class="fixed inset-0 z-40 bg-black/50" />
         <div class="fixed inset-0 z-50 flex items-center justify-center p-4">

@@ -112,14 +112,14 @@ func TestWebPanelSocketAccess(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			uid, _ := strconv.Atoi(tc.u.Uid)
 			gid, _ := strconv.Atoi(tc.u.Gid)
-			origin, pid := startPanel(t, dir, tc.name, socket, uid, gid)
+			origin, url, pid := startPanel(t, dir, tc.name, socket, uid, gid)
 			st := procStatus(t, pid)
 			if ids := tc.u.Uid + " " + tc.u.Uid + " " + tc.u.Uid + " " + tc.u.Uid; st["Uid"] != ids || st["CapEff"] != "0000000000000000" {
 				t.Errorf("panel runs as Uid %q CapEff %q, want %q and no capabilities", st["Uid"], st["CapEff"], ids)
 			}
 
 			hc := &http.Client{Transport: originTransport{origin}}
-			client := lotsmanv1connect.NewStatusServiceClient(connect.NewClient(connecthttp.NewTransport(hc, origin+"/api")))
+			client := lotsmanv1connect.NewStatusServiceClient(connect.NewClient(connecthttp.NewTransport(hc, url+"/api")))
 			stream, err := client.Watch(t.Context(), &lotsmanv1.WatchStatusRequest{})
 			var snap *lotsmanv1.StatusSnapshot
 			if err == nil {
@@ -138,8 +138,9 @@ func TestWebPanelSocketAccess(t *testing.T) {
 }
 
 // startPanel runs `lotsman web` as uid:gid, with no supplementary groups,
-// and waits until it answers. It returns the panel's origin and pid.
-func startPanel(t *testing.T, dir, name, socket string, uid, gid int) (string, int) {
+// and waits until it answers. It returns the panel's origin, the URL it
+// listens on and its pid.
+func startPanel(t *testing.T, dir, name, socket string, uid, gid int) (origin, url string, pid int) {
 	t.Helper()
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -151,7 +152,10 @@ func startPanel(t *testing.T, dir, name, socket string, uid, gid int) (string, i
 	os.Mkdir(state, 0o700)
 	os.Chown(state, uid, gid)
 	cfg := filepath.Join(dir, name+".yaml")
-	os.WriteFile(cfg, []byte("listen: "+addr+"\npublic_url: http://"+addr+"\nsocket: "+socket+"\nstate_dir: "+state+"\n"), 0o644)
+	// A passkey's RP ID cannot be an IP address, so the panel is localhost.
+	_, port, _ := net.SplitHostPort(addr)
+	origin = "http://localhost:" + port
+	os.WriteFile(cfg, []byte("listen: "+addr+"\npublic_url: "+origin+"\nsocket: "+socket+"\nstate_dir: "+state+"\n"), 0o644)
 
 	// /proc/self/exe: the test binary's own directory is root's alone.
 	cmd := exec.Command("/proc/self/exe", "-config", cfg, "web")
@@ -190,7 +194,7 @@ func startPanel(t *testing.T, dir, name, socket string, uid, gid int) (string, i
 		}
 		return err == nil
 	})
-	return "http://" + addr, cmd.Process.Pid
+	return origin, "http://" + addr, cmd.Process.Pid
 }
 
 type originTransport struct{ origin string }

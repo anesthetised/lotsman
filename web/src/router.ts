@@ -11,8 +11,13 @@ export const Router = createRouter({
     {
       path: "/admin",
       component: AdminLayout,
-      children: [{ path: "/", component: lazy(() => import("./pages/admin/Overview")) }],
+      children: [
+        { path: "/", component: lazy(() => import("./pages/admin/Overview")) },
+        { path: "/passkeys", component: lazy(() => import("./pages/admin/Passkeys")) },
+      ],
     },
+    { path: "/login", component: lazy(() => import("./pages/auth/SignIn")) },
+    { path: "/enroll", component: lazy(() => import("./pages/auth/Enroll")) },
     { path: "/u/:token", component: lazy(() => import("./pages/user/UserPage")) },
     { path: "*404", component: NotFound },
   ],

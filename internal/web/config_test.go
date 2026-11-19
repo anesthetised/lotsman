@@ -68,6 +68,8 @@ func TestParseConfigRejects(t *testing.T) {
 		{"public_url: ftp://vpn.example.com\n", "must be https"},
 		{"public_url: vpn.example.com\n", "public_url"},
 		{"public_url: https://vpn.example.com/panel\n", "served at the root"},
+		{"public_url: http://127.0.0.1:8080\n", "passkeys need a host name"},
+		{"public_url: https://[2001:db8::1]\n", "passkeys need a host name"},
 		{"public_url: https://vpn.example.com/?a=b\n", "served at the root"},
 		{"public_url: https://user@vpn.example.com\n", "served at the root"},
 		{"public_url: https://vpn.example.com\nlisten: 0.0.0.0:8080\n", "past the reverse proxy"},

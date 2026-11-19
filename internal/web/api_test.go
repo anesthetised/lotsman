@@ -117,8 +117,8 @@ func TestAPIScopes(t *testing.T) {
 		procedure string
 		want      string
 	}{
-		{"production refuses operators", NoAuth{}, operatorRPC, "unauthenticated"},
-		{"production refuses users", NoAuth{}, userRPC, "unauthenticated"},
+		{"nobody signed in: no operator", fakeAuth{}, operatorRPC, "unauthenticated"},
+		{"nobody signed in: no user", fakeAuth{}, userRPC, "unauthenticated"},
 		{"operator", fakeAuth{operator: true}, operatorRPC, ""},
 		{"user", fakeAuth{user: "alice"}, userRPC, ""},
 		{"a user is no operator", fakeAuth{user: "alice"}, operatorRPC, "unauthenticated"},
@@ -153,7 +153,7 @@ func TestAPIRefusesUnscopedRPC(t *testing.T) {
 
 func TestAPIPublicNeedsNoSignIn(t *testing.T) {
 	daemon := &fakeDaemon{}
-	a := newAPI(map[string]Scope{"/lotsman.v1.X/Y": Public}, NoAuth{}, daemon, discardLog())
+	a := newAPI(map[string]Scope{"/lotsman.v1.X/Y": Public}, fakeAuth{}, daemon, discardLog())
 	if got := errorCode(t, serve(a, rpc("/lotsman.v1.X/Y", ""))); got != "" || len(daemon.calls()) != 1 {
 		t.Errorf("code %q, daemon calls %d", got, len(daemon.calls()))
 	}

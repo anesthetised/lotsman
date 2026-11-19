@@ -11,7 +11,7 @@ import (
 )
 
 func TestSecurityHeaders(t *testing.T) {
-	h := testPanel(t, NoAuth{}, &fakeDaemon{})
+	h := testPanel(t, fakeAuth{}, &fakeDaemon{})
 	refused := rpc(lotsmanv1connect.ProfileServiceListProcedure, "")
 	refused.Header.Del("Origin")
 	for name, r := range map[string]*http.Request{

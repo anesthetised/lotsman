@@ -11,7 +11,7 @@ import (
 
 func uiPanel(t *testing.T, files fs.FS) http.Handler {
 	t.Helper()
-	return New(Deps{Config: testConfig(t, ""), Auth: NoAuth{}, Daemon: &fakeDaemon{}, UI: files, Log: discardLog()})
+	return New(Deps{Config: testConfig(t, ""), Auth: fakeAuth{}, Daemon: &fakeDaemon{}, UI: files, Log: discardLog()})
 }
 
 func get(h http.Handler, path string) *httptest.ResponseRecorder {

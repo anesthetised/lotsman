@@ -10,7 +10,7 @@ export default defineConfig({
   reporter: process.env.CI ? [["github"], ["list"]] : "list",
   use: { baseURL: `http://localhost:${port}`, trace: "retain-on-failure" },
   projects: [
-    { name: "desktop", testMatch: "admin.spec.ts", use: { ...devices["Desktop Chrome"] } },
+    { name: "desktop", testMatch: ["admin.spec.ts", "auth.spec.ts"], use: { ...devices["Desktop Chrome"] } },
     { name: "phone", testMatch: "user.spec.ts", use: { ...devices["Pixel 7"] } },
   ],
   webServer: {

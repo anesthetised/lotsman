@@ -9,28 +9,30 @@ import (
 )
 
 // migrations build web.db, the panel's own state; PRAGMA user_version
-// records how many have run. The tables are a skeleton for operator
-// sign-in (#133): secrets are stored only as SHA-256 hashes.
+// records how many have run. Secrets (session IDs, enrollment tokens) are
+// stored only as SHA-256 hashes; times are Unix seconds.
 var migrations = []string{
+	// passkeys: each is an operator of its own, with its own WebAuthn user
+	// handle. credential is the library's webauthn.Credential as JSON.
 	`CREATE TABLE passkeys (
 		id            INTEGER PRIMARY KEY,
 		credential_id BLOB NOT NULL UNIQUE,
-		credential    BLOB NOT NULL,
+		user_handle   BLOB NOT NULL,
+		credential    TEXT NOT NULL,
 		name          TEXT NOT NULL,
-		created_at    TEXT NOT NULL,
-		used_at       TEXT
+		created_at    INTEGER NOT NULL,
+		used_at       INTEGER
 	);
 	CREATE TABLE sessions (
 		id_hash    BLOB PRIMARY KEY,
 		passkey_id INTEGER NOT NULL REFERENCES passkeys(id) ON DELETE CASCADE,
-		created_at TEXT NOT NULL,
-		seen_at    TEXT NOT NULL
+		created_at INTEGER NOT NULL,
+		seen_at    INTEGER NOT NULL
 	);
 	CREATE TABLE enrollments (
 		token_hash BLOB PRIMARY KEY,
-		created_at TEXT NOT NULL,
-		expires_at TEXT NOT NULL,
-		used_at    TEXT
+		expires_at INTEGER NOT NULL,
+		used_at    INTEGER
 	);`,
 }
 

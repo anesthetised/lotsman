@@ -644,9 +644,10 @@ daemon over the [control socket](#control-socket). It runs as the unprivileged u
 `lotsman.db`; its own state, `web.db` (operator passkeys, sessions, enrollment tokens), lives in
 `/var/lib/lotsman-web`. It listens on loopback and needs a reverse proxy in front for TLS.
 
-Operator sign-in and user links are not implemented yet: the panel serves the UI, but every API
-call answers `unauthenticated`. A binary built without the frontend (`go build`, `just build`
-without `just web-build`) serves a page saying so, and the panel logs a warning at start.
+Operators sign in with passkeys (see [Operators and passkeys](#operators-and-passkeys)). User
+links are not implemented yet, so the user page's calls answer `unauthenticated`. A binary built
+without the frontend (`go build`, `just build` without `just web-build`) serves a page saying so,
+and the panel logs a warning at start.
 
 Install, after the gateway itself:
 
@@ -663,6 +664,8 @@ Record `user=lotsman-web` and the unit and state paths in the [manifest](#removi
 daemon was already running when the group was created, restart it once so the socket gets the
 group.
 
+Then enroll the first operator's passkey, as below.
+
 ### Panel configuration
 
 `/etc/lotsman/web.yaml`, separate from `lotsman.yaml` because that file is root's alone and the
@@ -673,13 +676,56 @@ panel must not read the daemon's config. Keep it `0640 root:lotsman-web`. `lotsm
 | Key | Meaning |
 |---|---|
 | `listen` | Numeric TCP address, default `127.0.0.1:8080`. `0.0.0.0` and `[::]` are refused: only the reverse proxy should reach the panel. |
-| `public_url` | Required. The address browsers use, `https://host[:port]` with no path (plain `http` only for a loopback host). Every API call must carry exactly this `Origin`; the `Host` header plays no part. Passkeys (#133) are bound to its host, so changing it means enrolling them again. |
+| `public_url` | Required. The address browsers use, `https://host[:port]` with no path (plain `http` only for a loopback host). The host must be a name, not an IP address: it is the passkeys' RP ID. Every API and sign-in call must carry exactly this `Origin`; the `Host` header plays no part. Passkeys are bound to its host, so changing the host means enrolling every passkey again (see below). |
 | `trusted_proxies` | Addresses or prefixes whose `X-Forwarded-For` the panel believes, such as `[127.0.0.1, "::1"]` for a proxy on the same host. Default none: the client address is the peer's own. Used for rate limits and logs. |
 | `socket` | The daemon's control socket, default `/run/lotsman/control.sock`. |
 | `state_dir` | Where `web.db` lives, default `/var/lib/lotsman-web` (the unit's `StateDirectory=`). |
 
 Changes need `systemctl restart lotsman-web`. A bad config stops the panel at start, with the
 key in the journal. The log level follows `-log-level` or `$LOTSMAN_LOG_LEVEL`, as for `serve`.
+
+### Operators and passkeys
+
+Operators sign in with a passkey (WebAuthn): one kept by the device (Touch ID, Windows Hello, an
+Android phone), a password manager or a security key. There are no passwords and no roles: every
+passkey is an operator with full control. Each passkey needs a PIN or biometric check on every
+use.
+
+The first operator, or anyone locked out, gets in from the server:
+
+```bash
+sudo lotsman web enroll
+```
+
+It prints a one-time link, such as `https://vpn.example.com/enroll#…`, valid for 15 minutes. Open
+it in the browser that will keep the passkey, name the passkey (`laptop`), and follow the
+browser's prompt; the browser is then signed in. The command writes `web.db` directly, so the
+panel need not be running; run it as root or as `lotsman-web` (`sudo -u lotsman-web lotsman web
+enroll`), and it hands any file it creates to the state directory's owner. Treat the link like a
+password until it is used: whoever opens it first becomes an operator. The token after `#` never
+reaches the server's or the proxy's logs, and `web.db` keeps only its hash.
+
+In the console, **Passkeys** lists every passkey with when it was created and last used. **Issue
+enrollment link** makes another one-time link for a new operator or another device; send it over a
+channel you trust. **Revoke** deletes a passkey and ends its sessions at once; revoking the last
+one locks the console until `lotsman web enroll`. Deleting a passkey in the panel does not remove
+it from the device or password manager; remove it there too.
+
+Sessions are a `__Host-lotsman-session` cookie (`HttpOnly`, `Secure`, `SameSite=Strict`). A session
+ends after an hour without a request, after 12 hours in any case, on **Sign out**, and when its
+passkey is revoked. An open live view is not cut when its session ends; the next call is refused
+and the page goes to the sign-in page. Sign-in and enrollment attempts are limited per client
+address (from `trusted_proxies`, see above; an IPv6 /64 counts as one): ten at once, then one per
+30 seconds; past that the panel answers `429`.
+
+**Changing `public_url`'s host** invalidates every passkey: browsers bind a passkey to the host
+name (the RP ID) and will not offer it to another. Enroll again with `lotsman web enroll` after the
+change and revoke the old entries. A change of port or of the proxy alone keeps them.
+
+**Back up `web.db`** (in `state_dir`, with its `-wal` file if present, or with `sqlite3 web.db
+".backup web.db.bak"`) along with `lotsman.db`. It holds the passkeys' public keys and the
+sessions; it holds no private key, so a copy cannot sign anyone in, but losing it means
+enrolling every operator again with `lotsman web enroll`. Keep it `0600 lotsman-web`.
 
 ### Reverse proxy
 
@@ -732,7 +778,8 @@ request body is at most 64 KiB, and only the RPC protocol headers reach the daem
 credentials, forwarded addresses and every `Lotsman-*` header the browser sent are dropped. For
 self-service calls the panel sets `Lotsman-User` itself. When the daemon is down, or the panel's
 user is not in the `lotsman-web` group, calls answer `unavailable` and the panel logs
-`daemon unreachable` with the reason.
+`daemon unreachable` with the reason. The panel's own sign-in endpoints, under `/auth/`, are JSON
+over POST with the same `Origin` check, and never reach the daemon.
 
 ## Monitoring
 

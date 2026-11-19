@@ -491,7 +491,7 @@ or `lotsman.db`. It listens on loopback behind the operator's TLS reverse proxy.
 ```
 browser ──https──▶ reverse proxy ──http──▶ lotsman web ──Connect, unix socket──▶ lotsman serve
                                            scopes, origin,          (trusts its peer)
-                                           sessions (#133),
+                                           passkeys, sessions,
                                            links (#134), UI
 ```
 
@@ -503,15 +503,16 @@ browser ──https──▶ reverse proxy ──http──▶ lotsman web ─�
   a new RPC without a scope fails CI, and a procedure missing from the table is refused at run time.
 - Scopes: operator (every service but `UserSelfService`), user (`UserSelfService`), internal
   (`UserSelfService.ResolveLink`: the panel resolves links itself; a browser never reaches it) and
-  public (none yet). An `Authenticator` interface decides operator and user; until #133 and #134 it
-  is `NoAuth`, which refuses both with `unauthenticated`. There is no bypass flag: integration
-  tests replace the authenticator inside their own test binary.
+  public (none yet). An `Authenticator` interface decides operator and user: `OperatorAuth`
+  (#133, below) checks operator sessions and, until #134, refuses every user with
+  `unauthenticated`. There is no bypass flag: integration tests replace the authenticator inside
+  their own test binary.
 - What reaches the daemon: only the RPC protocol headers (`Content-Type`, `Content-Encoding`,
   `Accept-Encoding`, `Te`, `Connect-*`, `Grpc-*`, `X-Grpc-Web`). Cookies, credentials, forwarded
   addresses and any `Lotsman-*` header from the browser are dropped; for user-scope calls the panel
   then sets `Lotsman-User` to the user it resolved. It is an allowlist rather than stripping
   `Lotsman-*` alone, so a future trusted header cannot leak through by default.
-- Browser checks: API calls and every non-GET/HEAD request need `Origin` equal to `public_url`'s
+- Browser checks: API and `/auth/` calls and every non-GET/HEAD request need `Origin` equal to `public_url`'s
   origin; `Host` is never used, so DNS rebinding and a spoofed `Host` get nowhere. Plain page loads
   carry no `Origin` and serve only the public UI. `X-Forwarded-For` is read only when the peer is in
   `trusted_proxies`, walking back from the last hop to the first untrusted address; the result is
@@ -530,9 +531,8 @@ browser ──https──▶ reverse proxy ──http──▶ lotsman web ─�
   names); any other path without an extension gets `index.html` (`no-cache`), so client routes such
   as `/u/<token>` load the app; a missing path with an extension is a 404 rather than HTML in place
   of a script.
-- State: `web.db` (SQLite, `0600`) in the state directory; the first migration creates the
-  `passkeys`, `sessions` and `enrollments` tables for #133, which may reshape them freely before
-  the first release. A database from a newer panel is refused rather than misread.
+- State: `web.db` (SQLite, `0600`) in the state directory: the `passkeys`, `sessions` and
+  `enrollments` tables of #133. A database from a newer panel is refused rather than misread.
 
 | Option | For | Against |
 |---|---|---|
@@ -548,6 +548,82 @@ browser ──https──▶ reverse proxy ──http──▶ lotsman web ─�
 Cost: the static linux/amd64 binary grows by about 0.2 MB (30,982,304 to 31,174,816 bytes, +0.6%,
 without a built UI). No new module: `net/http/httputil`, `embed` and the already linked
 `modernc.org/sqlite` and `connectrpc.com/connect/v2`.
+
+## Operator sign-in (#133)
+
+Operators sign in to the panel with passkeys (WebAuthn, `github.com/go-webauthn/webauthn`), and the
+panel keeps their sessions in `web.db`. It is the panel's own concern: the endpoints are small JSON
+handlers under `/auth/`, not `lotsman.v1`, and the daemon never sees an operator.
+
+- Identity: every passkey is an operator of its own, with a random 32-byte WebAuthn user handle
+  and the name given at enrollment; all are equal. The RP ID is `public_url`'s host and the only
+  accepted origin is its origin, never `Host`; an IP address is refused at config load, as browsers
+  refuse it as an RP ID. Credentials are discoverable (sign-in needs no user name), user
+  verification is required at registration and at every sign-in, and attestation is `none`, so any
+  authenticator works and no vendor list is kept. The library's credential record is stored as
+  JSON with the credential ID and user handle as columns; each sign-in stores the new signature
+  counter, and a counter that goes back (a cloned key) refuses the sign-in.
+- Enrollment: `lotsman web enroll` (on the host, as root or `lotsman-web`; it writes `web.db`
+  directly and hands files it creates to the state directory's owner) or an operator in the console
+  issues a token: 256 random bits, SHA-256 in `enrollments`, 15 minutes, single use. The link is
+  `<public_url>/enroll#<token>`: the fragment never leaves the browser, so proxies and logs never
+  see it. The token is checked when the ceremony begins (unknown `404`, used or expired `410`) and
+  spent in the same transaction that stores the passkey, so of two ceremonies begun with one link
+  only the first to finish gets in. Enrolling signs the browser in.
+- Ceremonies: the WebAuthn session data of a begun ceremony stays in memory, keyed by its
+  challenge, for 5 minutes, at most 1024 at once. The finish request is matched by the challenge
+  inside the signed client data, so no extra ID or cookie ties the two requests; a ceremony is
+  taken once, whether it then passes or not, so a replayed response finds nothing. A restart drops
+  open ceremonies; the browser starts again.
+- Sessions: a 256-bit random ID in `__Host-lotsman-session` (`HttpOnly; Secure; SameSite=Strict;
+  Path=/`, Max-Age 12 h); `sessions` keeps its SHA-256, the passkey, and when it was created and
+  last used. It ends after 1 h idle or 12 h in all, on logout, and with its passkey (`ON DELETE
+  CASCADE`). A request refreshes the last use at most once a minute. `Authenticator.Operator`
+  looks the session up on every operator RPC; an open `Watch` is not cut when the session ends
+  later. Signing in ends the browser's previous session; expired rows are deleted on lookup and at
+  each sign-in.
+- Rate limit: a token bucket per client address (`ClientAddr`, so `trusted_proxies` applies; an
+  IPv6 /64 is one client): 10 ceremony begins, sign-in and enrollment alike, then one per 30 s.
+  Only begins count, since a finish needs a begun ceremony. At most 10,000 clients are remembered.
+- Endpoints, all `POST` with a JSON body: `session` (whether signed in, and as which passkey; signed
+  out is a `200`, so a page that asks logs no error), `login/begin|finish`, `enroll/begin|finish`,
+  `logout`, and, for a signed-in operator, `passkeys`, `passkeys/revoke` and `enrollments` (issue a
+  link). Responses are `no-store`.
+- CSRF: no extra token. A forged cross-site request needs three things to fail open, and each holds
+  alone: the session cookie is `SameSite=Strict`, so a request started by another site carries no
+  session; every `/auth/` and `/api/` request must carry `Origin` equal to `public_url`'s, which
+  browsers set on every POST and a page cannot forge; and the bodies must be `application/json`
+  (Connect's `application/proto` or `application/json` on `/api/`), which no HTML form can send and
+  which needs a CORS preflight the panel never grants. A GET changes nothing: there are no GET
+  endpoints under `/auth/` or `/api/`. Sign-in itself cannot be forged across sites, as the
+  browser binds the WebAuthn response to the page's origin and the panel checks it.
+
+| Library option | For | Against |
+|---|---|---|
+| **A. `go-webauthn/webauthn` v0.18.2 (chosen)** | The maintained Go RP library (Authelia and Gitea use it); full ceremony checks (origin, RP ID hash, flags, counter, backup flags); passkey (discoverable) login built in | Heavy: 9 new modules (CBOR, MessagePack, TPM, JWT and metadata-service support) for formats we never request; +2.5 MB binary |
+| B. Our own verifier for `none` attestation and ES256/EdDSA/RS256 | A few hundred lines and a CBOR decoder; far smaller binary | Security-critical parsing to write and keep right; the spec's corner cases (flags, extensions, counters) are ours to get right |
+| C. A wrapper such as `egregors/passkey` | Ready HTTP handlers | Still go-webauthn underneath, plus its own session and storage model that fits web.db badly |
+
+| Ceremony state option | For | Against |
+|---|---|---|
+| **A. In memory, keyed by challenge (chosen)** | Nothing to clean up; a replay finds nothing; no cookie or ID round trip | Lost on restart (the browser retries) and per process (the panel is one process) |
+| B. A table in `web.db` | Survives restarts | Rows and writes for every attempt, unauthenticated, so the rate limit then also guards the disk |
+| C. A signed cookie | Stateless | Single use needs server state anyway; a key to manage |
+
+Frontend: `web/src/api/webauthn.ts` converts the JSON options and credentials by hand (base64url)
+instead of `PublicKeyCredential.parseCreationOptionsFromJSON` and `toJSON`, which older Safari and
+Firefox lack, and instead of a dependency such as `@simplewebauthn/browser` for 60 lines. Pages:
+`/login`, `/enroll#<token>`, `/admin/passkeys`; the console checks `/auth/session` before it
+renders, and an operator RPC answering `unauthenticated` sends the browser to `/login?next=…`
+(only `/admin` paths are returned to). In the fake mode (`VITE_FAKE_API=1`) `src/api/fakeAuth.ts`
+answers `/auth/` in memory with real `navigator.credentials` prompts, checking the client data
+but not signatures, so the Playwright tests drive Chromium's virtual authenticator through the same
+code; it starts signed in as `dev` and accepts the enrollment token `dev` once.
+
+Cost: the static linux/amd64 binary grows by 2.5 MB (31,236,256 to 33,751,200 bytes, +8.1%,
+without a built UI). New modules: `github.com/go-webauthn/webauthn` (BSD-3-Clause) and its
+`go-webauthn/x`, `fxamacker/cbor/v2`, `x448/float16`, `tinylib/msgp`, `philhofer/fwd`,
+`google/go-tpm`, `golang-jwt/jwt/v5`, `go-viper/mapstructure/v2`. No new standard-library package.
 
 ## Traffic counters (#129)
 

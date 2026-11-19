@@ -4,7 +4,7 @@
 
 import { create } from "@bufbuild/protobuf";
 import { durationMs, timestampMs } from "@bufbuild/protobuf/wkt";
-import { Code, ConnectError, createRouterTransport, type Transport } from "@connectrpc/connect";
+import { Code, ConnectError, createRouterTransport, type Interceptor, type Transport } from "@connectrpc/connect";
 import { type HistoryRequest, type HistoryResponse, HistoryResponseSchema, HistoryService, SampleSchema } from "../gen/lotsman/v1/history_pb";
 import { type StatusSnapshot, StatusService, type WatchStatusRequest } from "../gen/lotsman/v1/status_pb";
 import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
@@ -18,6 +18,9 @@ const DAY = 86_400_000;
 export interface FakeOptions {
   seed?: number;
   clock?: () => number;
+  interceptors?: Interceptor[];
+  /** Whether an operator is signed in (default: always); operator calls answer Unauthenticated otherwise, as the panel does. */
+  signedIn?: () => boolean;
 }
 
 export function createFakeTransport(options: FakeOptions = {}): Transport {
@@ -31,9 +34,16 @@ export function createFakeTransport(options: FakeOptions = {}): Transport {
     return res;
   };
 
+  const operator = () => {
+    if (options.signedIn && !options.signedIn()) throw new ConnectError("not signed in", Code.Unauthenticated);
+  };
+
   return createRouterTransport(({ service }) => {
     service(StatusService, {
-      watch: (req, ctx) => watch(req, ctx.signal, () => sim.snapshot()),
+      watch: (req, ctx) => {
+        operator();
+        return watch(req, ctx.signal, () => sim.snapshot());
+      },
     });
     service(UserSelfService, {
       get: () => sim.user(FAKE_USER),
@@ -42,10 +52,10 @@ export function createFakeTransport(options: FakeOptions = {}): Transport {
       peerHistory: (req) => history("peer", req, sim.ownerOf(req.name) === FAKE_USER),
     });
     service(HistoryService, {
-      upstream: (req) => history("upstream", req),
-      peer: (req) => history("peer", req),
+      upstream: (req) => (operator(), history("upstream", req)),
+      peer: (req) => (operator(), history("peer", req)),
     });
-  });
+  }, { transport: { interceptors: options.interceptors } });
 }
 
 /** A user sees an upstream's availability and latency, not the traffic of everyone routed through it. */

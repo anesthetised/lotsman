@@ -24,10 +24,11 @@ func secure(next http.Handler) http.Handler {
 	})
 }
 
-// sameOrigin refuses API calls and every unsafe method unless the request
-// carries Origin equal to the public URL's: another site cannot call the API
-// with the operator's cookies, and DNS rebinding gets nowhere. Browsers send
-// no Origin on plain page loads, which are GETs of public files.
+// sameOrigin refuses API and sign-in calls and every unsafe method unless
+// the request carries Origin equal to the public URL's: another site cannot
+// call them with the operator's cookies, and DNS rebinding gets nowhere.
+// Browsers send no Origin on plain page loads, which are GETs of public
+// files.
 func sameOrigin(origin string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		safe := r.Method == http.MethodGet || r.Method == http.MethodHead
@@ -39,7 +40,14 @@ func sameOrigin(origin string, next http.Handler) http.Handler {
 	})
 }
 
-func isAPI(path string) bool { return path == apiPrefix || strings.HasPrefix(path, apiPrefix+"/") }
+func isAPI(path string) bool {
+	for _, prefix := range []string{apiPrefix, authPrefix} {
+		if path == prefix || strings.HasPrefix(path, prefix+"/") {
+			return true
+		}
+	}
+	return false
+}
 
 type clientKey struct{}
 

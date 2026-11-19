@@ -1,7 +1,6 @@
 package web
 
 import (
-	"errors"
 	"net/http"
 
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
@@ -70,19 +69,10 @@ var Scopes = map[string]Scope{
 	lotsmanv1connect.UserSelfServicePeerHistoryProcedure:     User,
 }
 
-// Authenticator tells who sent a request. Operator sessions (#133) and user
-// links (#134) implement it; until then NoAuth refuses everyone.
+// Authenticator tells who sent a request: OperatorAuth in production.
 type Authenticator interface {
 	// Operator returns nil when r comes from a signed-in operator.
 	Operator(r *http.Request) error
-	// User returns the user whose link r carries.
+	// User returns the user whose link r carries (#134).
 	User(r *http.Request) (string, error)
 }
-
-// NoAuth authenticates nobody, so only public RPCs answer.
-type NoAuth struct{}
-
-var errNoAuth = errors.New("sign-in is not available yet")
-
-func (NoAuth) Operator(*http.Request) error       { return errNoAuth }
-func (NoAuth) User(*http.Request) (string, error) { return "", errNoAuth }
