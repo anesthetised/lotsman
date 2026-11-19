@@ -35,10 +35,11 @@ func (everyoneOperator) Operator(*http.Request) error       { return nil }
 func (everyoneOperator) User(*http.Request) (string, error) { return "", nil }
 
 // panelSource is a daemon with one upstream. The test never calls the
-// profile and connection services.
+// profile, connection and history services.
 type panelSource struct {
 	control.ProfileSource
 	control.ConnectionSource
+	control.HistorySource
 }
 
 func (panelSource) Ready() <-chan struct{} {

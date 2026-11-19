@@ -29,6 +29,15 @@ type Config struct {
 	Upstreams []Upstream   `yaml:"upstreams"`
 	Health    Health       `yaml:"health"`
 	Metrics   Metrics      `yaml:"metrics"`
+	History   History      `yaml:"history"`
+}
+
+// History is how long the availability and traffic history is kept: samples
+// of a minute for MinuteRetention, then samples of an hour until HourRetention
+// has passed since the sample, counted from now.
+type History struct {
+	MinuteRetention time.Duration `yaml:"minute_retention"`
+	HourRetention   time.Duration `yaml:"hour_retention"`
 }
 
 // Metrics enables the Prometheus endpoint when Listen is set. The endpoint
@@ -187,6 +196,7 @@ func Default() Config {
 		StateDir: "/var/lib/lotsman",
 		Health: Health{Interval: 15 * time.Second, Probe: ProbeTargets{netip.MustParseAddrPort("1.1.1.1:443")},
 			DNS: DNSTargets{netip.MustParseAddrPort("1.1.1.1:53")}, DownAfter: 3, UpAfter: 2},
+		History: History{MinuteRetention: 7 * 24 * time.Hour, HourRetention: 90 * 24 * time.Hour},
 	}
 }
 
@@ -330,6 +340,12 @@ func (c *Config) Validate() error {
 				return fmt.Errorf("upstream %q: duplicate tag %q", u.Name, tag)
 			}
 		}
+	}
+	if c.History.MinuteRetention < time.Hour {
+		return fmt.Errorf("history.minute_retention: must be at least 1h")
+	}
+	if c.History.HourRetention < c.History.MinuteRetention {
+		return fmt.Errorf("history.hour_retention: must not be shorter than minute_retention")
 	}
 	h := c.Health
 	if h.Interval <= 0 {

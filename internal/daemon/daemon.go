@@ -184,6 +184,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	// Transfer probes end once ctx is done; none may outlive the devices.
 	defer d.transferRuns.Wait()
 	defer d.sampleTraffic(ctx)() // stopped before d.stop closes the devices
+	defer d.recordHistory(ctx)() // reads the sampler and the trackers, so it stops first too
 	// Stopped before d.stop, so no repair races the teardown.
 	watchCtx, stopWatch := context.WithCancel(ctx)
 	watched := make(chan struct{})

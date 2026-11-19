@@ -82,6 +82,14 @@ health:
   #   timeout: 10s
   #   interval: 5m
 
+# How long the availability and traffic history behind the web panel's charts
+# is kept: samples of a minute for minute_retention, then samples of an hour
+# until they are hour_retention old. These are the defaults; hours, not days
+# ("168h"). Applies on reload.
+# history:
+#   minute_retention: 168h   # 7 days; at least 1h
+#   hour_retention: 2160h    # 90 days; not shorter than minute_retention
+
 # Prometheus endpoint, off unless set. It names users, so keep it on the tunnel
 # gateway (reachable by clients only) or on loopback; 0.0.0.0 is refused.
 # metrics:

@@ -92,6 +92,45 @@ var migrations = []string{
 	INSERT INTO peers_new SELECT id, user_id, device, profile, private_key, public_key, ip, created_at FROM peers;
 	DROP TABLE peers;
 	ALTER TABLE peers_new RENAME TO peers;`,
+	// Availability and traffic history, see history.go. One table per
+	// resolution: the minute tables hold what is recent, a fold turns older
+	// minutes into the hour tables, and each is clustered by series and time
+	// (WITHOUT ROWID), so a range of one series is one contiguous scan and no
+	// other index is kept. The peer tables name no peers(id): the peers
+	// migrations above rebuild that table, and a removed peer's rows only
+	// wait for their retention to pass.
+	`CREATE TABLE upstream_samples (
+		upstream   TEXT NOT NULL,
+		ts         INTEGER NOT NULL,
+		up_ratio   REAL NOT NULL,
+		rtt_ms     REAL,
+		down_bytes INTEGER NOT NULL,
+		up_bytes   INTEGER NOT NULL,
+		PRIMARY KEY (upstream, ts)
+	) WITHOUT ROWID;
+	CREATE TABLE upstream_hour_samples (
+		upstream   TEXT NOT NULL,
+		ts         INTEGER NOT NULL,
+		up_ratio   REAL NOT NULL,
+		rtt_ms     REAL,
+		down_bytes INTEGER NOT NULL,
+		up_bytes   INTEGER NOT NULL,
+		PRIMARY KEY (upstream, ts)
+	) WITHOUT ROWID;
+	CREATE TABLE peer_samples (
+		peer_id    INTEGER NOT NULL,
+		ts         INTEGER NOT NULL,
+		down_bytes INTEGER NOT NULL,
+		up_bytes   INTEGER NOT NULL,
+		PRIMARY KEY (peer_id, ts)
+	) WITHOUT ROWID;
+	CREATE TABLE peer_hour_samples (
+		peer_id    INTEGER NOT NULL,
+		ts         INTEGER NOT NULL,
+		down_bytes INTEGER NOT NULL,
+		up_bytes   INTEGER NOT NULL,
+		PRIMARY KEY (peer_id, ts)
+	) WITHOUT ROWID;`,
 }
 
 type User struct {

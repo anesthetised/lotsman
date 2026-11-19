@@ -32,6 +32,7 @@ import (
 type fakeSource struct {
 	ProfileSource
 	ConnectionSource
+	HistorySource // none unless a test sets one
 
 	ready chan struct{}
 	st    daemon.Status
@@ -262,6 +263,8 @@ func TestUnimplemented(t *testing.T) {
 		lotsmanv1connect.ProfileServiceListProcedure,
 		lotsmanv1connect.ProfileServicePutProcedure,
 		lotsmanv1connect.ProfileServiceDeleteProcedure,
+		lotsmanv1connect.HistoryServiceUpstreamProcedure,
+		lotsmanv1connect.HistoryServicePeerProcedure,
 	}
 	s := NewServer(newFakeSource(daemon.Status{}))
 	var registered []string
