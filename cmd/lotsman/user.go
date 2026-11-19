@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -14,66 +15,35 @@ import (
 	"github.com/mdp/qrterminal/v3"
 
 	"github.com/anesthetised/lotsman/internal/daemon"
+	"github.com/anesthetised/lotsman/internal/policy"
 	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/web"
 )
 
+// userAdd creates a user without devices, for an operator who sets their
+// rights before handing out their link; `device add` creates one too.
 func userAdd(configPath string, args []string) error {
-	a, err := parseUserArgs("user add", args, true)
+	name, err := userName("user add", args)
 	if err != nil {
 		return err
 	}
-	name, device, profile := a.name, a.device, a.profile
+	if len(args) > 1 {
+		return fmt.Errorf("user add: unexpected argument %q; `device add USER/DEVICE` adds a device", args[1])
+	}
+	if strings.Contains(name, "/") {
+		return errors.New("user add: NAME must not contain /, which separates USER/DEVICE")
+	}
 	e, err := openEnv(configPath)
 	if err != nil {
 		return err
 	}
 	defer e.store.Close()
-	// Everything that can fail without touching the store runs first, so a
-	// rejected command leaves neither a user nor a peer behind.
-	m, err := e.clientMTU()
-	if err != nil {
+	if _, err := e.store.CreateUser(name); errors.Is(err, store.ErrExists) {
+		return fmt.Errorf("user %s already exists", name)
+	} else if err != nil {
 		return err
-	}
-	peer, err := e.store.AddUserPeer(name, device, profile, e.cfg.Subnet)
-	if errors.Is(err, store.ErrExists) {
-		return fmt.Errorf("%s/%s already has profile %s; use `user show`", name, device, profile)
-	}
-	if errors.Is(err, store.ErrNoProfile) {
-		return fmt.Errorf("profile %q does not exist; see `profile list`", profile)
-	}
-	if err != nil {
-		return err
-	}
-	// The peer is committed: the daemon must learn about it even when the
-	// config cannot be written.
-	werr := printClientConfig(e, peer, m, a.qr)
-	nudgeDaemon(e)
-	if werr != nil {
-		return fmt.Errorf("the peer was added but its config was not written (%w); print it again with `user show %s -profile %s -device %s`", werr, name, profile, device)
 	}
 	return nil
-}
-
-func userShow(configPath string, args []string) error {
-	a, err := parseUserArgs("user show", args, true)
-	if err != nil {
-		return err
-	}
-	e, err := openEnv(configPath)
-	if err != nil {
-		return err
-	}
-	defer e.store.Close()
-	peer, err := e.store.Peer(a.name, a.device, a.profile)
-	if err != nil {
-		return fmt.Errorf("%s/%s/%s: %w", a.name, a.device, a.profile, err)
-	}
-	m, err := e.clientMTU()
-	if err != nil {
-		return err
-	}
-	return printClientConfig(e, peer, m, a.qr)
 }
 
 func userList(configPath string) error {
@@ -95,38 +65,47 @@ func userList(configPath string) error {
 		byUser[p.User] = append(byUser[p.User], p)
 	}
 	// Live data comes from the daemon's status file; without a daemon the columns stay "-".
-	live := map[[3]string]daemon.PeerStatus{}
+	live := map[int64]daemon.PeerStatus{}
 	if st, err := readStatus(e.cfg.StateDir); err == nil {
 		for _, ps := range st.Peers {
-			live[[3]string{ps.User, ps.Device, ps.Profile}] = ps
+			live[ps.ID] = ps
 		}
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "USER\tDEVICE\tPROFILE\tADDRESS\tUPSTREAM\tLAST HANDSHAKE\tCREATED")
+	// The route goes last: it has spaces, as LAST HANDSHAKE does.
+	fmt.Fprintln(w, "USER\tDEVICE\tADDRESS\tUPSTREAM\tLAST HANDSHAKE\tCREATED\tROUTE")
 	for _, u := range users {
-		// A user whose last device was removed keeps their link, so list them too.
+		// A user without devices keeps their rights and link, so list them too.
 		if len(byUser[u.Name]) == 0 {
 			fmt.Fprintf(w, "%s\t-\t-\t-\t-\t-\t%s\n", u.Name, u.CreatedAt.Format("2006-01-02"))
 		}
 		for _, p := range byUser[u.Name] {
 			upstream, handshake := "-", "-"
-			if ps, ok := live[[3]string{p.User, p.Device, p.Profile}]; ok {
+			if ps, ok := live[p.ID]; ok {
 				upstream, handshake = ps.Upstream, ago(ps.LastHandshake)
 				if upstream == "" {
 					upstream = "blocked"
 				}
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.User, p.Device, p.Profile, p.IP, upstream, handshake, p.CreatedAt.Format("2006-01-02"))
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", p.User, p.Device, p.IP, upstream, handshake, p.CreatedAt.Format("2006-01-02"), p.Route)
 		}
 	}
 	return w.Flush()
 }
 
-// userRemove drops one peer (-device and -profile), every profile of a
-// device (-device only), or the whole user (neither).
-func userRemove(configPath string, args []string) error {
-	a, err := parseUserArgs("user rm", args, false)
+// userRights prints NAME's rights, after changing those given as flags.
+// The exits are checked against the config file, as routes are; the daemon
+// moves the devices off exits no longer allowed when nudged.
+func userRights(configPath string, args []string) error {
+	fs := flag.NewFlagSet("user rights", flag.ContinueOnError)
+	editRoutes := fs.Bool("edit-routes", true, "whether the user sets their devices' routes on their page")
+	showProviders := fs.Bool("show-providers", true, "whether the user's page shows providers, or countries only")
+	exits := fs.String("exits", "all", "the upstreams the user's devices may use, joined by commas, or all")
+	name, err := userName("user rights", args)
 	if err != nil {
+		return err
+	}
+	if err := parseAfterName(fs, args); err != nil {
 		return err
 	}
 	e, err := openEnv(configPath)
@@ -134,18 +113,94 @@ func userRemove(configPath string, args []string) error {
 		return err
 	}
 	defer e.store.Close()
-	switch {
-	case a.profile != "":
-		err = e.store.DeletePeer(a.name, a.device, a.profile)
-	case a.deviceSet:
-		err = e.store.DeleteDevice(a.name, a.device)
-	default:
-		err = e.store.DeleteUser(a.name)
-	}
+	u, err := e.store.User(name)
 	if err != nil {
-		return fmt.Errorf("%s: %w", a.name, err)
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	r, changed := u.Rights, false
+	var exitsErr error
+	fs.Visit(func(f *flag.Flag) {
+		changed = true
+		switch f.Name {
+		case "edit-routes":
+			r.EditRoutes = *editRoutes
+		case "show-providers":
+			r.ShowProviders = *showProviders
+		case "exits":
+			r.Exits, exitsErr = parseExits(*exits)
+		}
+	})
+	if exitsErr != nil {
+		return fmt.Errorf("user rights: -exits: %w", exitsErr)
+	}
+	if changed {
+		if err := policy.ValidateExits(r.Exits, e.cfg.Upstreams); err != nil {
+			return fmt.Errorf("user rights: %w", err)
+		}
+		if u, err = e.store.SetRights(name, r); err != nil {
+			return err
+		}
+		nudgeDaemon(e)
+	}
+	exitList := "all"
+	if len(u.Rights.Exits) > 0 {
+		exitList = strings.Join(u.Rights.Exits, ",")
+	}
+	fmt.Printf("edit-routes     %t\nshow-providers  %t\nexits           %s\n", u.Rights.EditRoutes, u.Rights.ShowProviders, exitList)
+	return nil
+}
+
+// parseExits reads -exits: upstream names joined by commas, or all.
+func parseExits(s string) ([]string, error) {
+	if s == "all" {
+		return nil, nil
+	}
+	exits := strings.Split(s, ",")
+	if slices.Contains(exits, "") {
+		return nil, fmt.Errorf("%q: want upstream names joined by commas, or all", s)
+	}
+	return exits, nil
+}
+
+// userRemove drops the user, their devices and their link.
+func userRemove(configPath string, args []string) error {
+	name, err := userName("user rm", args)
+	if err != nil {
+		return err
+	}
+	if len(args) > 1 {
+		return fmt.Errorf("user rm: unexpected argument %q; `device rm USER/DEVICE` removes one device", args[1])
+	}
+	e, err := openEnv(configPath)
+	if err != nil {
+		return err
+	}
+	defer e.store.Close()
+	if err := e.store.DeleteUser(name); err != nil {
+		return fmt.Errorf("%s: %w", name, err)
 	}
 	nudgeDaemon(e)
+	return nil
+}
+
+// userName is the NAME a user command starts with.
+func userName(cmd string, args []string) (string, error) {
+	if len(args) == 0 || args[0] == "" || args[0][0] == '-' {
+		return "", fmt.Errorf("%s: NAME is required", cmd)
+	}
+	return args[0], nil
+}
+
+// parseAfterName parses the flags after a command's first argument. Flag
+// parsing stops at the first positional argument, so whatever followed it
+// would be silently ignored; it is refused instead.
+func parseAfterName(fs *flag.FlagSet, args []string) error {
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("%s: unexpected argument %q (flags go after %s as -flag value)", fs.Name(), fs.Arg(0), args[0])
+	}
 	return nil
 }
 
@@ -159,15 +214,12 @@ func userLink(configPath string, args []string) error {
 	fs := flag.NewFlagSet("user link", flag.ContinueOnError)
 	revoke := fs.Bool("revoke", false, "end the user's link instead of issuing one")
 	base := fs.String("url", "", "the panel's public URL (default: public_url of the panel's config, see `web`)")
-	if len(args) == 0 || args[0] == "" || args[0][0] == '-' {
-		return errors.New("user link: NAME is required")
-	}
-	name := args[0]
-	if err := fs.Parse(args[1:]); err != nil {
+	name, err := userName("user link", args)
+	if err != nil {
 		return err
 	}
-	if fs.NArg() > 0 {
-		return fmt.Errorf("user link: unexpected argument %q (flags go after NAME as -flag value)", fs.Arg(0))
+	if err := parseAfterName(fs, args); err != nil {
+		return err
 	}
 	origin := *base
 	if origin == "" {
@@ -219,49 +271,6 @@ func checkPanelURL(s string) error {
 		return fmt.Errorf("%q: want https://host[:port]; the panel is served at the root", s)
 	}
 	return nil
-}
-
-type userArgs struct {
-	name, device, profile string
-	deviceSet, qr         bool
-}
-
-func parseUserArgs(cmd string, args []string, profileRequired bool) (userArgs, error) {
-	var a userArgs
-	fs := flag.NewFlagSet(cmd, flag.ContinueOnError)
-	fs.StringVar(&a.profile, "profile", "", "profile name, see `profile list`")
-	fs.StringVar(&a.device, "device", store.DefaultDevice, "the user's device; each device needs its own config")
-	fs.BoolVar(&a.qr, "qr", false, "also print the config as a QR code on stderr")
-	if len(args) == 0 || args[0] == "" || args[0][0] == '-' {
-		return a, fmt.Errorf("%s: NAME is required", cmd)
-	}
-	a.name = args[0]
-	if err := fs.Parse(args[1:]); err != nil {
-		return a, err
-	}
-	// Flag parsing stops at the first positional argument; whatever follows
-	// would be silently ignored, e.g. `user rm alice phone -profile nl`.
-	if fs.NArg() > 0 {
-		return a, fmt.Errorf("%s: unexpected argument %q (flags go after NAME as -flag value)", cmd, fs.Arg(0))
-	}
-	var profileSet bool
-	fs.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "device":
-			a.deviceSet = true
-		case "profile":
-			profileSet = true
-		}
-	})
-	// An empty value would pick the whole-user or whole-device form of
-	// `user rm`, e.g. from an unset shell variable: `-profile "$P"`.
-	if profileSet && a.profile == "" {
-		return a, fmt.Errorf("%s: -profile must not be empty", cmd)
-	}
-	if profileRequired && a.profile == "" {
-		return a, fmt.Errorf("%s: -profile is required", cmd)
-	}
-	return a, nil
 }
 
 // printClientConfig writes the config to stdout so it can be redirected to a

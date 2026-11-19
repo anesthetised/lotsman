@@ -1,5 +1,5 @@
 import type { Page } from "@playwright/test";
-import { expect, pressIn, settled, test } from "./fixtures";
+import { expect, pressIn, test } from "./fixtures";
 
 /** The console fits the window: tables scroll inside their frames, the page never sideways. */
 async function noSidewaysScroll(page: Page) {
@@ -11,7 +11,6 @@ test("every page is reachable from the navigation", async ({ page }) => {
   await page.goto("/admin");
   const nav = page.getByRole("navigation", { name: "Operator" });
   for (const [name, path, heading] of [
-    ["Profiles", "/admin/profiles", "Profiles"],
     ["Users", "/admin/users", "Users"],
     ["Connections", "/admin/connections", "Connections"],
     ["Passkeys", "/admin/passkeys", "Passkeys"],
@@ -25,141 +24,121 @@ test("every page is reachable from the navigation", async ({ page }) => {
   }
 });
 
-test("create, edit and delete a profile", async ({ page }) => {
-  await page.goto("/admin/profiles");
-  const table = page.getByRole("table");
-  await expect(table.getByRole("row")).toHaveCount(5); // header + default, streaming, backup, fi
-  // The daemon's warnings show with the profile they are about.
-  const fi = table.getByRole("row", { name: /^fi/ });
-  await expect(fi).toContainText("Tier 1 (geo=FI) matches no upstream and is ignored.");
-  await expect(table.getByRole("row", { name: /^default/ })).toContainText("Tier 2 (geo=LV) never applies: tier 1 tag=near already takes");
-
-  await page.getByRole("button", { name: "New profile" }).click();
-  const dialog = page.getByRole("dialog", { name: "New profile" });
-  await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
-  await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(dialog.getByText("Give the profile a name.")).toBeVisible();
-  await expect(dialog.getByLabel("Name")).toBeFocused();
-  await expect(dialog.getByLabel("Name")).toHaveAttribute("aria-invalid", "true");
-  await dialog.getByLabel("Name").fill("default");
-  await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(dialog.getByText("A profile of this name exists, ignoring case.")).toBeVisible();
-
-  await dialog.getByLabel("Name").fill("eu");
-  await dialog.getByRole("button", { name: "Add tier" }).click();
-  await expect(dialog.getByLabel("Tier 1 geo")).toBeFocused();
-  await dialog.getByLabel("Tier 1 geo").fill("FI");
-  await dialog.getByRole("button", { name: "Add tier" }).click();
-  await dialog.getByLabel("Tier 2 tag").fill("eu");
-  await expect(dialog.getByText("lotsman profile add eu geo=FI tag=eu")).toBeVisible();
-  // No upstream is in FI: the form flags the tier and sends nothing.
-  await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(dialog.getByText("Tier 1 matches no upstream. The fields suggest the values that do.")).toBeVisible();
-  await expect(dialog.getByLabel("Tier 1 geo")).toBeFocused();
-  await expect(dialog.getByLabel("Tier 1 geo")).toHaveAttribute("aria-invalid", "true");
-  await expect(dialog.locator("#profile-new-tier-0-geo-options option")).toHaveCount(4);
-
-  await dialog.getByLabel("Tier 1 geo").fill("LV");
-  await expect(dialog.getByText("Tier 1 matches no upstream.")).toBeHidden();
-  await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(dialog).toBeHidden();
-  const eu = table.getByRole("row", { name: /^eu/ });
-  const tiers = eu.getByRole("list", { name: "Tiers of eu" }).getByRole("listitem");
-  await expect(tiers).toHaveText(["1. geo=LV", "2. tag=eu"]);
-  await expect(eu).not.toContainText("Warning");
-
-  // Reorder from the keyboard: focus follows the moved tier.
-  await page.getByRole("button", { name: "Edit eu" }).click();
-  const edit = page.getByRole("dialog", { name: "Edit profile eu" });
-  await expect(edit.getByLabel("Name")).toHaveAttribute("readonly", "");
-  await expect(edit.getByRole("button", { name: "Close" })).toBeFocused();
-  await settled(edit);
-  await edit.getByRole("button", { name: "Move tier 2 up" }).focus();
-  await page.keyboard.press("Enter");
-  await expect(edit.getByLabel("Tier 1 tag")).toHaveValue("eu");
-  await expect(edit.getByRole("button", { name: "Move tier 1 down" })).toBeFocused();
-  await edit.getByRole("button", { name: "Remove tier 2" }).click();
-  await expect(edit.getByRole("button", { name: "Add tier" })).toBeFocused();
-  await edit.getByRole("button", { name: "Save" }).click();
-  await expect(edit).toBeHidden();
-  await expect(tiers).toHaveText(["1. tag=eu"]);
-  await expect(eu).not.toContainText("matches no upstream");
-
-  // A profile in use cannot go.
-  await page.getByRole("button", { name: "Delete default" }).click();
-  const refuse = page.getByRole("dialog", { name: "Delete profile default?" });
-  await refuse.getByRole("button", { name: "Delete" }).click();
-  await expect(refuse.getByRole("alert")).toHaveText("default is in use. Remove its devices or give them another profile first.");
-  await pressIn(refuse, "Escape");
-  await expect(refuse).toBeHidden();
-
-  await page.getByRole("button", { name: "Delete eu" }).click();
-  await page.getByRole("dialog", { name: "Delete profile eu?" }).getByRole("button", { name: "Delete" }).click();
-  await expect(eu).toBeHidden();
-  await expect(table.getByRole("row")).toHaveCount(5);
-  await noSidewaysScroll(page);
-});
-
-test("add a device and see its config and QR code", async ({ page, context }) => {
+test("add a user and a device, and see its config and QR code", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("/admin/users");
-  await expect(page.getByRole("heading", { name: "alice", level: 2 })).toBeVisible();
+  const list = page.getByRole("table");
+  await expect(list.getByRole("row")).toHaveCount(4); // header + alice, bob, carol
+  await expect(list.getByRole("row", { name: /^bob/ })).toContainText("operator sets routes · 2 exits");
 
-  await page.getByRole("button", { name: "Add device", exact: true }).click();
-  const dialog = page.getByRole("dialog", { name: "Add a device" });
-  await dialog.getByLabel("User").fill("dave");
+  await page.getByRole("button", { name: "Add user" }).click();
+  const addUser = page.getByRole("dialog", { name: "Add a user" });
+  await addUser.getByLabel("Name").fill("eve");
+  await addUser.getByRole("button", { name: "Add", exact: true }).click();
+  await expect(page).toHaveURL("/admin/users/eve");
+  await expect(page.getByRole("heading", { name: "eve", level: 1 })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Users", exact: true }).first()).toHaveAttribute("aria-current", "page");
+  await expect(page.getByText("No devices.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Add device" }).click();
+  const dialog = page.getByRole("dialog", { name: "Add a device for eve" });
   await dialog.getByLabel("Device").fill("phone");
-  await expect(dialog.getByLabel("Profile")).toHaveValue("default");
   await dialog.getByRole("button", { name: "Add", exact: true }).click();
 
-  const config = page.getByRole("dialog", { name: "Config of dave/phone · default" });
+  const config = page.getByRole("dialog", { name: "Config of eve/phone" });
   await expect(config.getByLabel("Config file")).toHaveValue(/^\[Interface\]\nPrivateKey = .+\nAddress = 10\.8\.0\.8\/32\n/);
-  const qr = config.getByRole("img", { name: "QR code of the config of dave/phone · default" });
+  const qr = config.getByRole("img", { name: "QR code of the config of eve/phone" });
   await expect(qr).toBeVisible();
   expect(await qr.evaluate((svg) => svg.tagName + (svg.querySelector("path")?.getAttribute("d")?.length ?? 0))).toMatch(/^svg\d{4,}$/);
 
   await config.getByRole("button", { name: "Copy" }).click();
   await expect(config.getByRole("button", { name: "Copied" })).toBeVisible();
   expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/^\[Interface\]/);
-  const [file] = await Promise.all([page.waitForEvent("download"), config.getByRole("button", { name: "Download dave-phone.conf" }).click()]);
-  expect(file.suggestedFilename()).toBe("dave-phone.conf");
+  const [file] = await Promise.all([page.waitForEvent("download"), config.getByRole("button", { name: "Download eve-phone.conf" }).click()]);
+  expect(file.suggestedFilename()).toBe("eve-phone.conf");
   await pressIn(config, "Escape");
   await expect(config).toBeHidden();
 
-  // The new user is listed, and the config can be shown again.
-  const dave = page.getByRole("region", { name: "dave" });
-  await expect(dave.getByRole("row")).toHaveCount(2);
-  await dave.getByRole("button", { name: "Config dave/phone · default" }).click();
-  const again = page.getByRole("dialog", { name: "Config of dave/phone · default" });
+  // The device is listed with the default route, and its config can be shown again.
+  const devices = page.getByRole("region", { name: "Devices" });
+  await expect(devices.getByRole("row")).toHaveCount(2);
+  await expect(devices.getByRole("row", { name: /^phone/ })).toContainText("Any, fastest");
+  await expect(devices.getByRole("row", { name: /^phone/ })).toContainText("lv-1");
+  await devices.getByRole("button", { name: "Config eve/phone" }).click();
+  const again = page.getByRole("dialog", { name: "Config of eve/phone" });
   await expect(again.getByLabel("Config file")).toHaveValue(/Address = 10\.8\.0\.8\/32/);
   await pressIn(again, "Escape");
   await expect(again).toBeHidden();
 
-  // The same device and profile twice is refused, with the daemon's reason.
-  await dave.getByRole("button", { name: "Add device for dave" }).click();
-  const twice = page.getByRole("dialog", { name: "Add a device" });
-  await expect(twice.getByLabel("User")).toHaveValue("dave");
+  // The same device twice is refused, with the daemon's reason.
+  await page.getByRole("button", { name: "Add device" }).click();
+  const twice = page.getByRole("dialog", { name: "Add a device for eve" });
   await twice.getByLabel("Device").fill("phone");
   await twice.getByRole("button", { name: "Add", exact: true }).click();
-  await expect(twice.getByRole("alert")).toHaveText(/dave\/phone already has profile default/);
+  await expect(twice.getByRole("alert")).toHaveText(/device eve\/phone already exists/);
   await noSidewaysScroll(page);
 });
 
+test("edit a device's route from the console", async ({ page }) => {
+  await page.goto("/admin/users/alice");
+  const devices = page.getByRole("region", { name: "Devices" });
+  await expect(devices.getByRole("row", { name: /^tv/ })).toContainText("Fastest: Latvia (provider-b), Netherlands · strict");
+  await expect(page.getByRole("region", { name: "Route of phone" })).toBeVisible(); // the first device's, at first
+
+  await devices.getByRole("button", { name: "Route tv" }).click();
+  await expect(devices.getByRole("button", { name: "Route tv" })).toHaveAttribute("aria-pressed", "true");
+  const editor = page.getByRole("region", { name: "Route of tv" });
+  await editor.getByRole("button", { name: "In order" }).click();
+  await editor.getByRole("button", { name: "Netherlands, 2 of 2" }).focus();
+  await page.keyboard.press("ArrowUp");
+  await editor.getByRole("button", { name: "Apply" }).click();
+  await expect(devices.getByRole("row", { name: /^tv/ })).toContainText("Netherlands → Latvia (provider-b) · strict");
+  // The Netherlands is degraded, a last resort: Latvia's provider-b is up, so tv stays on lv-2.
+  await expect(devices.getByRole("row", { name: /^tv/ })).toContainText("lv-2");
+  await expect(editor.getByRole("button", { name: "Apply" })).toBeDisabled();
+  await noSidewaysScroll(page);
+});
+
+test("a user's rights: who sets routes, the allowed exits, providers", async ({ page }) => {
+  await page.goto("/admin/users/alice");
+  const rights = page.getByRole("region", { name: "Rights" });
+  const editRoutes = rights.getByRole("switch", { name: "Changes routes themselves" });
+  await expect(editRoutes).toHaveAttribute("aria-checked", "true");
+  await editRoutes.click();
+  await expect(editRoutes).toHaveAttribute("aria-checked", "false");
+
+  // Every exit is allowed by default; taking one away takes its country out of the route editor.
+  const exits = rights.getByRole("group", { name: "Allowed exits" });
+  await expect(exits.getByRole("button")).toHaveText(["lv-1", "lv-2", "al-1", "nl-1", "de-1"]);
+  for (const name of ["lv-1", "lv-2", "al-1", "nl-1", "de-1"]) await expect(exits.getByRole("button", { name })).toHaveAttribute("aria-pressed", "true");
+  const editor = page.getByRole("region", { name: "Route of phone" });
+  await expect(editor.getByRole("switch", { name: "Use Germany" })).toBeVisible();
+  await exits.getByRole("button", { name: "de-1" }).click();
+  await expect(exits.getByRole("button", { name: "de-1" })).toHaveAttribute("aria-pressed", "false");
+  await expect(editor.getByRole("switch", { name: "Use Germany" })).toHaveCount(0);
+
+  const providers = rights.getByRole("switch", { name: "Show providers" });
+  await providers.click();
+  await expect(providers).toHaveAttribute("aria-checked", "false");
+
+  await page.getByRole("navigation", { name: "Operator" }).getByRole("link", { name: "Users" }).click();
+  await expect(page.getByRole("row", { name: /^alice/ })).toContainText("operator sets routes · 4 exits · countries only");
+});
+
 test("issue a link, see it once in its /u# form, revoke it", async ({ page }) => {
-  await page.goto("/admin/users");
-  const bob = page.getByRole("region", { name: "bob" });
-  await expect(bob).toContainText("No link");
-  await bob.getByRole("button", { name: "Issue link bob" }).click();
+  await page.goto("/admin/users/bob");
+  await expect(page.getByText("No link")).toBeVisible();
+  await page.getByRole("button", { name: "Issue link" }).click();
   const dialog = page.getByRole("dialog", { name: "Link for bob" });
   await dialog.getByRole("button", { name: "Issue link" }).click();
   const link = await dialog.getByLabel("Link").inputValue();
   expect(link).toMatch(/^http:\/\/localhost:\d+\/u#[\w-]{43}$/);
   await pressIn(dialog, "Escape");
   await expect(dialog).toBeHidden();
-  await expect(bob).toContainText("Has a link");
+  await expect(page.getByText("Has a link")).toBeVisible();
 
   // Issuing again rotates it.
-  await bob.getByRole("button", { name: "New link bob" }).click();
+  await page.getByRole("button", { name: "New link" }).click();
   const rotate = page.getByRole("dialog", { name: "Link for bob" });
   await expect(rotate).toContainText("The current link stops working");
   await rotate.getByRole("button", { name: "New link" }).click();
@@ -167,20 +146,20 @@ test("issue a link, see it once in its /u# form, revoke it", async ({ page }) =>
   await pressIn(rotate, "Escape");
   await expect(rotate).toBeHidden();
 
-  await bob.getByRole("button", { name: "Revoke link bob" }).click();
+  await page.getByRole("button", { name: "Revoke link" }).click();
   await page.getByRole("dialog", { name: "Revoke bob's link?" }).getByRole("button", { name: "Revoke link" }).click();
-  await expect(bob).toContainText("No link");
+  await expect(page.getByText("No link")).toBeVisible();
 });
 
 test("remove a device and a user, confirmed from the keyboard", async ({ page }) => {
-  await page.goto("/admin/users");
-  const alice = page.getByRole("region", { name: "alice" });
-  await expect(alice.getByRole("row")).toHaveCount(4); // header + phone, laptop, tv
+  await page.goto("/admin/users/alice");
+  const devices = page.getByRole("region", { name: "Devices" });
+  await expect(devices.getByRole("row")).toHaveCount(4); // header + phone, laptop, tv
 
-  const trigger = alice.getByRole("button", { name: "Remove alice/tv · streaming" });
+  const trigger = devices.getByRole("button", { name: "Remove alice/tv" });
   await trigger.focus();
   await page.keyboard.press("Enter");
-  const dialog = page.getByRole("dialog", { name: "Remove alice/tv · streaming?" });
+  const dialog = page.getByRole("dialog", { name: "Remove alice/tv?" });
   await expect(dialog.getByRole("button", { name: "Close" })).toBeFocused();
   await pressIn(dialog, "Escape");
   await expect(dialog).toBeHidden();
@@ -196,14 +175,18 @@ test("remove a device and a user, confirmed from the keyboard", async ({ page })
   await trigger.click();
   await dialog.getByRole("button", { name: "Remove" }).click();
   await expect(dialog).toBeHidden();
-  await expect(alice.getByRole("row")).toHaveCount(3);
+  await expect(devices.getByRole("row")).toHaveCount(3);
 
-  const carol = page.getByRole("region", { name: "carol" });
-  await carol.getByRole("button", { name: "Remove user carol" }).click();
+  await page.goto("/admin/users/carol");
+  await page.getByRole("button", { name: "Remove user" }).click();
   const confirm = page.getByRole("dialog", { name: "Remove user carol?" });
-  await expect(confirm).toContainText("Removes their only config and their link.");
+  await expect(confirm).toContainText("Removes their only device and their link.");
   await confirm.getByRole("button", { name: "Remove user" }).click();
-  await expect(carol).toBeHidden();
+  await expect(page).toHaveURL("/admin/users");
+  await expect(page.getByRole("row", { name: /^carol/ })).toHaveCount(0);
+
+  await page.goto("/admin/users/nobody");
+  await expect(page.getByText("There is no user of this name.")).toBeVisible();
 });
 
 test("the connections table updates live, sorts and filters by peer", async ({ page }) => {
@@ -225,7 +208,7 @@ test("the connections table updates live, sorts and filters by peer", async ({ p
   await table.getByRole("button", { name: "Up rate" }).click();
   await expect(table.getByRole("columnheader", { name: "Up rate" })).toHaveAttribute("aria-sort", "ascending");
 
-  await page.getByLabel("Peer").selectOption({ label: "alice/phone · default" });
+  await page.getByLabel("Peer").selectOption({ label: "alice/phone" });
   await expect(page).toHaveURL("/admin/connections?peer=peer-1");
   await expect(page.getByRole("status")).toBeHidden();
   const peers = await table.getByRole("row").locator("td:first-child").allTextContents();
@@ -235,9 +218,9 @@ test("the connections table updates live, sorts and filters by peer", async ({ p
   await noSidewaysScroll(page);
 });
 
-test("a peer's connections open from the users page", async ({ page }) => {
-  await page.goto("/admin/users");
-  await page.getByRole("region", { name: "bob" }).getByRole("link", { name: "Connections bob/phone · default" }).click();
+test("a device's connections open from its user's page", async ({ page }) => {
+  await page.goto("/admin/users/bob");
+  await page.getByRole("region", { name: "Devices" }).getByRole("link", { name: "Connections bob/phone" }).click();
   await expect(page).toHaveURL("/admin/connections?peer=peer-4");
   await expect(page.getByLabel("Peer")).toHaveValue("peer-4");
   await expect(page.getByRole("table", { name: "Open connections" }).getByRole("row").nth(1)).toContainText("al-1");

@@ -7,12 +7,11 @@ import { type Duration, durationMs, timestampMs } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, createRouterTransport, type Interceptor, type Transport } from "@connectrpc/connect";
 import { type ConnectionSnapshot, ConnectionService } from "../gen/lotsman/v1/connection_pb";
 import { type HistoryRequest, HistoryService } from "../gen/lotsman/v1/history_pb";
-import { ProfileService } from "../gen/lotsman/v1/profile_pb";
 import { StatusService, TrafficSchema } from "../gen/lotsman/v1/status_pb";
 import { UserService } from "../gen/lotsman/v1/user_pb";
 import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
 import { createSelfService, type FakeSelfOptions } from "./fakeSelf";
-import { Simulation } from "./simulation";
+import { routeValue, Simulation } from "./simulation";
 
 export { FAKE_LINKS, FAKE_USER, withToken } from "./fakeSelf";
 
@@ -63,15 +62,17 @@ export function createFakeTransport(options: FakeOptions = {}): Transport {
         });
       },
     });
-    service(ProfileService, {
-      list: () => (operator(), sim.listProfiles()),
-      put: (req) => (operator(), { warnings: sim.putProfile({ name: req.profile?.name ?? "", prefer: req.profile?.prefer ?? [] }) }),
-      delete: (req) => (operator(), sim.deleteProfile(req.name), {}),
-    });
     service(UserService, {
       list: () => (operator(), { users: sim.listUsers() }),
-      addDevice: (req) => (operator(), sim.addDevice(req.user, req.device, req.profile)),
-      removeDevice: (req) => (operator(), sim.removeDevice(req.user, req.device, req.profile), {}),
+      addUser: (req) => (operator(), sim.addUser(req.user)),
+      setRights: (req) => {
+        operator();
+        const r = req.rights;
+        return sim.setRights(req.user, { editRoutes: r?.editRoutes ?? false, showProviders: r?.showProviders ?? false, exits: [...(r?.exits ?? [])] });
+      },
+      addDevice: (req) => (operator(), sim.addDevice(req.user, req.device, routeValue(req.route))),
+      setRoute: (req) => (operator(), sim.setRoute(req.user, req.device, routeValue(req.route))),
+      removeDevice: (req) => (operator(), sim.removeDevice(req.user, req.device), {}),
       removeUser: (req) => (operator(), sim.removeUser(req.user), {}),
       getConfig: (req) => (operator(), { peerId: req.peerId, config: sim.config(req.peerId) }),
       issueLink: (req) => (operator(), { token: sim.issueLink(req.user) }),

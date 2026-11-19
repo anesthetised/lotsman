@@ -6,8 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
-	"github.com/anesthetised/lotsman/internal/store"
 )
 
 // A replacement provider config that cannot be read, parsed, validated or
@@ -15,7 +13,7 @@ import (
 func TestReloadKeepsUpstreamWhenReplacementFails(t *testing.T) {
 	h := newHarness(t)
 	h.st.CreateUser("alice")
-	peer, _ := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
+	peer, _ := h.st.AddPeer("alice", "nl", nlRoute, h.cfg.Subnet)
 	h.run(t)
 	routedViaNL := func() bool { got, _ := h.dp.RouteOf(peer.IP); return got == "lm-up-nl" }
 	eventually(t, "initial routing", routedViaNL)

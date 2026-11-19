@@ -124,7 +124,7 @@ func degradedOf(h *harness, name string) bool {
 func TestTransferDegradesAndRecovers(t *testing.T) {
 	h, f, round, _ := transferHarness(t, 2) // the harness has down_after 2
 	h.st.CreateUser("alice")
-	euPeer, _ := h.st.AddPeer("alice", store.DefaultDevice, "eu", h.cfg.Subnet)
+	euPeer, _ := h.st.AddPeer("alice", "eu", euRoute, h.cfg.Subnet)
 	routeOf := func(p store.Peer) string { r, _ := h.dp.RouteOf(p.IP); return r }
 	nl := metrics.Label{Name: "upstream", Value: "nl"}
 
@@ -187,13 +187,13 @@ func TestTransferDegradesAndRecovers(t *testing.T) {
 	}
 }
 
-// A degraded upstream is the last resort of a profile with nothing else, and
+// A degraded upstream is the last resort of a route with nothing else, and
 // stays alive while it is anyone's route, so those clients keep working.
 func TestTransferLastResort(t *testing.T) {
 	h, f, round, _ := transferHarness(t, 1)
 	h.st.CreateUser("alice")
-	nlPeer, _ := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
-	euPeer, _ := h.st.AddPeer("alice", store.DefaultDevice, "eu", h.cfg.Subnet)
+	nlPeer, _ := h.st.AddPeer("alice", "nl", nlRoute, h.cfg.Subnet)
+	euPeer, _ := h.st.AddPeer("alice", "eu", euRoute, h.cfg.Subnet)
 	routeOf := func(p store.Peer) string { r, _ := h.dp.RouteOf(p.IP); return r }
 	round()
 	f.set("lm-up-nl", true)
@@ -203,7 +203,7 @@ func TestTransferLastResort(t *testing.T) {
 	if !degradedOf(h, "nl") {
 		t.Fatal("nl not degraded")
 	}
-	// eu has DE; the nl profile has only nl and stays on it.
+	// eu has DE; the nl device has only nl and stays on it.
 	if routeOf(euPeer) != "lm-up-de" || routeOf(nlPeer) != "lm-up-nl" {
 		t.Errorf("eu via %q, nl via %q", routeOf(euPeer), routeOf(nlPeer))
 	}
@@ -217,7 +217,7 @@ func TestTransferLastResort(t *testing.T) {
 	}
 
 	// Its last client leaves: degraded with nobody on it, nl is no longer alive.
-	h.st.DeletePeer("alice", store.DefaultDevice, "nl")
+	h.st.DeletePeer("alice", "nl")
 	if err := h.d.Reconcile(); err != nil {
 		t.Fatal(err)
 	}

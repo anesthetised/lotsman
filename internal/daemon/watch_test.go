@@ -49,8 +49,8 @@ func newWatchHarness(t *testing.T) *watchHarness {
 		t.Fatal(err)
 	}
 	var peers []store.Peer
-	for _, profile := range []string{"nl", "eu"} {
-		p, err := h.st.AddPeer("alice", store.DefaultDevice, profile, h.cfg.Subnet)
+	for _, device := range []string{"phone", "laptop"} {
+		p, err := h.st.AddPeer("alice", device, euRoute, h.cfg.Subnet)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -150,8 +150,8 @@ func TestMigrateFromVersion5(t *testing.T) {
 	defer s.Close()
 	var version int
 	s.db.QueryRow(`PRAGMA user_version`).Scan(&version)
-	if version != len(migrations) || version != 6 {
-		t.Errorf("user_version = %d, want 6", version)
+	if version != len(migrations) {
+		t.Errorf("user_version = %d, want %d", version, len(migrations))
 	}
 	token, err := s.IssueLink("alice")
 	if err != nil {

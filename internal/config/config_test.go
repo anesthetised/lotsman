@@ -1,10 +1,7 @@
 package config
 
 import (
-	"errors"
 	"net/netip"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -151,13 +148,16 @@ func TestValidationErrors(t *testing.T) {
 		"empty dns":              {"dns", "dns: []\n", "dns:"},
 		"bad upstream name":      {"upstreams", "upstreams: [{name: 'Bad Name', conf: /x}]\n", "upstreams[0]: name"},
 		"upstream name too long": {"upstreams", "upstreams: [{name: acmecorp-nl, conf: /x}]\n", "upstreams[0]: name"},
-		"duplicate upstream":     {"upstreams", "upstreams: [{name: a, conf: /x}, {name: a, conf: /y}]\n", "duplicate name"},
+		"duplicate upstream":     {"upstreams", "upstreams: [{name: a, conf: /x, geo: NL, provider: acme}, {name: a, conf: /y}]\n", "duplicate name"},
 		"upstream without conf":  {"upstreams", "upstreams: [{name: a}]\n", "conf path is required"},
-		"profiles key":           {"profiles", "profiles: [{name: p}]\n", "profile import FILE"},
-		"empty profiles key":     {"profiles", "profiles: []\n", "profile import FILE"},
-		"bad tag":                {"upstreams", "upstreams: [{name: a, conf: /x, tags: ['Bad Tag']}]\n", `tag "Bad Tag" must match`},
-		"empty tag":              {"upstreams", "upstreams: [{name: a, conf: /x, tags: ['']}]\n", `tag "" must match`},
-		"duplicate tag":          {"upstreams", "upstreams: [{name: a, conf: /x, tags: [eu, near, eu]}]\n", `duplicate tag "eu"`},
+		"upstream without geo":   {"upstreams", "upstreams: [{name: a, conf: /x, provider: acme}]\n", `upstream "a": geo "" must be an ISO 3166-1 alpha-2`},
+		"lowercase geo":          {"upstreams", "upstreams: [{name: a, conf: /x, geo: nl, provider: acme}]\n", `geo "nl" must be`},
+		"three-letter geo":       {"upstreams", "upstreams: [{name: a, conf: /x, geo: NLD, provider: acme}]\n", `geo "NLD" must be`},
+		"upstream w/o provider":  {"upstreams", "upstreams: [{name: a, conf: /x, geo: NL}]\n", `upstream "a": provider "" must match`},
+		"bad provider":           {"upstreams", "upstreams: [{name: a, conf: /x, geo: NL, provider: Acme Corp}]\n", `provider "Acme Corp" must match`},
+		"provider too long":      {"upstreams", "upstreams: [{name: a, conf: /x, geo: NL, provider: " + strings.Repeat("a", 33) + "}]\n", "must match"},
+		"tags are gone":          {"upstreams", "upstreams: [{name: a, conf: /x, geo: NL, provider: acme, tags: [eu]}]\n", "field tags not found"},
+		"profiles are gone":      {"profiles", "profiles: [{name: p}]\n", "field profiles not found"},
 		"zero health interval":   {"health", "health: {interval: 0s}\n", "health.interval:"},
 		"probe without port":     {"health", "health: {probe: 1.1.1.1}\n", "health.probe:"},
 		"down_after zero":        {"health", "health: {down_after: 0}\n", "health.down_after"},
@@ -229,142 +229,10 @@ func replaceTopLevelField(yaml, field, replacement string) string {
 	return strings.Join(lines[:start], "\n") + "\n" + replacement + strings.Join(lines[end:], "\n")
 }
 
-func TestTags(t *testing.T) {
-	cfg, profiles, err := ParseLegacy([]byte(tagsConfig("  - {name: near, prefer: [{tag: near}]}\n")))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := cfg.Upstreams[0].Tags; !slices.Equal(got, []string{"near", "eu"}) {
-		t.Errorf("tags = %q", got)
-	}
-	near := profiles[0].Prefer[0]
-	if !near.Matches(cfg.Upstreams[0]) || near.Matches(cfg.Upstreams[1]) || near.Matches(cfg.Upstreams[2]) {
-		t.Error("tag tier matches the wrong upstreams")
-	}
-}
-
-// Profiles moved to the store; a config that still has the key must say
-// what to run instead, naming the file it was loaded from.
-func TestProfilesKeyIsRejected(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "lotsman.yaml")
-	if err := os.WriteFile(path, []byte(minimal+"profiles: [{name: nl, prefer: [{geo: NL}]}]\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	_, err := Load(path)
-	if !errors.Is(err, ErrProfilesMoved) || !strings.Contains(err.Error(), "`lotsman -config "+path+" profile import "+path+"`") {
-		t.Fatalf("Load error = %v", err)
-	}
-	cfg, profiles, err := LoadLegacy(path)
-	if err != nil || len(cfg.Upstreams) != 2 || len(profiles) != 1 || profiles[0].Name != "nl" || profiles[0].Prefer[0].Geo != "NL" {
-		t.Fatalf("LoadLegacy = %+v, %+v, %v", cfg, profiles, err)
-	}
-	if _, profiles, err := ParseLegacy([]byte(minimal)); err != nil || profiles != nil {
-		t.Errorf("ParseLegacy without the key = %+v, %v; want nil profiles", profiles, err)
-	}
-	if _, _, err := ParseLegacy([]byte(minimal + "profiles: [{name: p, bogus: 1}]\n")); err == nil {
-		t.Error("ParseLegacy accepted an unknown profile field")
-	}
-}
-
-func TestValidateProfile(t *testing.T) {
-	cfg, err := Parse([]byte(minimal))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range []Profile{
-		{Name: "auto"},
-		{Name: "nl", Prefer: []Match{{Geo: "NL"}}},
-		{Name: "a-1", Prefer: []Match{{Geo: "XX"}, {Provider: "acme"}}},
-		{Name: "any", Prefer: []Match{{}}},
-	} {
-		if err := cfg.ValidateProfile(p); err != nil {
-			t.Errorf("%+v: %v", p, err)
-		}
-	}
-	for _, tc := range []struct {
-		p    Profile
-		want string
-	}{
-		{Profile{Name: "Bad Name"}, `profile name "Bad Name" must match`},
-		{Profile{Name: ""}, `profile name "" must match`},
-		{Profile{Name: "-nl"}, `profile name "-nl" must match`},
-		{Profile{Name: strings.Repeat("a", 33)}, "must match"},
-		{Profile{Name: "p", Prefer: []Match{{Geo: "XX"}}}, `profile "p": prefer matches no upstream`},
-		{Profile{Name: "p", Prefer: []Match{{Tag: "asia"}}}, `profile "p": prefer matches no upstream`},
-	} {
-		if err := cfg.ValidateProfile(tc.p); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%+v: error = %v, want %q", tc.p, err, tc.want)
-		}
-	}
-}
-
-// A profile being written must have every tier match an upstream now, in
-// values the CLI can write back; a stored one only needs one usable tier.
-func TestValidateProfileWrite(t *testing.T) {
-	cfg, err := Parse([]byte(minimal))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range []Profile{
-		{Name: "auto"},
-		{Name: "nl", Prefer: []Match{{Geo: "NL", Provider: "acme"}, {Geo: "DE"}, {}}},
-	} {
-		if err := cfg.ValidateProfileWrite(p); err != nil {
-			t.Errorf("%+v: %v", p, err)
-		}
-	}
-	for _, tc := range []struct {
-		p    Profile
-		want string
-	}{
-		{Profile{Name: "Bad Name"}, `profile name "Bad Name" must match`},
-		{Profile{Name: "p", Prefer: []Match{{Geo: "NL"}, {Geo: "XX"}}}, `profile "p": tier 2 geo=XX matches no upstream`},
-		{Profile{Name: "p", Prefer: []Match{{Geo: "DE", Provider: "other"}}}, `profile "p": tier 1 geo=DE,provider=other matches no upstream`},
-		{Profile{Name: "p", Prefer: []Match{{Geo: "N L"}}}, `profile "p": tier 1: geo "N L" must be at most 64 characters without spaces, commas or =`},
-		{Profile{Name: "p", Prefer: []Match{{Provider: "a,b"}}}, `tier 1: provider "a,b" must be`},
-		{Profile{Name: "p", Prefer: []Match{{Provider: strings.Repeat("a", 65)}}}, "must be at most 64 characters"},
-		{Profile{Name: "p", Prefer: []Match{{Tag: "EU"}}}, `profile "p": tier 1: tag "EU" must match`},
-	} {
-		if err := cfg.ValidateProfileWrite(tc.p); err == nil || !strings.Contains(err.Error(), tc.want) {
-			t.Errorf("%+v: error = %v, want %q", tc.p, err, tc.want)
-		}
-	}
-}
-
-func TestMatchString(t *testing.T) {
-	for m, want := range map[Match]string{
-		{}:                                     "any",
-		{Geo: "NL"}:                            "geo=NL",
-		{Tag: "eu"}:                            "tag=eu",
-		{Geo: "NL", Provider: "rs", Tag: "eu"}: "geo=NL,provider=rs,tag=eu",
-	} {
-		if got := m.String(); got != want {
-			t.Errorf("%#v.String() = %q, want %q", m, got, want)
-		}
-	}
-}
-
-// The shipped example is the first thing an operator copies; it must load,
-// show tags, and the profiles its comments suggest must raise no warnings.
+// The shipped example is the first thing an operator copies; it must load.
 func TestExampleConfigIsValid(t *testing.T) {
-	cfg, err := Load("../../deploy/lotsman.example.yaml")
-	if err != nil {
+	if _, err := Load("../../deploy/lotsman.example.yaml"); err != nil {
 		t.Fatal(err)
-	}
-	suggested := []Profile{
-		{Name: "nl", Prefer: []Match{{Geo: "NL"}}},
-		{Name: "eu", Prefer: []Match{{Tag: "near"}, {Tag: "eu"}}},
-		{Name: "auto"},
-	}
-	if got, err := cfg.CheckProfiles(suggested); err != nil || len(got) != 0 {
-		t.Errorf("CheckProfiles = %q, %v; want no warnings", got, err)
-	}
-	tagged := false
-	for _, u := range cfg.Upstreams {
-		tagged = tagged || len(u.Tags) > 0
-	}
-	if !tagged {
-		t.Error("example shows no upstream tags")
 	}
 }
 
@@ -400,26 +268,6 @@ func TestUsersMaxDevices(t *testing.T) {
 func TestInterfaceName(t *testing.T) {
 	if got := (Upstream{Name: "ac-nl"}).InterfaceName(); got != "lm-up-ac-nl" || len(got) > 15 {
 		t.Errorf("InterfaceName = %q", got)
-	}
-}
-
-func TestMatch(t *testing.T) {
-	u := Upstream{Name: "x", Geo: "NL", Provider: "rs", Tags: []string{"near", "eu"}}
-	for m, want := range map[Match]bool{
-		{}:                             true,
-		{Geo: "NL"}:                    true,
-		{Provider: "rs"}:               true,
-		{Geo: "NL", Provider: "rs"}:    true,
-		{Tag: "eu"}:                    true,
-		{Tag: "near", Geo: "NL"}:       true,
-		{Tag: "asia"}:                  false,
-		{Tag: "eu", Geo: "DE"}:         false,
-		{Geo: "DE"}:                    false,
-		{Geo: "NL", Provider: "other"}: false,
-	} {
-		if got := m.Matches(u); got != want {
-			t.Errorf("%+v.Matches = %v, want %v", m, got, want)
-		}
 	}
 }
 

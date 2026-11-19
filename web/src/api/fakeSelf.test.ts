@@ -17,22 +17,25 @@ const selfFor = (link: string, options?: Parameters<typeof createFakeTransport>[
 
 const codeOf = async (call: Promise<unknown>) => ConnectError.from(await call.catch((e) => e)).code;
 
-test("devices, profiles and configs of the ordinary user", async () => {
+async function snapshotOf(self: ReturnType<typeof selfFor>): Promise<StatusSnapshot> {
+  const stream = self.watch({})[Symbol.asyncIterator]();
+  const snapshot: StatusSnapshot = (await stream.next()).value;
+  await stream.return?.();
+  return snapshot;
+}
+
+const range = (name: string) => {
+  const to = Date.now();
+  return { name, from: timestampFromMs(to - 3_600_000), to: timestampFromMs(to) };
+};
+
+test("devices, rights and configs of the ordinary user", async () => {
   const self = selfFor(FAKE_LINKS.ordinary);
   const user = await self.get({});
-  expect(user.devices.map((d) => [d.name, d.peers.map((p) => p.profile)])).toEqual([
-    ["phone", ["default"]],
-    ["laptop", ["default"]],
-    ["tv", ["streaming"]],
-  ]);
-  expect((await self.listProfiles({})).profiles.map((p) => [p.name, p.prefer.length])).toEqual([
-    ["default", 0],
-    ["streaming", 0],
-    ["backup", 0],
-    ["fi", 0],
-  ]);
+  expect(user.devices.map((d) => d.name)).toEqual(["phone", "laptop", "tv"]);
+  expect(user.rights).toMatchObject({ editRoutes: true, showProviders: true, exits: [] });
 
-  const peerId = user.devices[0]!.peers[0]!.peerId;
+  const peerId = user.devices[0]!.peerId;
   const config = (await self.getConfig({ peerId })).config;
   expect(config).toMatch(/^\[Interface\]\nPrivateKey = [A-Za-z0-9+/]{43}=\n/);
   expect(config.length).toBeGreaterThan(400);
@@ -45,83 +48,116 @@ test("another user's peer and a missing one are both NotFound", async () => {
   expect(await codeOf(self.getConfig({ peerId: "peer-99" }))).toBe(Code.NotFound);
 });
 
-test("AddDevice returns the config and the device appears; a second profile is the same device", async () => {
+test("AddDevice returns the config; the device is routed by its route, or the default one", async () => {
   const self = selfFor(FAKE_LINKS.ordinary);
-  const added = await self.addDevice({ device: "tablet", profile: "streaming" });
+  expect(await codeOf(self.addDevice({ device: "x", route: { countries: [{ geo: "FI" }] } }))).toBe(Code.InvalidArgument);
+  const added = await self.addDevice({ device: "tablet", route: { strict: true, countries: [{ geo: "AL" }] } });
   expect(added.config).toContain("[Interface]");
   expect((await self.getConfig({ peerId: added.peerId })).config).toBe(added.config);
+  const plain = await self.addDevice({ device: "watch" });
 
-  await self.addDevice({ device: "tablet", profile: "default" });
+  const snapshot = await snapshotOf(self);
+  expect(snapshot.peers.find((p) => p.peerId === added.peerId)).toMatchObject({ device: "tablet", upstream: "al-1" });
+  expect(snapshot.peers.find((p) => p.peerId === plain.peerId)?.upstream).toBe("lv-1");
   const tablet = (await self.get({})).devices.find((d) => d.name === "tablet");
-  expect(tablet?.peers.map((p) => p.profile)).toEqual(["streaming", "default"]);
+  expect(tablet?.route).toMatchObject({ strict: true, countries: [{ geo: "AL" }] });
 
-  expect(await codeOf(self.addDevice({ device: "tablet", profile: "default" }))).toBe(Code.AlreadyExists);
-  expect(await codeOf(self.addDevice({ device: "x", profile: "nope" }))).toBe(Code.InvalidArgument);
-  expect(await codeOf(self.addDevice({ device: " x", profile: "default" }))).toBe(Code.InvalidArgument);
-  expect(await codeOf(self.addDevice({ device: "", profile: "default" }))).toBe(Code.InvalidArgument);
-});
-
-test("a new device is routed through its profile's exit and has no history yet but is visible to its owner", async () => {
-  const self = selfFor(FAKE_LINKS.ordinary);
-  const added = await self.addDevice({ device: "tablet", profile: "backup" });
-  const stream = self.watch({})[Symbol.asyncIterator]();
-  const snapshot: StatusSnapshot = (await stream.next()).value;
-  expect(snapshot.peers.find((p) => p.peerId === added.peerId)).toMatchObject({ device: "tablet", profile: "backup", upstream: "al-1" });
-  const to = Date.now();
-  const history = await self.peerHistory({ name: added.peerId, from: timestampFromMs(to - 3_600_000), to: timestampFromMs(to) });
+  // A new device has no history yet, but its owner may ask.
+  const history = await self.peerHistory(range(added.peerId));
   expect(durationMs(history.step!)).toBe(60_000);
-  await stream.return?.();
+
+  expect(await codeOf(self.addDevice({ device: "tablet" }))).toBe(Code.AlreadyExists);
+  expect(await codeOf(self.addDevice({ device: " x" }))).toBe(Code.InvalidArgument);
+  expect(await codeOf(self.addDevice({ device: "" }))).toBe(Code.InvalidArgument);
 });
 
-test("RemoveDevice removes one profile or the whole device", async () => {
+test("SetRoute moves a device to the exit its new route picks", async () => {
   const self = selfFor(FAKE_LINKS.ordinary);
-  await self.addDevice({ device: "phone", profile: "streaming" });
-  await self.removeDevice({ device: "phone", profile: "default" });
-  expect((await self.get({})).devices.find((d) => d.name === "phone")?.peers.map((p) => p.profile)).toEqual(["streaming"]);
-  await self.removeDevice({ device: "phone", profile: "" });
-  expect((await self.get({})).devices.map((d) => d.name)).toEqual(["laptop", "tv"]);
-  expect(await codeOf(self.removeDevice({ device: "phone", profile: "" }))).toBe(Code.NotFound);
-  expect(await codeOf(self.removeDevice({ device: "", profile: "" }))).toBe(Code.InvalidArgument);
+  const device = await self.setRoute({ device: "phone", route: { fastest: true, strict: true, countries: [{ geo: "AL" }, { geo: "NL" }] } });
+  expect(device.route?.countries.map((c) => c.geo)).toEqual(["AL", "NL"]);
+  expect((await snapshotOf(self)).peers.find((p) => p.device === "phone")?.upstream).toBe("al-1");
+  expect(await codeOf(self.setRoute({ device: "nope", route: {} }))).toBe(Code.NotFound);
+  expect(await codeOf(self.setRoute({ device: "phone", route: { countries: [{ geo: "LV", providers: ["nope"] }] } }))).toBe(Code.InvalidArgument);
 });
 
-test("max_devices: the limit counts devices, not profiles, and removing one lifts it", async () => {
+test("without edit_routes a user keeps the operator's routes: SetRoute and a route on AddDevice are PermissionDenied", async () => {
+  const bob = selfFor(FAKE_LINKS.fixedRoutes);
+  expect((await bob.get({})).rights).toMatchObject({ editRoutes: false, exits: ["lv-2", "al-1"] });
+  expect(await codeOf(bob.setRoute({ device: "phone", route: { countries: [{ geo: "LV" }] } }))).toBe(Code.PermissionDenied);
+  expect(await codeOf(bob.addDevice({ device: "tablet", route: { countries: [{ geo: "LV" }] } }))).toBe(Code.PermissionDenied);
+  await bob.addDevice({ device: "tablet" }); // the default route: the fastest of his exits
+  const snapshot = await snapshotOf(bob);
+  expect(snapshot.peers.find((p) => p.device === "tablet")?.upstream).toBe("lv-2");
+});
+
+test("only the allowed exits reach the user: in Watch, in history, in routes", async () => {
+  const bob = selfFor(FAKE_LINKS.fixedRoutes);
+  const snapshot = await snapshotOf(bob);
+  expect(snapshot.upstreams.map((u) => [u.name, u.geo, u.provider])).toEqual([
+    ["lv-2", "LV", "provider-b"],
+    ["al-1", "AL", "provider-b"],
+  ]);
+  await bob.upstreamHistory(range("al-1"));
+  expect(await codeOf(bob.upstreamHistory(range("nl-1")))).toBe(Code.NotFound);
+});
+
+test("without show_providers the snapshot names no provider and a route may not name one", async () => {
+  const carol = selfFor(FAKE_LINKS.countriesOnly);
+  const snapshot = await snapshotOf(carol);
+  expect(snapshot.upstreams.map((u) => u.geo)).toEqual(["LV", "LV", "AL", "NL", "DE"]);
+  expect(snapshot.upstreams.every((u) => u.provider === "")).toBe(true);
+  // Her only device is strict to Germany, which is down: blocked.
+  expect(snapshot.peers.map((p) => [p.device, p.upstream])).toEqual([["phone", ""]]);
+
+  expect(await codeOf(carol.setRoute({ device: "phone", route: { countries: [{ geo: "LV", providers: ["provider-a"] }] } }))).toBe(Code.InvalidArgument);
+  await carol.setRoute({ device: "phone", route: { strict: true, countries: [{ geo: "DE" }, { geo: "NL" }] } });
+  expect((await snapshotOf(carol)).peers[0]?.upstream).toBe("nl-1");
+});
+
+test("RemoveDevice removes the device", async () => {
+  const self = selfFor(FAKE_LINKS.ordinary);
+  await self.removeDevice({ device: "phone" });
+  expect((await self.get({})).devices.map((d) => d.name)).toEqual(["laptop", "tv"]);
+  expect(await codeOf(self.removeDevice({ device: "phone" }))).toBe(Code.NotFound);
+  expect(await codeOf(self.removeDevice({ device: "" }))).toBe(Code.InvalidArgument);
+});
+
+test("max_devices: the limit counts devices, and removing one lifts it", async () => {
   const self = selfFor(FAKE_LINKS.ordinary, { self: { maxDevices: 4 } });
-  await self.addDevice({ device: "d4", profile: "default" });
-  const refused = await self.addDevice({ device: "d5", profile: "default" }).catch((e) => ConnectError.from(e));
+  await self.addDevice({ device: "d4" });
+  const refused = await self.addDevice({ device: "d5" }).catch((e) => ConnectError.from(e));
   expect(refused).toMatchObject({ code: Code.ResourceExhausted, rawMessage: "at most 4 devices; remove one first or ask the operator" });
-  await self.addDevice({ device: "phone", profile: "streaming" }); // another profile of a device they have
-  await self.removeDevice({ device: "d4", profile: "" });
-  await self.addDevice({ device: "d5", profile: "default" });
+  await self.removeDevice({ device: "d4" });
+  await self.addDevice({ device: "d5" });
 });
 
 test("max_devices 0 refuses every addition with permission_denied, but removing still works", async () => {
   const self = selfFor(FAKE_LINKS.noAdding);
-  expect(await codeOf(self.addDevice({ device: "new", profile: "default" }))).toBe(Code.PermissionDenied);
-  expect(await codeOf(self.addDevice({ device: "phone", profile: "streaming" }))).toBe(Code.PermissionDenied);
-  await self.removeDevice({ device: "tv", profile: "" });
+  expect(await codeOf(self.addDevice({ device: "new" }))).toBe(Code.PermissionDenied);
+  await self.removeDevice({ device: "tv" });
 });
 
 test("the rate limit allows a burst, then one addition every 6 minutes", async () => {
   const self = selfFor(FAKE_LINKS.ordinary, { self: { maxDevices: 100, addBurst: 3 } });
-  for (const device of ["a", "b", "c"]) await self.addDevice({ device, profile: "default" });
-  const refused = await self.addDevice({ device: "d", profile: "default" }).catch((e) => ConnectError.from(e));
+  for (const device of ["a", "b", "c"]) await self.addDevice({ device });
+  const refused = await self.addDevice({ device: "d" }).catch((e) => ConnectError.from(e));
   expect(refused).toMatchObject({ code: Code.ResourceExhausted, rawMessage: "too many devices added lately; try again in a few minutes" });
   vi.advanceTimersByTime(6 * 60_000);
-  await self.addDevice({ device: "d", profile: "default" });
-  expect(await codeOf(self.addDevice({ device: "e", profile: "default" }))).toBe(Code.ResourceExhausted);
+  await self.addDevice({ device: "d" });
+  expect(await codeOf(self.addDevice({ device: "e" }))).toBe(Code.ResourceExhausted);
 });
 
 test("scenario links: revoked is Unauthenticated everywhere, unavailable is Unavailable, empty has no devices", async () => {
   const revoked = selfFor(FAKE_LINKS.revoked);
   expect(await codeOf(revoked.get({}))).toBe(Code.Unauthenticated);
-  expect(await codeOf(revoked.listProfiles({}))).toBe(Code.Unauthenticated);
-  expect(await codeOf(revoked.addDevice({ device: "x", profile: "default" }))).toBe(Code.Unauthenticated);
+  expect(await codeOf(revoked.addDevice({ device: "x" }))).toBe(Code.Unauthenticated);
+  expect(await codeOf(revoked.setRoute({ device: "phone", route: {} }))).toBe(Code.Unauthenticated);
   expect(await codeOf(revoked.watch({})[Symbol.asyncIterator]().next())).toBe(Code.Unauthenticated);
   expect(await codeOf(selfFor(FAKE_LINKS.unavailable).get({}))).toBe(Code.Unavailable);
 
   const empty = selfFor(FAKE_LINKS.empty);
   expect(await empty.get({})).toMatchObject({ name: "dave", devices: [] });
-  const snapshot: StatusSnapshot = (await empty.watch({})[Symbol.asyncIterator]().next()).value;
+  const snapshot = await snapshotOf(empty);
   expect(snapshot.peers).toEqual([]);
-  expect(snapshot.upstreams).toEqual([]);
+  expect(snapshot.upstreams).toHaveLength(5); // what a first device may use
 });

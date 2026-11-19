@@ -85,13 +85,12 @@ listen: 127.0.0.1:51820
 endpoint: 127.0.0.1:51820
 state_dir: ` + filepath.Join(dir, "state") + `
 upstreams:
-  - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, provider: awg}
-  - {name: vl, kind: vless, conf: ` + filepath.Join(dir, "vl.key") + `, provider: vless}
+  - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, geo: NL, provider: awg}
+  - {name: vl, kind: vless, conf: ` + filepath.Join(dir, "vl.key") + `, geo: SE, provider: vless}
 health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_after: 2, up_after: 1}
 metrics: {listen: 127.0.0.1:19100}
 `
 	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
-	mustRun(t, "-config", cfgPath, "profile", "add", "p", "provider=vless", "provider=awg")
 
 	out, err := capture(t, "-config", cfgPath, "config", "check")
 	if err != nil || !strings.Contains(out, "lm-up-vl  kind vless") || !strings.Contains(out, transport) ||
@@ -112,7 +111,7 @@ metrics: {listen: 127.0.0.1:19100}
 		_, err := os.Stat(filepath.Join(dir, "state", "status.json"))
 		return err == nil
 	})
-	out, err = capture(t, "-config", cfgPath, "user", "add", "alice", "-profile", "p")
+	out, err = capture(t, "-config", cfgPath, "device", "add", "alice/phone", "SE", "NL")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,13 +137,13 @@ metrics: {listen: 127.0.0.1:19100}
 			strings.Contains(body, `lotsman_upstream_flows{upstream="vl"}`)
 	})
 
-	// Flow pinning: a connection through vl survives the profile preferring
+	// Flow pinning: a connection through vl survives the route preferring
 	// AWG while vl is alive; new connections use nl.
 	long := c.openStream(t)
 	if via, err := long.ping("a"); err != nil || via != "vl" {
 		t.Fatalf("stream before move: %q, %v", via, err)
 	}
-	mustRun(t, "-config", cfgPath, "profile", "set", "p", "provider=awg", "provider=vless")
+	mustRun(t, "-config", cfgPath, "device", "route", "alice/phone", "NL", "SE")
 	eventually(t, "new connections via nl", 15*time.Second, exitsVia("nl"))
 	if via, err := long.ping("b"); err != nil || via != "vl" {
 		t.Errorf("pinned stream after move: %q, %v (want vl)", via, err)
@@ -161,7 +160,7 @@ metrics: {listen: 127.0.0.1:19100}
 
 	// VLESS blocked (it uses TCP only, UDP included): fail over to AWG,
 	// and back.
-	mustRun(t, "-config", cfgPath, "profile", "set", "p", "provider=vless", "provider=awg")
+	mustRun(t, "-config", cfgPath, "device", "route", "alice/phone", "SE", "NL")
 	eventually(t, "vless preferred again", 15*time.Second, exitsVia("vl"))
 	restore = blockLoopback(t, "tcp", vl.Addr().Port())
 	eventually(t, "vl down", 15*time.Second, func() bool {

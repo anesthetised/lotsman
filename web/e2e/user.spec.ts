@@ -1,4 +1,5 @@
 import { FAKE_LINKS } from "../src/api/fakeSelf";
+import type { Page } from "@playwright/test";
 import { expect, test } from "./fixtures";
 
 // A link as `lotsman user link` prints it; the fake daemon takes any token as
@@ -6,7 +7,10 @@ import { expect, test } from "./fixtures";
 const link = "/u#q2V8Zp0nY3xW_4b-Lk9sTq1RmA7cJd5eHf6gUi0oPzE";
 const open = (token: string) => `/u#${token}`;
 
-test("the user page shows live speed, devices and exits", async ({ page }) => {
+/** A device's card on the user page. */
+const card = (page: Page, device: string) => page.locator("#devices ~ ul > li").filter({ has: page.getByRole("heading", { name: device, exact: true }) });
+
+test("the user page shows live speed, devices, their exits now and the exits in use", async ({ page }) => {
   await page.goto(link);
   await expect(page.getByRole("heading", { name: "Hello, alice" })).toBeVisible();
 
@@ -15,14 +19,17 @@ test("the user page shows live speed, devices and exits", async ({ page }) => {
   await expect(speed).not.toHaveText(before!, { timeout: 5000 });
 
   await expect(page.locator("#devices ~ ul > li > div h3")).toHaveText(["phone", "laptop", "tv"]);
+  await expect(card(page, "phone")).toContainText("Now: Latvia · provider-a");
+  await expect(card(page, "tv")).toContainText("Now: Latvia · provider-b");
 
-  // Only the exits the user's peers use, each with its 7-day availability and latency.
+  // Only the exits the user's devices use, by country and provider, each with its 7-day availability and latency.
   const exits = page.getByRole("region", { name: "Exits" });
   await expect(exits.getByRole("listitem")).toHaveCount(2);
-  await expect(exits.getByRole("img", { name: /^Availability of lv-1 over 7 days: \d/ })).toBeVisible();
-  await expect(exits.getByRole("img", { name: /^Availability of nl-1 over 7 days: \d/ })).toBeVisible();
+  await expect(exits.getByRole("img", { name: /^Availability of Latvia · provider-a over 7 days: \d/ })).toBeVisible();
+  await expect(exits.getByRole("img", { name: /^Availability of Latvia · provider-b over 7 days: \d/ })).toBeVisible();
   await expect(exits).toContainText("Used by phone, laptop");
   await expect(exits).toContainText("Latency:");
+  await expect(exits).not.toContainText("lv-1"); // never the upstream's name
 
   // Mobile-first: nothing scrolls sideways.
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -33,17 +40,19 @@ test("every control is a large touch target", async ({ page }) => {
   await page.goto(link);
   await expect(page.getByRole("heading", { name: "Hello, alice" })).toBeVisible();
   const controls = page.locator("main").locator("button, summary, input, select");
-  const heights = await controls.evaluateAll((els) => els.map((el) => [el.textContent?.trim() || el.id, el.getBoundingClientRect().height]));
-  expect(heights.length).toBeGreaterThan(6);
+  const heights = await controls.evaluateAll((els) =>
+    els.map((el) => [el.getAttribute("aria-label") || el.textContent?.trim() || el.id, el.getBoundingClientRect().height]),
+  );
+  expect(heights.length).toBeGreaterThan(30); // the route editors' switches, chips and handles among them
   for (const [name, height] of heights) expect(height, String(name)).toBeGreaterThanOrEqual(43.5);
 });
 
 test("a device's config shows as a large QR code, a file and text", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto(link);
-  await page.getByRole("button", { name: "Config and QR code phone, default" }).click();
+  await page.getByRole("button", { name: "Config and QR code phone" }).click();
 
-  const qr = page.getByRole("img", { name: "QR code of the config for phone, profile default" });
+  const qr = page.getByRole("img", { name: "QR code of the config for phone" });
   await expect(qr).toBeVisible();
   const box = (await qr.boundingBox())!;
   expect(box.width).toBeGreaterThanOrEqual(280);
@@ -54,7 +63,7 @@ test("a device's config shows as a large QR code, a file and text", async ({ pag
   expect(await qr.getAttribute("viewBox")).toMatch(/^-4 -4 (\d+) \1$/);
 
   const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download .conf" }).click()]);
-  expect(download.suggestedFilename()).toBe("phone-default.conf");
+  expect(download.suggestedFilename()).toBe("phone.conf");
   const { createReadStream } = await import("node:fs");
   const chunks: Buffer[] = [];
   for await (const chunk of createReadStream((await download.path())!)) chunks.push(chunk as Buffer);
@@ -65,25 +74,85 @@ test("a device's config shows as a large QR code, a file and text", async ({ pag
   await expect(page.getByRole("status")).toHaveText("Copied");
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(file);
 
-  await page.getByRole("button", { name: "Hide config phone, default" }).click();
+  await page.getByRole("button", { name: "Hide config phone" }).click();
   await expect(qr).toBeHidden();
 });
 
-test("adding a device shows its config and QR code at once", async ({ page }) => {
+test("a route reorders from the keyboard and applies without a new config", async ({ page }) => {
   await page.goto(link);
-  await page.getByLabel("Device name").fill("tablet");
-  await page.getByLabel("Profile", { exact: true }).selectOption("streaming");
-  await page.getByRole("button", { name: "Add device" }).click();
+  const phone = card(page, "phone");
+  const apply = phone.getByRole("button", { name: "Apply" });
+  await expect(phone.getByRole("button", { name: "In order" })).toHaveAttribute("aria-pressed", "true");
+  await expect(apply).toBeDisabled();
 
-  const issued = page.getByRole("region", { name: "tablet added (streaming)" });
+  // Albania joins last; two presses of the up arrow make it first, and each move is announced.
+  await phone.getByRole("switch", { name: "Use Albania" }).click();
+  await expect(phone.getByRole("switch", { name: "Use Albania" })).toHaveAttribute("aria-checked", "true");
+  await phone.getByRole("button", { name: "Albania, 3 of 3" }).focus();
+  await page.keyboard.press("ArrowUp");
+  await page.keyboard.press("ArrowUp");
+  await expect(phone.getByRole("button", { name: "Albania, 1 of 3" })).toBeFocused();
+  await expect(phone.getByText("Albania moved to 1 of 3")).toBeAttached();
+  await expect(phone.getByText("The config does not change, the tunnel does not reconnect.")).toBeVisible();
+
+  const requests: string[] = [];
+  page.on("request", (r) => requests.push(r.url()));
+  await apply.click();
+  await expect(phone).toContainText("Now: Albania · provider-b");
+  await expect(apply).toBeDisabled(); // stored: nothing left to apply
+  expect(requests.some((url) => url.includes("GetConfig"))).toBe(false);
+});
+
+test("a route reorders by dragging its handle", async ({ page }) => {
+  await page.goto(link);
+  const phone = card(page, "phone");
+  const handle = phone.getByRole("button", { name: "Netherlands, 2 of 2" });
+  const target = (await phone.getByRole("button", { name: "Latvia, 1 of 2" }).boundingBox())!;
+  const from = (await handle.boundingBox())!;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(target.x + target.width / 2, target.y, { steps: 5 });
+  await page.mouse.up();
+  await expect(phone.getByRole("button", { name: "Netherlands, 1 of 2" })).toBeVisible();
+  await expect(phone.getByRole("button", { name: "Apply" })).toBeEnabled();
+  await phone.getByRole("button", { name: "Cancel" }).click();
+  await expect(phone.getByRole("button", { name: "Latvia, 1 of 2" })).toBeVisible();
+});
+
+test("the fastest mode, providers, and the strict switch", async ({ page }) => {
+  await page.goto(link);
+  const tv = card(page, "tv");
+  await expect(tv.getByRole("button", { name: "Fastest" })).toHaveAttribute("aria-pressed", "true");
+  await expect(tv.getByText("Of the checked countries, the one with the lowest latency now.")).toBeVisible();
+  const latvia = tv.getByRole("group", { name: "Providers in Latvia" });
+  await expect(latvia.getByRole("button", { name: "provider-a" })).toHaveAttribute("aria-pressed", "false");
+  await expect(latvia.getByRole("button", { name: "provider-b" })).toHaveAttribute("aria-pressed", "true");
+  await latvia.getByRole("button", { name: "provider-a" }).click();
+  await tv.getByRole("button", { name: "Apply" }).click();
+  await expect(tv).toContainText("Now: Latvia · provider-a"); // now the faster of the two
+  await expect(tv.getByRole("switch", { name: "Only the selected countries" })).toHaveAttribute("aria-checked", "true");
+});
+
+test("adding a device shows its config and QR code at once, with the route chosen", async ({ page }) => {
+  await page.goto(link);
+  const add = page.getByRole("region", { name: "New device" });
+  await add.getByLabel("Name").fill("tablet");
+  await expect(add.getByRole("button", { name: "Any, fastest", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await add.getByRole("button", { name: /^Same as “phone” Latvia → Netherlands$/ }).click();
+  await add.getByRole("button", { name: "Create" }).click();
+
+  const issued = page.getByRole("region", { name: "tablet added" });
   await expect(issued).toBeVisible();
-  await expect(issued.getByRole("img", { name: "QR code of the config for tablet, profile streaming" })).toBeVisible();
+  await expect(issued.getByRole("img", { name: "QR code of the config for tablet" })).toBeVisible();
   await expect(issued.getByRole("heading")).toBeFocused();
   await expect(page.locator("#devices ~ ul > li > div h3")).toHaveText(["phone", "laptop", "tv", "tablet"]);
-  await expect(page.getByLabel("Device name")).toHaveValue("");
+  await expect(add.getByLabel("Name")).toHaveValue("");
+  const tablet = card(page, "tablet");
+  await expect(tablet.getByRole("button", { name: "Latvia, 1 of 2" })).toBeVisible();
+  await expect(tablet).toContainText("Now: Latvia · provider-a");
 
   const [download] = await Promise.all([page.waitForEvent("download"), issued.getByRole("button", { name: "Download .conf" }).click()]);
-  expect(download.suggestedFilename()).toBe("tablet-streamin.conf") // tunnel names are at most 15 characters;
+  expect(download.suggestedFilename()).toBe("tablet.conf");
 
   await issued.getByRole("button", { name: "Done" }).click();
   await expect(issued).toBeHidden();
@@ -108,65 +177,86 @@ test("removing a device asks first", async ({ page }) => {
   await expect(page.getByRole("region", { name: "Exits" }).getByRole("listitem")).toHaveCount(1);
 });
 
-test("a profile change adds the new profile, shows its config, and drops the old one", async ({ page }) => {
-  await page.goto(link);
-  const laptop = page.locator("#devices ~ ul > li", { hasText: "laptop" });
-  await expect(laptop).toContainText("Profile: default");
-  await laptop.getByRole("button", { name: "Change profile laptop, default" }).click();
-  const dialog = page.getByRole("dialog", { name: "Change the profile of laptop (now default)" });
-  await dialog.getByLabel("New profile").selectOption("streaming");
-  await dialog.getByRole("button", { name: "Change profile" }).click();
+test("a blocked device says so, and turning on another country lifts it", async ({ page }) => {
+  await page.goto(open(FAKE_LINKS.countriesOnly));
+  const phone = card(page, "phone");
+  await expect(phone).toContainText("No exit");
+  await expect(phone).toContainText("Now: traffic blocked");
+  await expect(phone.getByRole("alert")).toHaveText(
+    "No available exit. The selected countries are unavailable now, so traffic is blocked. Turn on another country or turn off “Only the selected countries”.",
+  );
+  await expect(phone.getByText("unavailable", { exact: true })).toBeVisible();
+  // Countries only: no provider anywhere on the page.
+  await expect(page.getByRole("group", { name: /^Providers in/ })).toHaveCount(0);
+  await expect(page.locator("main")).not.toContainText("provider-");
 
-  const issued = page.getByRole("region", { name: "laptop now uses streaming" });
-  await expect(issued.getByRole("img", { name: "QR code of the config for laptop, profile streaming" })).toBeVisible();
-  await expect(laptop).toContainText("Profile: streaming");
-  await expect(laptop).not.toContainText("Profile: default");
+  await phone.getByRole("switch", { name: "Use Netherlands" }).click();
+  await expect(phone.getByRole("alert")).toHaveCount(0);
+  await phone.getByRole("button", { name: "Apply" }).click();
+  await expect(phone).toContainText("Now: Netherlands");
+  await expect(phone).toContainText("Degraded");
+});
+
+test("a user whose routes the operator sets sees them read-only", async ({ page }) => {
+  await page.goto(open(FAKE_LINKS.fixedRoutes));
+  const phone = card(page, "phone");
+  await expect(phone.getByText("Only the operator changes this route.")).toBeVisible();
+  await expect(phone.getByRole("list", { name: "Countries" }).getByRole("listitem")).toHaveText([/^1\.Albania/]);
+  await expect(phone.getByRole("switch")).toHaveCount(0);
+  await expect(phone.getByRole("button", { name: "Apply" })).toHaveCount(0);
+  // A new device gets the default route: no choice to make.
+  await expect(page.getByRole("region", { name: "New device" }).getByRole("group")).toHaveCount(0);
+  // Only his two exits exist for him.
+  await expect(card(page, "laptop").getByRole("list", { name: "Countries" }).getByRole("listitem")).toHaveCount(2);
 });
 
 test("the device limit is explained, and removing a device lifts it", async ({ page }) => {
   await page.goto(link);
+  const add = page.getByRole("region", { name: "New device" });
   for (const name of ["d4", "d5"]) {
-    await page.getByLabel("Device name").fill(name);
-    await page.getByRole("button", { name: "Add device" }).click();
-    await expect(page.getByRole("region", { name: `${name} added (default)` })).toBeVisible();
+    await add.getByLabel("Name").fill(name);
+    await add.getByRole("button", { name: "Create" }).click();
+    await expect(page.getByRole("region", { name: `${name} added` })).toBeVisible();
   }
-  await page.getByLabel("Device name").fill("d6");
-  await page.getByRole("button", { name: "Add device" }).click();
-  await expect(page.getByRole("alert")).toHaveText("You already have the most devices allowed (5). Remove one first, or ask the operator for more.");
+  await add.getByLabel("Name").fill("d6");
+  await add.getByRole("button", { name: "Create" }).click();
+  await expect(add.getByRole("alert")).toHaveText("You already have the most devices allowed (5). Remove one first, or ask the operator for more.");
   await expect(page.locator("#devices ~ ul > li > div h3")).toHaveCount(5);
 
   await page.getByRole("button", { name: "Remove d5" }).click();
   await page.getByRole("dialog").getByRole("button", { name: "Remove device" }).click();
-  await page.getByRole("button", { name: "Add device" }).click();
-  await expect(page.getByRole("region", { name: "d6 added (default)" })).toBeVisible();
+  await add.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("region", { name: "d6 added" })).toBeVisible();
 });
 
 test("a user whose adding is turned off is told so", async ({ page }) => {
   await page.goto(open(FAKE_LINKS.noAdding));
-  await page.getByLabel("Device name").fill("tablet");
-  await page.getByRole("button", { name: "Add device" }).click();
-  await expect(page.getByRole("alert")).toHaveText("Adding devices is turned off. Ask the operator.");
-  await expect(page.getByLabel("Device name")).toBeDisabled();
-  await expect(page.getByRole("button", { name: "Add device" })).toBeDisabled();
+  const add = page.getByRole("region", { name: "New device" });
+  await add.getByLabel("Name").fill("tablet");
+  await add.getByRole("button", { name: "Create" }).click();
+  await expect(add.getByRole("alert")).toHaveText("Adding devices is turned off. Ask the operator.");
+  await expect(add.getByLabel("Name")).toBeDisabled();
+  await expect(add.getByRole("button", { name: "Create" })).toBeDisabled();
   // They can still see and remove what they have.
   await expect(page.getByRole("button", { name: "Remove phone" })).toBeVisible();
 });
 
 test("too many additions are told apart from the device limit", async ({ page }) => {
   await page.goto(open(FAKE_LINKS.ordinary));
+  const add = page.getByRole("region", { name: "New device" });
   // The fake allows ten additions at once; adding and removing the same device keeps the limit out of the way.
   for (let i = 0; i < 10; i++) {
-    await page.getByLabel("Device name").fill("loop");
-    await page.getByRole("button", { name: "Add device" }).click();
-    await expect(page.getByRole("region", { name: "loop added (default)" })).toBeVisible();
+    await add.getByLabel("Name").fill("loop");
+    await add.getByRole("button", { name: "Create" }).click();
+    await expect(page.getByRole("region", { name: "loop added" })).toBeVisible();
     await page.getByRole("button", { name: "Done" }).click();
     await page.getByRole("button", { name: "Remove loop" }).click();
     await page.getByRole("dialog").getByRole("button", { name: "Remove device" }).click();
     await expect(page.getByRole("button", { name: "Remove loop" })).toHaveCount(0);
   }
-  await page.getByLabel("Device name").fill("loop");
-  await page.getByRole("button", { name: "Add device" }).click();
-  await expect(page.getByRole("alert")).toHaveText("You added too many devices lately. Try again in 6 min.");
+  await add.getByLabel("Name").fill("loop");
+  await add.getByRole("button", { name: "Create" }).click();
+  await expect(add.getByRole("alert")).toHaveText("You added too many devices lately. Try again in 6 min.");
 });
 
 test("a revoked link says it no longer works", async ({ page }) => {
@@ -182,9 +272,9 @@ test("a user without devices is invited to add one", async ({ page }) => {
   await expect(page.getByText("You have no devices yet")).toBeVisible();
   await expect(page.getByRole("group", { name: "Period" })).toHaveCount(0);
   await expect(page.getByText("How to import a config")).toBeVisible();
-  await page.getByLabel("Device name").fill("phone");
-  await page.getByRole("button", { name: "Add device" }).click();
-  await expect(page.getByRole("img", { name: "QR code of the config for phone, profile default" })).toBeVisible();
+  await page.getByLabel("Name").fill("phone");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("img", { name: "QR code of the config for phone" })).toBeVisible();
 });
 
 test("an unreachable daemon can be retried", async ({ page }) => {
@@ -209,7 +299,10 @@ test("the page is in Russian for a Russian browser", async ({ browser, baseURL }
   const page = await context.newPage();
   await page.goto(link);
   await expect(page.getByRole("heading", { name: "Привет, alice" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Конфиг и QR-код phone, default" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Конфиг и QR-код phone" })).toBeVisible();
+  await expect(card(page, "phone").getByRole("button", { name: "По порядку" })).toHaveAttribute("aria-pressed", "true");
+  await expect(card(page, "phone")).toContainText("Сейчас: Латвия · provider-a");
+  await expect(card(page, "phone").getByRole("switch", { name: "Только выбранные страны" })).toBeVisible();
   await expect(page.getByText("Как загрузить конфиг")).toBeVisible();
   await context.close();
 });
@@ -224,11 +317,11 @@ test("the link stays in the address for bookmarks and nowhere else", async ({ pa
   const requested: string[] = [];
   page.on("request", (r) => requested.push(r.url()));
   await page.goto(link);
-  await page.getByRole("button", { name: "Config and QR code phone, default" }).click();
+  await page.getByRole("button", { name: "Config and QR code phone" }).click();
   await expect(page.getByRole("img", { name: /^QR code/ })).toBeVisible();
-  await page.getByLabel("Device name").fill("tablet");
-  await page.getByRole("button", { name: "Add device" }).click();
-  await expect(page.getByRole("region", { name: "tablet added (default)" })).toBeVisible();
+  await page.getByLabel("Name").fill("tablet");
+  await page.getByRole("button", { name: "Create" }).click();
+  await expect(page.getByRole("region", { name: "tablet added" })).toBeVisible();
 
   expect(page.url()).toMatch(/\/u#[A-Za-z0-9_-]{43}$/);
   const token = link.split("#")[1]!;

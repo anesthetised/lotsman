@@ -12,7 +12,6 @@ import (
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/metrics"
 	"github.com/anesthetised/lotsman/internal/proxy"
-	"github.com/anesthetised/lotsman/internal/store"
 )
 
 // fakeHelper stands in for a proxy upstream run in a helper process: the
@@ -73,7 +72,7 @@ func TestProxyLinkExit(t *testing.T) {
 	f := &fakeHelper{}
 	h.d.runProxy = f.run
 	h.st.CreateUser("alice")
-	peer, _ := h.st.AddPeer("alice", store.DefaultDevice, "px", h.cfg.Subnet)
+	peer, _ := h.st.AddPeer("alice", "px", pxRoute, h.cfg.Subnet)
 	stop := h.run(t)
 	routedVia := func(want string) func() bool {
 		return func() bool { got, _ := h.dp.RouteOf(peer.IP); return got == want }

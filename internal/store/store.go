@@ -1,8 +1,9 @@
-// Package store persists users, their peers and the profiles peers use in SQLite.
+// Package store persists users, their rights and their devices' peers in SQLite.
 package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -16,19 +17,14 @@ import (
 	sqlite3 "modernc.org/sqlite/lib"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
-	"github.com/anesthetised/lotsman/internal/config"
+	"github.com/anesthetised/lotsman/internal/policy"
 )
 
 var (
 	ErrNotFound   = errors.New("not found")
 	ErrExists     = errors.New("already exists")
 	ErrSubnetFull = errors.New("no free address in subnet")
-	ErrNoProfile  = errors.New("no such profile")
-	ErrInUse      = errors.New("in use")
 )
-
-// DefaultDevice is used when a user does not name their device.
-const DefaultDevice = "default"
 
 // migrations run in order; PRAGMA user_version records how many have been applied.
 var migrations = []string{
@@ -60,7 +56,7 @@ var migrations = []string{
 		UNIQUE (user_id, device, profile)
 	);
 	INSERT INTO peers_new (id, user_id, device, profile, private_key, public_key, ip, created_at)
-		SELECT id, user_id, '` + DefaultDevice + `', profile, private_key, public_key, ip, created_at FROM peers;
+		SELECT id, user_id, 'default', profile, private_key, public_key, ip, created_at FROM peers;
 	DROP TABLE peers;
 	ALTER TABLE peers_new RENAME TO peers;`,
 	// Profiles moved here from lotsman.yaml, so they can change at runtime.
@@ -143,6 +139,33 @@ var migrations = []string{
 	);
 	CREATE INDEX user_links_user ON user_links (user_id);
 	CREATE UNIQUE INDEX user_links_live ON user_links (user_id) WHERE revoked_at IS NULL;`,
+	// Per-device routes and user rights replace profiles (#161): a peer is
+	// one device of a user, with the route as JSON, and users get their
+	// rights. Nothing was in production, so the old peers and their history
+	// are dropped rather than converted; users and their links stay. Ids go
+	// on counting from the old table's, so a peer_id still in a browser or
+	// a log never names a new device.
+	`DROP TABLE profile_tiers;
+	DROP TABLE profiles;
+	DELETE FROM peer_samples;
+	DELETE FROM peer_hour_samples;
+	CREATE TABLE peers_new (
+		id          INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+		device      TEXT NOT NULL,
+		route       TEXT NOT NULL,
+		private_key TEXT NOT NULL,
+		public_key  TEXT NOT NULL UNIQUE,
+		ip          TEXT NOT NULL UNIQUE,
+		created_at  TEXT NOT NULL,
+		UNIQUE (user_id, device)
+	);
+	INSERT INTO sqlite_sequence (name, seq) SELECT 'peers_new', seq FROM sqlite_sequence WHERE name = 'peers';
+	DROP TABLE peers;
+	ALTER TABLE peers_new RENAME TO peers;
+	ALTER TABLE users ADD COLUMN edit_routes INTEGER NOT NULL DEFAULT 1;
+	ALTER TABLE users ADD COLUMN show_providers INTEGER NOT NULL DEFAULT 1;
+	ALTER TABLE users ADD COLUMN exits TEXT NOT NULL DEFAULT '[]';`,
 }
 
 type User struct {
@@ -150,17 +173,30 @@ type User struct {
 	Name      string
 	CreatedAt time.Time
 	HasLink   bool // a live link to the user's page; see IssueLink
+	Rights    Rights
 }
 
-// Peer is one (user, device, profile) tunnel. The private key is kept so the
-// client config can be shown again later; anyone with read access to the
-// database can impersonate the peer, so the database must be protected like
-// the server key.
+// Rights are what the operator lets a user do on their page, and which
+// exits the user's devices may use.
+type Rights struct {
+	EditRoutes    bool     // false: only the operator sets the user's routes
+	ShowProviders bool     // false: the user's page and API show countries only
+	Exits         []string // upstream names the devices may use; empty: every upstream (policy.Allows)
+}
+
+// DefaultRights are a new user's: they edit their routes, see providers and
+// may use every upstream.
+func DefaultRights() Rights { return Rights{EditRoutes: true, ShowProviders: true} }
+
+// Peer is one device of a user: one tunnel, with its route. The private key
+// is kept so the client config can be shown again later; anyone with read
+// access to the database can impersonate the peer, so the database must be
+// protected like the server key.
 type Peer struct {
 	ID         int64
 	User       string
 	Device     string
-	Profile    string
+	Route      policy.Route
 	PrivateKey awgconf.Key
 	PublicKey  awgconf.Key
 	IP         netip.Addr
@@ -292,7 +328,25 @@ func (s *Store) CreateUser(name string) (User, error) {
 		return User{}, err
 	}
 	id, _ := res.LastInsertId()
-	return User{ID: id, Name: name, CreatedAt: now}, nil
+	return User{ID: id, Name: name, CreatedAt: now, Rights: DefaultRights()}, nil
+}
+
+// SetRights replaces the user's rights; ErrNotFound if there is no such
+// user. The caller validates the exits against the upstreams.
+func (s *Store) SetRights(name string, r Rights) (User, error) {
+	exits, err := json.Marshal(nonNil(r.Exits))
+	if err != nil {
+		return User{}, err
+	}
+	res, err := s.db.Exec(`UPDATE users SET edit_routes = ?, show_providers = ?, exits = ? WHERE name = ?`,
+		r.EditRoutes, r.ShowProviders, string(exits), name)
+	if err != nil {
+		return User{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return User{}, ErrNotFound
+	}
+	return s.User(name)
 }
 
 func (s *Store) DeleteUser(name string) error {
@@ -307,12 +361,12 @@ func (s *Store) DeleteUser(name string) error {
 }
 
 func (s *Store) ListUsers() ([]User, error) {
-	return s.queryUsers("")
+	return queryUsers(s.db, "")
 }
 
 // User returns the user of that name; ErrNotFound if there is none.
 func (s *Store) User(name string) (User, error) {
-	users, err := s.queryUsers(`WHERE u.name = ?`, name)
+	users, err := queryUsers(s.db, `WHERE u.name = ?`, name)
 	if err != nil {
 		return User{}, err
 	}
@@ -322,8 +376,8 @@ func (s *Store) User(name string) (User, error) {
 	return users[0], nil
 }
 
-func (s *Store) queryUsers(where string, args ...any) ([]User, error) {
-	rows, err := s.db.Query(`SELECT u.id, u.name, u.created_at,
+func queryUsers(q querier, where string, args ...any) ([]User, error) {
+	rows, err := q.Query(`SELECT u.id, u.name, u.created_at, u.edit_routes, u.show_providers, u.exits,
 		EXISTS (SELECT 1 FROM user_links l WHERE l.user_id = u.id AND l.revoked_at IS NULL)
 		FROM users u `+where+` ORDER BY u.name`, args...)
 	if err != nil {
@@ -333,33 +387,45 @@ func (s *Store) queryUsers(where string, args ...any) ([]User, error) {
 	var users []User
 	for rows.Next() {
 		var u User
-		var created string
-		if err := rows.Scan(&u.ID, &u.Name, &created, &u.HasLink); err != nil {
+		var created, exits string
+		if err := rows.Scan(&u.ID, &u.Name, &created, &u.Rights.EditRoutes, &u.Rights.ShowProviders, &exits, &u.HasLink); err != nil {
 			return nil, err
 		}
 		if u.CreatedAt, err = time.Parse(time.RFC3339, created); err != nil {
 			return nil, fmt.Errorf("user %d: %w", u.ID, err)
+		}
+		if err := json.Unmarshal([]byte(exits), &u.Rights.Exits); err != nil {
+			return nil, fmt.Errorf("user %d: exits: %w", u.ID, err)
+		}
+		if len(u.Rights.Exits) == 0 {
+			u.Rights.Exits = nil
 		}
 		users = append(users, u)
 	}
 	return users, rows.Err()
 }
 
-// AddPeer generates a key pair and allocates the next free address in subnet.
-// The network address and the first host (the gateway) are never handed out.
-// The user and the profile must exist.
-func (s *Store) AddPeer(user, device, profile string, subnet netip.Prefix) (Peer, error) {
-	return s.addPeer(user, device, profile, subnet, false)
+// AddPeer adds a device with its route: it generates a key pair and
+// allocates the next free address in subnet. The network address and the
+// first host (the gateway) are never handed out. The user must exist;
+// ErrExists if they have a device of that name. The caller validates the
+// route against the upstreams.
+func (s *Store) AddPeer(user, device string, route policy.Route, subnet netip.Prefix) (Peer, error) {
+	return s.addPeer(user, device, route, subnet, false)
 }
 
 // AddUserPeer is AddPeer for a user that may not exist yet: the user and the
 // peer are created in one transaction, so a failed allocation leaves no user.
-func (s *Store) AddUserPeer(user, device, profile string, subnet netip.Prefix) (Peer, error) {
-	return s.addPeer(user, device, profile, subnet, true)
+func (s *Store) AddUserPeer(user, device string, route policy.Route, subnet netip.Prefix) (Peer, error) {
+	return s.addPeer(user, device, route, subnet, true)
 }
 
-func (s *Store) addPeer(user, device, profile string, subnet netip.Prefix, createUser bool) (Peer, error) {
+func (s *Store) addPeer(user, device string, route policy.Route, subnet netip.Prefix, createUser bool) (Peer, error) {
 	priv, err := awgconf.GeneratePrivateKey()
+	if err != nil {
+		return Peer{}, err
+	}
+	routeJSON, err := json.Marshal(route)
 	if err != nil {
 		return Peer{}, err
 	}
@@ -375,14 +441,8 @@ func (s *Store) addPeer(user, device, profile string, subnet netip.Prefix, creat
 			return Peer{}, err
 		}
 	}
-	if err := profileExists(tx, profile); err != nil {
-		return Peer{}, err
-	}
-	var userID int64
-	if err := tx.QueryRow(`SELECT id FROM users WHERE name = ?`, user).Scan(&userID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return Peer{}, ErrNotFound
-		}
+	userID, err := userID(tx, user)
+	if err != nil {
 		return Peer{}, err
 	}
 	used, err := usedAddresses(tx)
@@ -393,8 +453,8 @@ func (s *Store) addPeer(user, device, profile string, subnet netip.Prefix, creat
 	if !ok {
 		return Peer{}, ErrSubnetFull
 	}
-	res, err := tx.Exec(`INSERT INTO peers (user_id, device, profile, private_key, public_key, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
-		userID, device, profile, priv.String(), priv.Public().String(), ip.String(), now.Format(time.RFC3339))
+	res, err := tx.Exec(`INSERT INTO peers (user_id, device, route, private_key, public_key, ip, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		userID, device, string(routeJSON), priv.String(), priv.Public().String(), ip.String(), now.Format(time.RFC3339))
 	if err != nil {
 		if isUnique(err) {
 			return Peer{}, ErrExists
@@ -405,20 +465,31 @@ func (s *Store) addPeer(user, device, profile string, subnet netip.Prefix, creat
 		return Peer{}, err
 	}
 	id, _ := res.LastInsertId()
-	return Peer{ID: id, User: user, Device: device, Profile: profile, PrivateKey: priv, PublicKey: priv.Public(), IP: ip, CreatedAt: now}, nil
+	return Peer{ID: id, User: user, Device: device, Route: route, PrivateKey: priv, PublicKey: priv.Public(), IP: ip, CreatedAt: now}, nil
 }
 
-func (s *Store) DeletePeer(user, device, profile string) error {
-	return s.deletePeers(`profile = ? AND device = ? AND user_id = (SELECT id FROM users WHERE name = ?)`, profile, device, user)
+// SetRoute replaces the route of one of the user's devices; ErrNotFound if
+// there is no such device. The key and the address stay, so the client
+// config does too.
+func (s *Store) SetRoute(user, device string, route policy.Route) (Peer, error) {
+	routeJSON, err := json.Marshal(route)
+	if err != nil {
+		return Peer{}, err
+	}
+	res, err := s.db.Exec(`UPDATE peers SET route = ? WHERE device = ? AND user_id = (SELECT id FROM users WHERE name = ?)`,
+		string(routeJSON), device, user)
+	if err != nil {
+		return Peer{}, err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return Peer{}, ErrNotFound
+	}
+	return s.Peer(user, device)
 }
 
-// DeleteDevice removes every profile of one of the user's devices.
-func (s *Store) DeleteDevice(user, device string) error {
-	return s.deletePeers(`device = ? AND user_id = (SELECT id FROM users WHERE name = ?)`, device, user)
-}
-
-func (s *Store) deletePeers(where string, args ...any) error {
-	res, err := s.db.Exec(`DELETE FROM peers WHERE `+where, args...)
+// DeletePeer removes one of the user's devices.
+func (s *Store) DeletePeer(user, device string) error {
+	res, err := s.db.Exec(`DELETE FROM peers WHERE device = ? AND user_id = (SELECT id FROM users WHERE name = ?)`, device, user)
 	if err != nil {
 		return err
 	}
@@ -428,8 +499,9 @@ func (s *Store) deletePeers(where string, args ...any) error {
 	return nil
 }
 
-func (s *Store) Peer(user, device, profile string) (Peer, error) {
-	peers, err := s.queryPeers(`WHERE u.name = ? AND p.device = ? AND p.profile = ?`, user, device, profile)
+// Peer returns the user's device of that name; ErrNotFound if there is none.
+func (s *Store) Peer(user, device string) (Peer, error) {
+	peers, err := s.queryPeers(`WHERE u.name = ? AND p.device = ?`, user, device)
 	if err != nil {
 		return Peer{}, err
 	}
@@ -455,10 +527,9 @@ func (s *Store) ListPeers() ([]Peer, error) {
 	return s.queryPeers("")
 }
 
-// PeersAndProfiles reads every peer and every profile in one transaction,
-// so a profile renamed in between cannot leave a peer naming a profile the
-// other list lacks.
-func (s *Store) PeersAndProfiles() ([]Peer, []config.Profile, error) {
+// PeersAndUsers reads every peer and every user in one transaction, so each
+// peer's user is in the list, with the rights that were in effect.
+func (s *Store) PeersAndUsers() ([]Peer, []User, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, nil, err
@@ -468,14 +539,14 @@ func (s *Store) PeersAndProfiles() ([]Peer, []config.Profile, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	profiles, err := listProfiles(tx)
+	users, err := queryUsers(tx, "")
 	if err != nil {
 		return nil, nil, err
 	}
-	return peers, profiles, nil
+	return peers, users, nil
 }
 
-// UserPeers returns every peer of one user, by device and profile.
+// UserPeers returns every peer of one user, by device.
 func (s *Store) UserPeers(user string) ([]Peer, error) {
 	return s.queryPeers(`WHERE u.name = ?`, user)
 }
@@ -490,8 +561,8 @@ type querier interface {
 }
 
 func queryPeers(q querier, where string, args ...any) ([]Peer, error) {
-	rows, err := q.Query(`SELECT p.id, u.name, p.device, p.profile, p.private_key, p.public_key, p.ip, p.created_at
-		FROM peers p JOIN users u ON u.id = p.user_id `+where+` ORDER BY u.name, p.device, p.profile`, args...)
+	rows, err := q.Query(`SELECT p.id, u.name, p.device, p.route, p.private_key, p.public_key, p.ip, p.created_at
+		FROM peers p JOIN users u ON u.id = p.user_id `+where+` ORDER BY u.name, p.device`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -499,9 +570,12 @@ func queryPeers(q querier, where string, args ...any) ([]Peer, error) {
 	var peers []Peer
 	for rows.Next() {
 		var p Peer
-		var priv, pub, ip, created string
-		if err := rows.Scan(&p.ID, &p.User, &p.Device, &p.Profile, &priv, &pub, &ip, &created); err != nil {
+		var route, priv, pub, ip, created string
+		if err := rows.Scan(&p.ID, &p.User, &p.Device, &route, &priv, &pub, &ip, &created); err != nil {
 			return nil, err
+		}
+		if err := json.Unmarshal([]byte(route), &p.Route); err != nil {
+			return nil, fmt.Errorf("peer %d: route: %w", p.ID, err)
 		}
 		if p.PrivateKey, err = awgconf.ParseKey(priv); err != nil {
 			return nil, fmt.Errorf("peer %d: %w", p.ID, err)
@@ -518,6 +592,14 @@ func queryPeers(q querier, where string, args ...any) ([]Peer, error) {
 		peers = append(peers, p)
 	}
 	return peers, rows.Err()
+}
+
+// nonNil keeps an empty list a JSON array rather than null.
+func nonNil(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
 }
 
 func usedAddresses(tx *sql.Tx) (map[netip.Addr]bool, error) {

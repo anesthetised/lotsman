@@ -94,12 +94,10 @@ listen: 127.0.0.1:51820
 endpoint: 127.0.0.1:51820
 state_dir: `+filepath.Join(dir, "state")+`
 upstreams:
-  - {name: nl, conf: `+filepath.Join(dir, "nl.conf")+`, provider: awg}
-  - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, provider: outline}
+  - {name: nl, conf: `+filepath.Join(dir, "nl.conf")+`, geo: NL, provider: awg}
+  - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, geo: FI, provider: outline}
 health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_after: 2, up_after: 1}
 `), 0o600)
-	mustRun(t, "-config", cfgPath, "profile", "add", "awg", "provider=awg")
-	mustRun(t, "-config", cfgPath, "profile", "add", "outline", "provider=outline")
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() { served <- serve(ctx, cfgPath, slog.LevelInfo) }()
@@ -114,8 +112,8 @@ health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_af
 		return err == nil
 	})
 	clients := map[string]*client{}
-	for user, profile := range map[string]string{"alice": "awg", "bob": "outline"} {
-		out, err := capture(t, "-config", cfgPath, "user", "add", user, "-profile", profile)
+	for user, country := range map[string]string{"alice": "NL", "bob": "FI"} {
+		out, err := capture(t, "-config", cfgPath, "device", "add", user+"/phone", country)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -1,6 +1,6 @@
 // Package daemon ties the pieces together: it configures the devices, keeps
 // the downstream peer list in sync with the store, probes upstreams and
-// routes every peer to the upstream its profile selects.
+// routes every peer to the upstream its device's route selects.
 package daemon
 
 import (
@@ -228,9 +228,6 @@ func (d *Daemon) start(ctx context.Context) error {
 	d.mu.Lock()
 	cfg := d.cfg
 	d.mu.Unlock()
-	if err := d.checkProfiles(cfg, nil); err != nil {
-		return err
-	}
 	// Provider configs are loaded and resolved before d.mu is taken, so slow
 	// DNS never blocks Status or Metrics. The serve loop delivers SIGHUP only
 	// after Ready, so no reload or reconcile races a half-started daemon.
@@ -396,15 +393,12 @@ func (d *Daemon) teardown() []link {
 // Upstreams are matched by name; one whose provider config changed is
 // replaced once the new config loads and resolves, otherwise the running one
 // stays and the error is returned. Health settings are swapped in and every
-// peer is re-evaluated against the stored profiles. Settings that need a restart, or
-// removing the last upstream of a stored profile the running config serves,
-// reject the whole reload.
+// peer is re-evaluated against its route. Settings that need a restart reject
+// the whole reload. Removing upstreams never does: a route that named one
+// simply matches less, and a device left without an exit is blocked.
 func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	d.mu.Lock()
 	err := restartRequired(d.cfg, cfg)
-	if err == nil {
-		err = d.checkProfiles(cfg, d.cfg)
-	}
 	if err != nil {
 		d.reloads[1]++
 	}
@@ -524,7 +518,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 		}
 	}
 	// Until the new upstreams open, they are out of service like ones that
-	// are not up yet; profiles and labels already match.
+	// are not up yet; routes and labels already match.
 	d.ups = kept
 	d.cfg = cfg
 	if cfg.Health.Transfer == nil {
@@ -1193,16 +1187,15 @@ func (d *Daemon) Reconcile() error {
 
 // reconcile is Reconcile for callers that hold d.mu.
 func (d *Daemon) reconcile() error {
-	// Profiles are read every pass, so a profile edited in the store applies
-	// on the next reconcile, as a new peer does; with the peers, so a
-	// renamed profile is never missing for its peers.
-	peers, stored, err := d.store.PeersAndProfiles()
+	// Routes and rights are read every pass, so a route or rights edited
+	// in the store apply on the next reconcile, as a new peer does.
+	peers, users, err := d.store.PeersAndUsers()
 	if err != nil {
 		return err
 	}
-	profiles := map[string]config.Profile{}
-	for _, p := range stored {
-		profiles[p.Name] = p
+	exits := map[string][]string{}
+	for _, u := range users {
+		exits[u.Name] = u.Rights.Exits
 	}
 	var errs []error
 	wanted := map[awgconf.Key]bool{}
@@ -1238,36 +1231,31 @@ func (d *Daemon) reconcile() error {
 				continue
 			}
 		}
-		// Kept fresh, not only when added: a profile rename changes a peer
-		// that is already on the device.
+		// Kept fresh, not only when added: a new route changes a peer that
+		// is already on the device.
 		d.devicePeers[p.PublicKey] = p
-		errs = append(errs, d.route(p, profiles))
+		errs = append(errs, d.route(p, exits[p.User]))
 	}
 	d.syncAlive()
 	return errors.Join(errs...)
 }
 
-func (d *Daemon) route(p store.Peer, profiles map[string]config.Profile) error {
-	profile, ok := profiles[p.Profile]
-	if !ok {
-		return errors.Join(
-			fmt.Errorf("peer %s/%s/%s: profile %q is not in the store (lotsman profile add or import)", p.User, p.Device, p.Profile, p.Profile),
-			d.unroute(p.IP),
-		)
-	}
+// route moves p to the upstream its route selects among the exits its user
+// may use, or blocks it when there is none.
+func (d *Daemon) route(p store.Peer, exits []string) error {
 	if d.unroutePending[p.IP] {
 		if err := d.unroute(p.IP); err != nil {
 			return err
 		}
 	}
 	current := d.assignments[p.IP]
-	want, ok := policy.Select(profile, d.candidates(), current)
+	want, ok := policy.Select(p.Route.Tiers(), policy.Exits(d.candidates(), exits), current)
 	switch {
 	case !ok && current != "":
 		if err := d.unroute(p.IP); err != nil {
 			return err
 		}
-		d.log.Warn("no healthy upstream, peer is now blocked", "peer", p.IP, "user", p.User, "device", p.Device, "profile", p.Profile)
+		d.log.Warn("no healthy upstream, peer is now blocked", "peer", p.IP, "user", p.User, "device", p.Device, "route", p.Route.String())
 		return nil
 	case !ok:
 		return nil
@@ -1279,7 +1267,7 @@ func (d *Daemon) route(p store.Peer, profiles map[string]config.Profile) error {
 	}
 	d.assignments[p.IP] = want
 	d.reroutes[want]++
-	d.log.Info("peer routed", "peer", p.IP, "user", p.User, "device", p.Device, "profile", p.Profile, "from", current, "to", want)
+	d.log.Info("peer routed", "peer", p.IP, "user", p.User, "device", p.Device, "route", p.Route.String(), "from", current, "to", want)
 	return nil
 }
 
@@ -1340,7 +1328,6 @@ type UpstreamStatus struct {
 	Kind          string
 	Geo           string
 	Provider      string
-	Tags          []string
 	Interface     string
 	State         health.State
 	Degraded      bool // reachable, but failing its transfer probes
@@ -1351,11 +1338,11 @@ type UpstreamStatus struct {
 }
 
 type PeerStatus struct {
-	ID                    int64 // the store's peer row
-	User, Device, Profile string
-	Address               netip.Addr // the client's tunnel address
-	Upstream              string     // "" when blocked
-	LastHandshake         time.Time
+	ID            int64 // the store's peer row
+	User, Device  string
+	Address       netip.Addr // the client's tunnel address
+	Upstream      string     // "" when blocked
+	LastHandshake time.Time
 }
 
 type Status struct {
@@ -1371,7 +1358,7 @@ func (d *Daemon) Status() Status {
 	handshakes := d.downstreamHandshakes()
 	routed, active := map[string]int{}, map[string]int{}
 	for key, p := range d.devicePeers {
-		ps := PeerStatus{ID: p.ID, User: p.User, Device: p.Device, Profile: p.Profile, Address: p.IP, Upstream: d.assignments[p.IP], LastHandshake: handshakes[key]}
+		ps := PeerStatus{ID: p.ID, User: p.User, Device: p.Device, Address: p.IP, Upstream: d.assignments[p.IP], LastHandshake: handshakes[key]}
 		st.Peers = append(st.Peers, ps)
 		if ps.Upstream == "" {
 			continue
@@ -1382,10 +1369,10 @@ func (d *Daemon) Status() Status {
 		}
 	}
 	slices.SortFunc(st.Peers, func(a, b PeerStatus) int {
-		return cmp.Or(strings.Compare(a.User, b.User), strings.Compare(a.Device, b.Device), strings.Compare(a.Profile, b.Profile))
+		return cmp.Or(strings.Compare(a.User, b.User), strings.Compare(a.Device, b.Device))
 	})
 	for _, u := range d.ups {
-		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Geo: u.Geo, Provider: u.Provider, Tags: u.Tags, Interface: u.InterfaceName(), State: u.Tracker.State(), Degraded: d.degraded(u),
+		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Geo: u.Geo, Provider: u.Provider, Interface: u.InterfaceName(), State: u.Tracker.State(), Degraded: d.degraded(u),
 			Latency: u.Tracker.Latency(), Routed: routed[u.Name], Active: active[u.Name]}
 		if peer := u.link.Stats().Peer; peer != nil {
 			s.LastHandshake = peer.LastHandshake

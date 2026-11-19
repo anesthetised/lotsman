@@ -1,5 +1,6 @@
-// The exits the user's devices go out through now: state, latency and a
-// 7-day availability bar. Never who else uses them.
+// The exits the user's devices go out through now: country (and provider,
+// when the user may see it), state, latency and a 7-day availability bar.
+// Never who else uses them, nor the upstream's name.
 
 import { durationMs } from "@bufbuild/protobuf/wkt";
 import { createMemo, For, Show } from "solid-js";
@@ -16,10 +17,8 @@ export function Exits() {
   const used = createMemo(() => {
     const devices = new Map<string, Set<string>>();
     for (const device of ctx.user().devices) {
-      for (const peer of device.peers) {
-        const name = ctx.peer(peer.peerId)?.upstream;
-        if (name) devices.set(name, (devices.get(name) ?? new Set()).add(device.name));
-      }
+      const name = ctx.peer(device.peerId)?.upstream;
+      if (name) devices.set(name, (devices.get(name) ?? new Set()).add(device.name));
     }
     return [...devices].sort(([a], [b]) => a.localeCompare(b)).map(([name, names]) => ({ name, devices: [...names].join(", ") }));
   });
@@ -34,20 +33,18 @@ export function Exits() {
           <For each={used()} keyed={(e) => e.name}>
             {(exit) => {
               const status = () => ctx.upstream(exit().name);
+              const label = () => [fmt.country(status()?.geo ?? ""), status()?.provider ?? ""].filter(Boolean).join(" · ");
               return (
                 <li class="space-y-2 rounded-xl border border-line bg-surface p-4">
                   <div class="flex flex-wrap items-center justify-between gap-2">
-                    <span class="font-medium">
-                      {exit().name}
-                      <Show when={status()?.geo}>{(geo) => <span class="font-normal text-muted"> · {geo()}</span>}</Show>
-                    </span>
+                    <span class="font-medium">{label()}</span>
                     <Show when={status()}>{(u) => <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />}</Show>
                   </div>
                   <p class="text-sm text-muted">
                     {t.user.usedBy(exit().devices)}
                     <Show when={status()?.latency}>{(latency) => <> · {t.user.latency}: {fmt.milliseconds(durationMs(latency()))}</>}</Show>
                   </p>
-                  <Availability name={exit().name} label={t.user.availabilityLabel(exit().name)} load={ctx.self.upstreamHistory} />
+                  <Availability name={exit().name} label={t.user.availabilityLabel(label())} load={ctx.self.upstreamHistory} />
                 </li>
               );
             }}

@@ -23,17 +23,17 @@ func TestUserChangesApplyAtOnce(t *testing.T) {
 		return false
 	}
 
-	if _, err := h.d.AddPeer("alice", "phone", "nl", false); !errors.Is(err, store.ErrNotFound) {
+	if _, err := h.d.AddPeer("alice", "phone", nlRoute, false); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("AddPeer for a missing user without createUser: %v", err)
 	}
-	phone, err := h.d.AddPeer("alice", "phone", "nl", true)
+	phone, err := h.d.AddPeer("alice", "phone", nlRoute, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !onDevice(phone.ID) {
 		t.Error("the new peer is not routed when AddPeer returns")
 	}
-	laptop, err := h.d.AddPeer("alice", "laptop", "eu", false)
+	laptop, err := h.d.AddPeer("alice", "laptop", euRoute, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,14 +42,32 @@ func TestUserChangesApplyAtOnce(t *testing.T) {
 		t.Errorf("config of the laptop:\n%s", conf)
 	}
 
-	if err := h.d.RemovePeers("alice", "phone", ""); err != nil {
+	// A new route moves the device before SetRoute returns.
+	if _, err := h.d.SetRoute("alice", "phone", route("DE")); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := h.dp.RouteOf(phone.IP); got != "lm-up-de" {
+		t.Errorf("phone after SetRoute: %q, want lm-up-de", got)
+	}
+	// Rights apply before SetRights returns: without DE the phone is blocked.
+	if _, err := h.d.SetRights("alice", store.Rights{Exits: []string{"nl"}}); err != nil {
 		t.Fatal(err)
 	}
 	if onDevice(phone.ID) {
-		t.Error("the removed peer is still on the device")
+		t.Error("the phone is still routed outside its exits")
 	}
-	if err := h.d.RemovePeers("alice", "laptop", "nl"); !errors.Is(err, store.ErrNotFound) {
-		t.Errorf("removing a profile the device lacks: %v", err)
+	if _, err := h.d.SetRoute("alice", "tablet", nlRoute); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("SetRoute of a missing device: %v", err)
+	}
+
+	if err := h.d.RemovePeer("alice", "phone"); err != nil {
+		t.Fatal(err)
+	}
+	if peers, _ := h.d.down.Peers(); len(peers) != 1 {
+		t.Errorf("the removed peer is still on the device: %d peers", len(peers))
+	}
+	if err := h.d.RemovePeer("alice", "phone"); !errors.Is(err, store.ErrNotFound) {
+		t.Errorf("removing a missing device: %v", err)
 	}
 	if err := h.d.RemoveUser("alice"); err != nil {
 		t.Fatal(err)
@@ -66,7 +84,7 @@ func TestUserChangesApplyAtOnce(t *testing.T) {
 // store, and a change it missed wakes it again.
 func TestUserChangeBeforeReady(t *testing.T) {
 	h := newHarness(t)
-	p, err := h.d.AddPeer("alice", "phone", "nl", true)
+	p, err := h.d.AddPeer("alice", "phone", nlRoute, true)
 	if err != nil {
 		t.Fatal(err)
 	}

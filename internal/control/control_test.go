@@ -27,10 +27,8 @@ import (
 )
 
 // fakeSource is a daemon with a fixed status and the traffic the test sets.
-// The profile and connection services have their own fakes; here they are
-// never called.
+// The connection service has its own fake; here it is never called.
 type fakeSource struct {
-	ProfileSource
 	ConnectionSource
 	HistorySource // none unless a test sets one
 	Users         // none unless a test sets one
@@ -70,7 +68,7 @@ func TestSnapshot(t *testing.T) {
 	handshake := now.Add(-time.Minute)
 	st := daemon.Status{
 		Upstreams: []daemon.UpstreamStatus{
-			{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme", Tags: []string{"eu", "fast"}, State: health.Up,
+			{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme", State: health.Up,
 				Latency: 25 * time.Millisecond, LastHandshake: handshake, Routed: 2, Active: 1},
 			{Name: "de", Kind: "outline", State: health.Up, Degraded: true, Latency: time.Second},
 			{Name: "fi", Kind: "vless", State: health.Down},
@@ -79,9 +77,9 @@ func TestSnapshot(t *testing.T) {
 			{Name: "pl", Kind: "other", State: health.Down, Degraded: true},
 		},
 		Peers: []daemon.PeerStatus{
-			{ID: 7, User: "alice", Device: "phone", Profile: "eu", Address: netip.MustParseAddr("10.77.0.2"),
+			{ID: 7, User: "alice", Device: "phone", Address: netip.MustParseAddr("10.77.0.2"),
 				Upstream: "nl", LastHandshake: handshake},
-			{ID: 12, User: "bob", Device: "default", Profile: "eu", Address: netip.MustParseAddr("10.77.0.3")},
+			{ID: 12, User: "bob", Device: "default", Address: netip.MustParseAddr("10.77.0.3")},
 		},
 	}
 	// Every field differs, so a swapped direction shows. bob's peer and
@@ -96,7 +94,7 @@ func TestSnapshot(t *testing.T) {
 		Time: timestamppb.New(now), ClientMtu: 1280,
 		Total: &lotsmanv1.Traffic{DownBytes: 9, UpBytes: 10, DownRate: 11, UpRate: 12},
 		Upstreams: []*lotsmanv1.UpstreamStatus{
-			{Name: "nl", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "NL", Provider: "acme", Tags: []string{"eu", "fast"},
+			{Name: "nl", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "NL", Provider: "acme",
 				State: lotsmanv1.UpstreamState_UPSTREAM_STATE_UP, Latency: durationpb.New(25 * time.Millisecond),
 				LastHandshake: timestamppb.New(handshake), Routed: 2, Active: 1,
 				Traffic: &lotsmanv1.Traffic{DownBytes: 5, UpBytes: 6, DownRate: 7, UpRate: 8}},
@@ -107,10 +105,10 @@ func TestSnapshot(t *testing.T) {
 			{Name: "pl", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_UNSPECIFIED, State: lotsmanv1.UpstreamState_UPSTREAM_STATE_DOWN},
 		},
 		Peers: []*lotsmanv1.PeerStatus{
-			{PeerId: "p_7", User: "alice", Device: "phone", Profile: "eu", Address: "10.77.0.2", Upstream: "nl",
+			{PeerId: "p_7", User: "alice", Device: "phone", Address: "10.77.0.2", Upstream: "nl",
 				LastHandshake: timestamppb.New(handshake), Traffic: &lotsmanv1.Traffic{DownBytes: 1, UpBytes: 2, DownRate: 3, UpRate: 4}},
 			// Blocked and never connected: no upstream, no handshake.
-			{PeerId: "p_12", User: "bob", Device: "default", Profile: "eu", Address: "10.77.0.3"},
+			{PeerId: "p_12", User: "bob", Device: "default", Address: "10.77.0.3"},
 		},
 	}
 	if diff := cmp.Diff(want, snapshot(now, 1280, st, tr), protocmp.Transform()); diff != "" {
@@ -215,7 +213,7 @@ func TestWatchWaitsForReady(t *testing.T) {
 func TestWatchTraffic(t *testing.T) {
 	src := newFakeSource(daemon.Status{
 		Upstreams: []daemon.UpstreamStatus{{Name: "ol", Kind: "outline", State: health.Up}},
-		Peers:     []daemon.PeerStatus{{ID: 3, User: "alice", Device: "default", Profile: "p", Upstream: "ol"}},
+		Peers:     []daemon.PeerStatus{{ID: 3, User: "alice", Device: "default", Upstream: "ol"}},
 	})
 	sample := func(down, up uint64) traffic.Snapshot {
 		tr := traffic.Traffic{DownBytes: down, UpBytes: up, DownRate: down / 2, UpRate: up / 2}
@@ -261,13 +259,13 @@ func TestUnimplemented(t *testing.T) {
 	implemented := []string{
 		lotsmanv1connect.StatusServiceWatchProcedure,
 		lotsmanv1connect.ConnectionServiceWatchProcedure,
-		lotsmanv1connect.ProfileServiceListProcedure,
-		lotsmanv1connect.ProfileServicePutProcedure,
-		lotsmanv1connect.ProfileServiceDeleteProcedure,
 		lotsmanv1connect.HistoryServiceUpstreamProcedure,
 		lotsmanv1connect.HistoryServicePeerProcedure,
 		lotsmanv1connect.UserServiceListProcedure,
+		lotsmanv1connect.UserServiceAddUserProcedure,
+		lotsmanv1connect.UserServiceSetRightsProcedure,
 		lotsmanv1connect.UserServiceAddDeviceProcedure,
+		lotsmanv1connect.UserServiceSetRouteProcedure,
 		lotsmanv1connect.UserServiceRemoveDeviceProcedure,
 		lotsmanv1connect.UserServiceRemoveUserProcedure,
 		lotsmanv1connect.UserServiceGetConfigProcedure,
@@ -277,9 +275,9 @@ func TestUnimplemented(t *testing.T) {
 		lotsmanv1connect.UserSelfServiceGetProcedure,
 		lotsmanv1connect.UserSelfServiceWatchProcedure,
 		lotsmanv1connect.UserSelfServiceAddDeviceProcedure,
+		lotsmanv1connect.UserSelfServiceSetRouteProcedure,
 		lotsmanv1connect.UserSelfServiceRemoveDeviceProcedure,
 		lotsmanv1connect.UserSelfServiceGetConfigProcedure,
-		lotsmanv1connect.UserSelfServiceListProfilesProcedure,
 		lotsmanv1connect.UserSelfServiceUpstreamHistoryProcedure,
 		lotsmanv1connect.UserSelfServicePeerHistoryProcedure,
 	}

@@ -16,7 +16,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file lotsman/v1/status.proto.
  */
 export const file_lotsman_v1_status: GenFile = /*@__PURE__*/
-  fileDesc("Chdsb3RzbWFuL3YxL3N0YXR1cy5wcm90bxIKbG90c21hbi52MSJBChJXYXRjaFN0YXR1c1JlcXVlc3QSKwoIaW50ZXJ2YWwYASABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iyAEKDlN0YXR1c1NuYXBzaG90EigKBHRpbWUYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmNsaWVudF9tdHUYAiABKA0SLQoJdXBzdHJlYW1zGAMgAygLMhoubG90c21hbi52MS5VcHN0cmVhbVN0YXR1cxIlCgVwZWVycxgEIAMoCzIWLmxvdHNtYW4udjEuUGVlclN0YXR1cxIiCgV0b3RhbBgFIAEoCzITLmxvdHNtYW4udjEuVHJhZmZpYyLDAgoOVXBzdHJlYW1TdGF0dXMSDAoEbmFtZRgBIAEoCRImCgRraW5kGAIgASgOMhgubG90c21hbi52MS5VcHN0cmVhbUtpbmQSCwoDZ2VvGAMgASgJEhAKCHByb3ZpZGVyGAQgASgJEgwKBHRhZ3MYBSADKAkSKAoFc3RhdGUYBiABKA4yGS5sb3RzbWFuLnYxLlVwc3RyZWFtU3RhdGUSKgoHbGF0ZW5jeRgHIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbhIyCg5sYXN0X2hhbmRzaGFrZRgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDgoGcm91dGVkGAkgASgNEg4KBmFjdGl2ZRgKIAEoDRIkCgd0cmFmZmljGAsgASgLMhMubG90c21hbi52MS5UcmFmZmljIskBCgpQZWVyU3RhdHVzEg8KB3BlZXJfaWQYASABKAkSDAoEdXNlchgCIAEoCRIOCgZkZXZpY2UYAyABKAkSDwoHcHJvZmlsZRgEIAEoCRIPCgdhZGRyZXNzGAUgASgJEhAKCHVwc3RyZWFtGAYgASgJEjIKDmxhc3RfaGFuZHNoYWtlGAcgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIkCgd0cmFmZmljGAggASgLMhMubG90c21hbi52MS5UcmFmZmljIlMKB1RyYWZmaWMSEgoKZG93bl9ieXRlcxgBIAEoBBIQCgh1cF9ieXRlcxgCIAEoBBIRCglkb3duX3JhdGUYAyABKAQSDwoHdXBfcmF0ZRgEIAEoBCqYAQoNVXBzdHJlYW1TdGF0ZRIeChpVUFNUUkVBTV9TVEFURV9VTlNQRUNJRklFRBAAEhoKFlVQU1RSRUFNX1NUQVRFX1VOS05PV04QARIVChFVUFNUUkVBTV9TVEFURV9VUBACEhsKF1VQU1RSRUFNX1NUQVRFX0RFR1JBREVEEAMSFwoTVVBTVFJFQU1fU1RBVEVfRE9XThAEKngKDFVwc3RyZWFtS2luZBIdChlVUFNUUkVBTV9LSU5EX1VOU1BFQ0lGSUVEEAASFQoRVVBTVFJFQU1fS0lORF9BV0cQARIZChVVUFNUUkVBTV9LSU5EX09VVExJTkUQAhIXChNVUFNUUkVBTV9LSU5EX1ZMRVNTEAMyVgoNU3RhdHVzU2VydmljZRJFCgVXYXRjaBIeLmxvdHNtYW4udjEuV2F0Y2hTdGF0dXNSZXF1ZXN0GhoubG90c21hbi52MS5TdGF0dXNTbmFwc2hvdDABQjpaOGdpdGh1Yi5jb20vYW5lc3RoZXRpc2VkL2xvdHNtYW4vYXBpL2xvdHNtYW4vdjE7bG90c21hbnYxYgZwcm90bzM", [file_google_protobuf_duration, file_google_protobuf_timestamp]);
+  fileDesc("Chdsb3RzbWFuL3YxL3N0YXR1cy5wcm90bxIKbG90c21hbi52MSJBChJXYXRjaFN0YXR1c1JlcXVlc3QSKwoIaW50ZXJ2YWwYASABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iyAEKDlN0YXR1c1NuYXBzaG90EigKBHRpbWUYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmNsaWVudF9tdHUYAiABKA0SLQoJdXBzdHJlYW1zGAMgAygLMhoubG90c21hbi52MS5VcHN0cmVhbVN0YXR1cxIlCgVwZWVycxgEIAMoCzIWLmxvdHNtYW4udjEuUGVlclN0YXR1cxIiCgV0b3RhbBgFIAEoCzITLmxvdHNtYW4udjEuVHJhZmZpYyK1AgoOVXBzdHJlYW1TdGF0dXMSDAoEbmFtZRgBIAEoCRImCgRraW5kGAIgASgOMhgubG90c21hbi52MS5VcHN0cmVhbUtpbmQSCwoDZ2VvGAMgASgJEhAKCHByb3ZpZGVyGAQgASgJEigKBXN0YXRlGAUgASgOMhkubG90c21hbi52MS5VcHN0cmVhbVN0YXRlEioKB2xhdGVuY3kYBiABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SMgoObGFzdF9oYW5kc2hha2UYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg4KBnJvdXRlZBgIIAEoDRIOCgZhY3RpdmUYCSABKA0SJAoHdHJhZmZpYxgKIAEoCzITLmxvdHNtYW4udjEuVHJhZmZpYyK4AQoKUGVlclN0YXR1cxIPCgdwZWVyX2lkGAEgASgJEgwKBHVzZXIYAiABKAkSDgoGZGV2aWNlGAMgASgJEg8KB2FkZHJlc3MYBCABKAkSEAoIdXBzdHJlYW0YBSABKAkSMgoObGFzdF9oYW5kc2hha2UYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiQKB3RyYWZmaWMYByABKAsyEy5sb3RzbWFuLnYxLlRyYWZmaWMiUwoHVHJhZmZpYxISCgpkb3duX2J5dGVzGAEgASgEEhAKCHVwX2J5dGVzGAIgASgEEhEKCWRvd25fcmF0ZRgDIAEoBBIPCgd1cF9yYXRlGAQgASgEKpgBCg1VcHN0cmVhbVN0YXRlEh4KGlVQU1RSRUFNX1NUQVRFX1VOU1BFQ0lGSUVEEAASGgoWVVBTVFJFQU1fU1RBVEVfVU5LTk9XThABEhUKEVVQU1RSRUFNX1NUQVRFX1VQEAISGwoXVVBTVFJFQU1fU1RBVEVfREVHUkFERUQQAxIXChNVUFNUUkVBTV9TVEFURV9ET1dOEAQqeAoMVXBzdHJlYW1LaW5kEh0KGVVQU1RSRUFNX0tJTkRfVU5TUEVDSUZJRUQQABIVChFVUFNUUkVBTV9LSU5EX0FXRxABEhkKFVVQU1RSRUFNX0tJTkRfT1VUTElORRACEhcKE1VQU1RSRUFNX0tJTkRfVkxFU1MQAzJWCg1TdGF0dXNTZXJ2aWNlEkUKBVdhdGNoEh4ubG90c21hbi52MS5XYXRjaFN0YXR1c1JlcXVlc3QaGi5sb3RzbWFuLnYxLlN0YXR1c1NuYXBzaG90MAFCOlo4Z2l0aHViLmNvbS9hbmVzdGhldGlzZWQvbG90c21hbi9hcGkvbG90c21hbi92MTtsb3RzbWFudjFiBnByb3RvMw", [file_google_protobuf_duration, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message lotsman.v1.WatchStatusRequest
@@ -99,45 +99,40 @@ export type UpstreamStatus = Message<"lotsman.v1.UpstreamStatus"> & {
   provider: string;
 
   /**
-   * @generated from field: repeated string tags = 5;
-   */
-  tags: string[];
-
-  /**
-   * @generated from field: lotsman.v1.UpstreamState state = 6;
+   * @generated from field: lotsman.v1.UpstreamState state = 5;
    */
   state: UpstreamState;
 
   /**
-   * @generated from field: google.protobuf.Duration latency = 7;
+   * @generated from field: google.protobuf.Duration latency = 6;
    */
   latency?: Duration | undefined;
 
   /**
    * unset for proxy upstreams / never
    *
-   * @generated from field: google.protobuf.Timestamp last_handshake = 8;
+   * @generated from field: google.protobuf.Timestamp last_handshake = 7;
    */
   lastHandshake?: Timestamp | undefined;
 
   /**
    * peers directed through it
    *
-   * @generated from field: uint32 routed = 9;
+   * @generated from field: uint32 routed = 8;
    */
   routed: number;
 
   /**
    * of those, handshake inside the active window
    *
-   * @generated from field: uint32 active = 10;
+   * @generated from field: uint32 active = 9;
    */
   active: number;
 
   /**
    * unset until the daemon has sampled it
    *
-   * @generated from field: lotsman.v1.Traffic traffic = 11;
+   * @generated from field: lotsman.v1.Traffic traffic = 10;
    */
   traffic?: Traffic | undefined;
 };
@@ -171,33 +166,28 @@ export type PeerStatus = Message<"lotsman.v1.PeerStatus"> & {
   device: string;
 
   /**
-   * @generated from field: string profile = 4;
-   */
-  profile: string;
-
-  /**
    * client tunnel IP
    *
-   * @generated from field: string address = 5;
+   * @generated from field: string address = 4;
    */
   address: string;
 
   /**
    * "" when blocked
    *
-   * @generated from field: string upstream = 6;
+   * @generated from field: string upstream = 5;
    */
   upstream: string;
 
   /**
-   * @generated from field: google.protobuf.Timestamp last_handshake = 7;
+   * @generated from field: google.protobuf.Timestamp last_handshake = 6;
    */
   lastHandshake?: Timestamp | undefined;
 
   /**
    * unset until the daemon has sampled it
    *
-   * @generated from field: lotsman.v1.Traffic traffic = 8;
+   * @generated from field: lotsman.v1.Traffic traffic = 7;
    */
   traffic?: Traffic | undefined;
 };

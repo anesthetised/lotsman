@@ -99,8 +99,8 @@ listen: 127.0.0.1:51820
 endpoint: 127.0.0.1:51820
 state_dir: `+filepath.Join(dir, "state")+`
 upstreams:
-  - {name: nl, conf: `+filepath.Join(dir, "nl.conf")+`, provider: awg}
-  - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, provider: outline}
+  - {name: nl, conf: `+filepath.Join(dir, "nl.conf")+`, geo: NL, provider: awg}
+  - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, geo: FI, provider: outline}
 health:
   interval: 500ms
   probe: 198.51.100.1:443
@@ -110,7 +110,6 @@ health:
   transfer: {url: 'http://198.51.100.1/down', min_bytes: 65536, timeout: 1s, interval: 1s}
 metrics: {listen: 127.0.0.1:19100}
 `), 0o600)
-	mustRun(t, "-config", cfgPath, "profile", "add", "p", "provider=awg", "provider=outline")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
@@ -125,7 +124,7 @@ metrics: {listen: 127.0.0.1:19100}
 		_, err := os.Stat(filepath.Join(dir, "state", "status.json"))
 		return err == nil
 	})
-	out, err := capture(t, "-config", cfgPath, "user", "add", "alice", "-profile", "p")
+	out, err := capture(t, "-config", cfgPath, "device", "add", "alice/phone", "NL", "FI")
 	if err != nil {
 		t.Fatal(err)
 	}

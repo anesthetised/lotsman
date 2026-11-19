@@ -20,6 +20,7 @@ import (
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
 	"github.com/anesthetised/lotsman/internal/control"
 	"github.com/anesthetised/lotsman/internal/control/controltest"
+	"github.com/anesthetised/lotsman/internal/policy"
 )
 
 // fakeResolver knows the links the test gives it and counts questions.
@@ -233,13 +234,13 @@ func TestLinksForwarding(t *testing.T) {
 // Through the panel and the real control API: a user acts on their own
 // devices only, and a revoked link also ends a Watch it opened.
 func TestLinksEndToEnd(t *testing.T) {
-	users := controltest.NewUsers(t, "eu")
+	users := controltest.NewUsers(t)
 	users.St.CreateUser("alice")
 	token, err := users.St.IssueLink("alice")
 	if err != nil {
 		t.Fatal(err)
 	}
-	bobs, err := users.AddPeer("bob", "phone", "eu", true)
+	bobs, err := users.AddPeer("bob", "phone", policy.DefaultRoute(), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +262,7 @@ func TestLinksEndToEnd(t *testing.T) {
 	if u, err := alice.Get(ctx, &lotsmanv1.GetSelfRequest{}); err != nil || u.Name != "alice" || !u.HasLink {
 		t.Fatalf("Get = %v, %v", u, err)
 	}
-	dev, err := alice.AddDevice(ctx, &lotsmanv1.AddSelfDeviceRequest{Device: "laptop", Profile: "eu"})
+	dev, err := alice.AddDevice(ctx, &lotsmanv1.AddSelfDeviceRequest{Device: "laptop"})
 	if err != nil {
 		t.Fatal(err)
 	}

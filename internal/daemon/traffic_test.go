@@ -14,7 +14,6 @@ import (
 	"github.com/amnezia-vpn/amneziawg-go/v3/tun/netstack"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
-	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/traffic"
 	"github.com/anesthetised/lotsman/internal/tunnel"
 )
@@ -43,7 +42,7 @@ func TestTraffic(t *testing.T) {
 		return 0, 0, errors.New("no such interface")
 	}
 	h.st.CreateUser("alice")
-	peer, err := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
+	peer, err := h.st.AddPeer("alice", "nl", nlRoute, h.cfg.Subnet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +133,7 @@ func BenchmarkTrafficSample(b *testing.B) {
 	h.d.interfaceCounters = func(string) (uint64, uint64, error) { return 1, 1, nil }
 	h.st.CreateUser("bench")
 	for i := range 50 {
-		if _, err := h.st.AddPeer("bench", fmt.Sprintf("d%d", i), "nl", h.cfg.Subnet); err != nil {
+		if _, err := h.st.AddPeer("bench", fmt.Sprintf("d%d", i), nlRoute, h.cfg.Subnet); err != nil {
 			b.Fatal(err)
 		}
 	}

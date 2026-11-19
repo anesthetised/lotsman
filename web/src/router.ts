@@ -14,8 +14,8 @@ export const Router = createRouter({
       children: [
         { path: "/", component: lazy(() => import("./pages/admin/Overview")) },
         { path: "/upstreams/:name", component: lazy(() => import("./pages/admin/UpstreamDetail")) },
-        { path: "/profiles", component: lazy(() => import("./pages/admin/Profiles")) },
         { path: "/users", component: lazy(() => import("./pages/admin/Users")) },
+        { path: "/users/:name", component: lazy(() => import("./pages/admin/UserDetail")) },
         { path: "/connections", component: lazy(() => import("./pages/admin/Connections")) },
         { path: "/passkeys", component: lazy(() => import("./pages/admin/Passkeys")) },
       ],

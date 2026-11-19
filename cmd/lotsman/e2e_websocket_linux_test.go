@@ -50,15 +50,14 @@ listen: 127.0.0.1:51820
 endpoint: 127.0.0.1:51820
 state_dir: `+filepath.Join(dir, "state")+`
 upstreams:
-  - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, provider: outline}
+  - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, geo: FI, provider: outline}
 health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_after: 2, up_after: 1}
 metrics: {listen: 127.0.0.1:19100}
 `), 0o600)
-	mustRun(t, "-config", cfgPath, "profile", "add", "p", "provider=outline")
 
 	out, err := capture(t, "-config", cfgPath, "config", "check")
 	endpoint := fmt.Sprintf("endpoint 127.0.0.1:%d", front.Addr().Port()) // localhost, resolved
-	if err != nil || !strings.Contains(out, "lm-up-ol  kind outline  "+endpoint) || !strings.Contains(out, "over WebSocket") ||
+	if err != nil || !strings.Contains(out, "lm-up-ol  kind outline  geo FI  provider outline  "+endpoint) || !strings.Contains(out, "over WebSocket") ||
 		strings.Contains(out, "outline-secret") || strings.Contains(out, "s3cr3t") {
 		t.Fatalf("config check: %v\n%s", err, out)
 	}
@@ -76,7 +75,7 @@ metrics: {listen: 127.0.0.1:19100}
 		_, err := os.Stat(filepath.Join(dir, "state", "status.json"))
 		return err == nil
 	})
-	out, err = capture(t, "-config", cfgPath, "user", "add", "alice", "-profile", "p")
+	out, err = capture(t, "-config", cfgPath, "device", "add", "alice/phone", "FI")
 	if err != nil {
 		t.Fatal(err)
 	}

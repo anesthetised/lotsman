@@ -25,29 +25,33 @@ const usage = `Usage: lotsman [-config FILE] [-log-level LEVEL] <command> [args]
 Commands:
   version                     print the build version
   serve                       run the gateway (Linux, root)
-  config check                validate the config, the upstream configs and the profiles
-  profile list                list profiles, their peers and preference tiers
-  profile add NAME [TIER...]  create profile NAME; each TIER is one preference, best first
-  profile set NAME [TIER...]  replace the tiers of profile NAME
-  profile rename OLD NEW      rename a profile; its peers follow and their configs stay valid
-  profile rm NAME             remove a profile no peer uses
-  profile import FILE         copy the profiles: key of an older lotsman.yaml into the store
-  user add NAME -profile P [-device D] [-qr]
-                              create a config for NAME's device D (default "default") with profile P
-  user show NAME -profile P [-device D] [-qr]
-                              print the config again
-  user list                   list users, devices and profiles
-  user rm NAME [-device D] [-profile P]
-                              remove one config, every config of a device, or the whole user
+  config check                validate the config and the upstream configs
+  user add NAME               create user NAME
+  user list                   list users, their devices and routes
+  user rights NAME [-edit-routes=BOOL] [-show-providers=BOOL] [-exits a,b|all]
+                              show or change NAME's rights: whether they set their routes and
+                              see providers on their page, and which upstreams (exits) their
+                              devices may use (all by default)
+  user rm NAME                remove NAME, their devices and their link
   user link NAME [-url URL] [-revoke]
                               print a new link to NAME's page in the web panel (the old one
                               stops working), or end their link
+  device add USER/DEVICE [-qr] [-fastest] [-fallback] [COUNTRY[:PROVIDER,...]...]
+                              create a config for USER's DEVICE, and USER if needed
+  device route USER/DEVICE [-fastest] [-fallback] [COUNTRY[:PROVIDER,...]...]
+                              change the device's route; its config and tunnel stay
+  device show USER/DEVICE [-qr]
+                              print the config again
+  device rm USER/DEVICE       remove the device
   upstream status             show upstream health as last written by the daemon
   web                         run the web panel (as the lotsman-web user)
   web enroll                  print a one-time link that enrolls an operator's passkey
 
-A TIER is key=value pairs joined by commas, with keys geo, provider and tag, all of
-which an upstream must match (geo=NL,provider=acme), or "any". No TIER means any upstream.
+A route lists countries, an upstream's geo such as NL, each optionally narrowed to
+providers (DE:acme,beta). The first country with a healthy upstream wins, or with
+-fastest the lowest latency of all of them. When none has one the device is blocked,
+or with -fallback uses any upstream instead. Without COUNTRY: the fastest of any
+upstream. Either way only the user's exits count.
 
 Config file: -config, or $LOTSMAN_CONFIG, or /etc/lotsman/lotsman.yaml
   for web: -config, or $LOTSMAN_WEB_CONFIG, or /etc/lotsman/web.yaml
@@ -85,14 +89,14 @@ func run(args []string) error {
 	}
 	cmd := rest[0]
 	// web alone runs the panel, so only its one subcommand joins it.
-	if len(rest) > 1 && (cmd == "user" || cmd == "profile" || cmd == "config" || cmd == "upstream" || (cmd == "web" && rest[1] == "enroll")) {
+	if len(rest) > 1 && (cmd == "user" || cmd == "device" || cmd == "config" || cmd == "upstream" || (cmd == "web" && rest[1] == "enroll")) {
 		cmd += " " + rest[1]
 		rest = rest[1:]
 	}
 	rest = rest[1:]
 
 	switch cmd {
-	case "version", "serve", "config check", "user list", "profile list", "upstream status", "web", "web enroll":
+	case "version", "serve", "config check", "user list", "upstream status", "web", "web enroll":
 		if len(rest) > 0 {
 			return fmt.Errorf("%s: unexpected argument %q", cmd, rest[0])
 		}
@@ -108,24 +112,22 @@ func run(args []string) error {
 		return checkConfig(*configPath)
 	case "user add":
 		return userAdd(*configPath, rest)
-	case "user show":
-		return userShow(*configPath, rest)
 	case "user list":
 		return userList(*configPath)
+	case "user rights":
+		return userRights(*configPath, rest)
 	case "user rm":
 		return userRemove(*configPath, rest)
 	case "user link":
 		return userLink(*configPath, rest)
-	case "profile list":
-		return profileList(*configPath)
-	case "profile add", "profile set":
-		return profilePut(*configPath, cmd, rest)
-	case "profile rename":
-		return profileRename(*configPath, rest)
-	case "profile rm":
-		return profileRemove(*configPath, rest)
-	case "profile import":
-		return profileImport(*configPath, rest)
+	case "device add":
+		return deviceAdd(*configPath, rest)
+	case "device route":
+		return deviceRoute(*configPath, rest)
+	case "device show":
+		return deviceShow(*configPath, rest)
+	case "device rm":
+		return deviceRemove(*configPath, rest)
 	case "upstream status":
 		return upstreamStatus(*configPath)
 	case "web", "web enroll":

@@ -32,7 +32,6 @@ type Source interface {
 	Status() daemon.Status
 	ClientMTU() int
 	Traffic() traffic.Snapshot
-	ProfileSource
 	ConnectionSource
 	HistorySource
 	Users
@@ -45,7 +44,6 @@ func NewServer(src Source) *connect.Server {
 	lotsmanv1connect.RegisterStatusServiceHandler(s, statusService{src})
 	lotsmanv1connect.RegisterHistoryServiceHandler(s, historyService{src})
 	lotsmanv1connect.RegisterConnectionServiceHandler(s, connectionService{src, flows.Conntrack{}})
-	lotsmanv1connect.RegisterProfileServiceHandler(s, profileService{src})
 	lotsmanv1connect.RegisterUserServiceHandler(s, userService{src})
 	lotsmanv1connect.RegisterUserSelfServiceHandler(s, newUserSelfService(src))
 	return s
@@ -115,7 +113,7 @@ func snapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Snapsho
 	for _, u := range st.Upstreams {
 		t, ok := tr.Upstreams[u.Name]
 		s.Upstreams = append(s.Upstreams, &lotsmanv1.UpstreamStatus{
-			Name: u.Name, Kind: upstreamKind(u.Kind), Geo: u.Geo, Provider: u.Provider, Tags: u.Tags,
+			Name: u.Name, Kind: upstreamKind(u.Kind), Geo: u.Geo, Provider: u.Provider,
 			State: upstreamState(u), Latency: duration(u.Latency), LastHandshake: timestamp(u.LastHandshake),
 			Routed: uint32(u.Routed), Active: uint32(u.Active), Traffic: trafficOf(t, ok),
 		})
@@ -123,7 +121,7 @@ func snapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Snapsho
 	for _, p := range st.Peers {
 		t, ok := tr.Peers[p.ID]
 		ps := &lotsmanv1.PeerStatus{
-			PeerId: PeerID(p.ID), User: p.User, Device: p.Device, Profile: p.Profile,
+			PeerId: PeerID(p.ID), User: p.User, Device: p.Device,
 			Upstream: p.Upstream, LastHandshake: timestamp(p.LastHandshake), Traffic: trafficOf(t, ok),
 		}
 		if p.Address.IsValid() {

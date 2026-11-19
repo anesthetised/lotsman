@@ -41,11 +41,9 @@ func (everyoneOperator) Operator(*http.Request) error       { return nil }
 func (everyoneOperator) User(*http.Request) (string, error) { return "", nil }
 
 // panelSource is a daemon with one upstream and a minute of history for
-// any name. The test never calls the profile and connection services. Its
-// users are nil unless a test sets them; their peers are in the status,
-// routed nowhere.
+// any name. The test never calls the connection service. Its users are nil
+// unless a test sets them; their peers are in the status, routed nowhere.
 type panelSource struct {
-	control.ProfileSource
 	control.ConnectionSource
 	*controltest.Users
 }
@@ -61,7 +59,7 @@ func (p panelSource) Status() daemon.Status {
 	if p.Users != nil {
 		peers, _ := p.St.ListPeers()
 		for _, peer := range peers {
-			st.Peers = append(st.Peers, daemon.PeerStatus{ID: peer.ID, User: peer.User, Device: peer.Device, Profile: peer.Profile})
+			st.Peers = append(st.Peers, daemon.PeerStatus{ID: peer.ID, User: peer.User, Device: peer.Device})
 		}
 	}
 	return st
@@ -187,12 +185,16 @@ func TestWebPanelUserLink(t *testing.T) {
 	}
 	// The daemon and the CLI share the store, as on a gateway.
 	cfg := testConfig(t)
-	st, err := store.Open(dbPath(filepath.Join(filepath.Dir(cfg), "state")))
+	stateDir := filepath.Join(filepath.Dir(cfg), "state")
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	st, err := store.Open(dbPath(stateDir))
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	users := &controltest.Users{St: st, Limit: config.DefaultMaxDevices}
+	users := &controltest.Users{St: st, Limit: config.DefaultMaxDevices, Ups: controltest.Upstreams}
 	ctx, stop := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() { served <- control.Serve(ctx, ln, panelSource{Users: users}) }()
@@ -206,11 +208,11 @@ func TestWebPanelUserLink(t *testing.T) {
 	// fragment.
 	opClient := connect.NewClient(connecthttp.NewTransport(&http.Client{Transport: originTransport{origin}}, origin+"/api"))
 	ops := lotsmanv1connect.NewUserServiceClient(opClient)
-	bobs, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "bob", Device: "phone", Profile: "nl"})
+	bobs, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "bob", Device: "phone"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone", Profile: "nl"}); err != nil {
+	if _, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone"}); err != nil {
 		t.Fatal(err)
 	}
 	bobsLink, err := ops.IssueLink(t.Context(), &lotsmanv1.IssueLinkRequest{User: "bob"})
@@ -238,7 +240,7 @@ func TestWebPanelUserLink(t *testing.T) {
 	if err != nil || len(h.Samples) != 1 || h.Samples[0].UpRatio != 1 || h.Samples[0].DownBytes != 0 {
 		t.Errorf("history of alice's exit: %v, %v", h, err)
 	}
-	laptop, err := self.AddDevice(t.Context(), &lotsmanv1.AddSelfDeviceRequest{Device: "laptop", Profile: "nl"})
+	laptop, err := self.AddDevice(t.Context(), &lotsmanv1.AddSelfDeviceRequest{Device: "laptop"})
 	if err != nil {
 		t.Fatal(err)
 	}

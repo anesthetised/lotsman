@@ -11,12 +11,14 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/daemon"
+	"github.com/anesthetised/lotsman/internal/policy"
 	"github.com/anesthetised/lotsman/internal/store"
 )
 
@@ -90,10 +92,8 @@ func testConfig(t *testing.T) string {
 	os.WriteFile(path, []byte(`
 endpoint: vpn.example.org:51820
 state_dir: `+filepath.Join(dir, "state")+`
-upstreams: [{name: nl, conf: `+up+`, geo: NL}]
+upstreams: [{name: nl, conf: `+up+`, geo: NL, provider: acme}]
 `), 0o600)
-	mustRun(t, "-config", path, "profile", "add", "nl", "geo=NL")
-	mustRun(t, "-config", path, "profile", "add", "auto")
 	return path
 }
 
@@ -136,72 +136,56 @@ func TestCLI(t *testing.T) {
 	cfg := testConfig(t)
 
 	out, err := capture(t, "-config", cfg, "config", "check")
-	if err != nil || !strings.Contains(out, "config OK") || !strings.Contains(out, "lm-up-nl") {
+	if err != nil || !strings.Contains(out, "config OK") || !strings.Contains(out, "lm-up-nl  kind awg  geo NL  provider acme") {
 		t.Fatalf("config check: %v\n%s", err, out)
 	}
 
-	out, err = capture(t, "-config", cfg, "user", "add", "alice", "-profile", "nl")
+	out, err = capture(t, "-config", cfg, "device", "add", "alice/laptop")
 	if err != nil {
 		t.Fatal(err)
 	}
 	client, err := awgconf.Parse(strings.NewReader(out))
 	if err != nil {
-		t.Fatalf("user add output is not a config: %v\n%s", err, out)
+		t.Fatalf("device add output is not a config: %v\n%s", err, out)
 	}
 	if client.Interface.MTU != 1392 || client.Interface.Addresses[0].String() != "10.77.0.2/32" || client.Peers[0].Endpoint != "vpn.example.org:51820" {
 		t.Errorf("client config = %+v", client)
 	}
-
-	if _, err := capture(t, "-config", cfg, "user", "add", "alice", "-profile", "nl"); err == nil {
-		t.Error("duplicate profile accepted")
+	if _, err := capture(t, "-config", cfg, "device", "add", "alice/laptop"); err == nil {
+		t.Error("duplicate device accepted")
 	}
-	if _, err := capture(t, "-config", cfg, "user", "add", "alice", "-profile", "nope"); err == nil {
-		t.Error("unknown profile accepted")
-	}
-	if _, err := capture(t, "-config", cfg, "user", "add", "alice"); err == nil {
-		t.Error("missing -profile accepted")
-	}
-
-	again, err := capture(t, "-config", cfg, "user", "show", "alice", "-profile", "nl")
+	again, err := capture(t, "-config", cfg, "device", "show", "alice/laptop")
 	if err != nil || again != out {
-		t.Errorf("user show differs from user add: %v\n%s", err, again)
+		t.Errorf("device show differs from device add: %v\n%s", err, again)
 	}
 
-	capture(t, "-config", cfg, "user", "add", "alice", "-profile", "auto")
-	list, err := capture(t, "-config", cfg, "user", "list")
-	if err != nil || strings.Count(list, "alice") != 2 || !strings.Contains(list, "10.77.0.3") || !strings.Contains(list, "default") {
-		t.Errorf("user list: %v\n%s", err, list)
-	}
-
-	// A second device gets its own key even for the same profile.
-	phone, err := capture(t, "-config", cfg, "user", "add", "alice", "-device", "phone", "-profile", "nl")
+	// A second device gets its own key and address.
+	phone, err := capture(t, "-config", cfg, "device", "add", "alice/phone", "NL:acme")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if phone == out {
-		t.Error("phone config identical to the default device's config")
+		t.Error("phone config identical to the laptop's config")
 	}
-	if _, err := capture(t, "-config", cfg, "user", "add", "alice", "-device", "phone", "-profile", "nl"); err == nil {
-		t.Error("duplicate device+profile accepted")
+	list, err := capture(t, "-config", cfg, "user", "list")
+	row := tableRow(list, "alice") // alice laptop 10.77.0.2 - - <created> any
+	if err != nil || strings.Count(list, "alice") != 2 || !strings.Contains(list, "10.77.0.3") ||
+		len(row) != 7 || !slices.Equal(row[:5], []string{"alice", "laptop", "10.77.0.2", "-", "-"}) || row[6] != "any" {
+		t.Errorf("user list: %v\n%s", err, list)
 	}
-	capture(t, "-config", cfg, "user", "add", "alice", "-device", "phone", "-profile", "auto")
 
-	if _, err := capture(t, "-config", cfg, "user", "rm", "alice", "-profile", "auto"); err != nil {
+	if _, err := capture(t, "-config", cfg, "device", "rm", "alice/phone"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := capture(t, "-config", cfg, "user", "rm", "alice", "-device", "phone"); err != nil {
-		t.Fatal(err)
-	}
-	list, _ = capture(t, "-config", cfg, "user", "list")
-	if strings.Count(list, "alice") != 1 || strings.Contains(list, "phone") {
-		t.Errorf("after removing profile and device:\n%s", list)
+	if _, err := capture(t, "-config", cfg, "device", "rm", "alice/phone"); err == nil {
+		t.Error("removing a missing device succeeded")
 	}
 	// Without devices the user stays, and the list still shows them.
-	if _, err := capture(t, "-config", cfg, "user", "rm", "alice", "-device", "default"); err != nil {
+	if _, err := capture(t, "-config", cfg, "device", "rm", "alice/laptop"); err != nil {
 		t.Fatal(err)
 	}
 	list, _ = capture(t, "-config", cfg, "user", "list")
-	if strings.Count(list, "alice") != 1 || strings.Contains(list, "default") {
+	if strings.Count(list, "alice") != 1 || strings.Contains(list, "laptop") {
 		t.Errorf("after removing the last device:\n%s", list)
 	}
 	if _, err := capture(t, "-config", cfg, "user", "rm", "alice"); err != nil {
@@ -219,7 +203,7 @@ func TestCLI(t *testing.T) {
 	r, w, _ := os.Pipe()
 	oldErr := os.Stderr
 	os.Stderr = w
-	withQR, err := capture(t, "-config", cfg, "user", "add", "bob", "-profile", "nl", "-qr")
+	withQR, err := capture(t, "-config", cfg, "device", "add", "bob/phone", "-qr")
 	w.Close()
 	os.Stderr = oldErr
 	var qr bytes.Buffer
@@ -249,46 +233,30 @@ func TestCLI(t *testing.T) {
 // it must be rejected rather than silently ignored (and then acted on).
 func TestCLIRejectsTrailingArgs(t *testing.T) {
 	cfg := testConfig(t)
-	for _, a := range [][]string{
-		{"alice", "-profile", "nl"},
-		{"alice", "-profile", "auto"},
-		{"alice", "-device", "phone", "-profile", "nl"},
-		{"alice", "-device", "phone", "-profile", "auto"},
+	for _, device := range []string{"alice/laptop", "alice/phone"} {
+		mustRun(t, "-config", cfg, "device", "add", device)
+	}
+	before := userState(t, cfg)
+	for _, tc := range []struct {
+		args []string
+		want string
+	}{
+		{[]string{"user", "rm", "alice", "phone"}, "unexpected argument"},
+		{[]string{"user", "rm", "alice", "-device", "phone"}, "unexpected argument"},
+		{[]string{"user", "add", "bob", "phone"}, "unexpected argument"},
+		{[]string{"user", "rights", "alice", "phone", "-edit-routes=false"}, "unexpected argument"},
+		{[]string{"user", "link", "alice", "extra"}, "unexpected argument"},
+		{[]string{"device", "show", "alice/phone", "extra"}, "unexpected argument"},
+		{[]string{"device", "rm", "alice/phone", "extra"}, "unexpected argument"},
+		{[]string{"device", "add", "bob/phone", "NL", "-fallback"}, "flags go before the countries"},
+		{[]string{"device", "route", "alice/phone", "NL", "-fastest"}, "flags go before the countries"},
 	} {
-		if _, err := capture(t, append([]string{"-config", cfg, "user", "add"}, a...)...); err != nil {
-			t.Fatal(err)
+		_, err := capture(t, append([]string{"-config", cfg}, tc.args...)...)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Errorf("%v: err = %v, want %q", tc.args, err, tc.want)
 		}
-	}
-	peers := func() []store.Peer {
-		e, err := openEnv(cfg)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer e.store.Close()
-		ps, err := e.store.ListPeers()
-		if err != nil {
-			t.Fatal(err)
-		}
-		return ps
-	}
-	before := peers()
-	if len(before) != 4 {
-		t.Fatalf("setup: %d peers, want 4", len(before))
-	}
-
-	for _, args := range [][]string{
-		{"user", "rm", "alice", "phone", "-profile", "nl"},
-		{"user", "rm", "alice", "phone"},
-		{"user", "rm", "alice", "-device", "phone", "extra"},
-		{"user", "add", "bob", "phone", "-profile", "nl"},
-		{"user", "show", "alice", "phone", "-profile", "nl"},
-	} {
-		_, err := capture(t, append([]string{"-config", cfg}, args...)...)
-		if err == nil || !strings.Contains(err.Error(), "unexpected argument") {
-			t.Errorf("%v: err = %v, want unexpected argument", args, err)
-		}
-		if after := peers(); !reflect.DeepEqual(after, before) {
-			t.Errorf("%v changed stored peers:\nbefore %+v\nafter  %+v", args, before, after)
+		if after := userState(t, cfg); after != before {
+			t.Errorf("%v changed the store:\nbefore %s\nafter  %s", tc.args, before, after)
 		}
 	}
 }
@@ -323,7 +291,7 @@ func TestCLIRejectsSubnetHostBits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, err := capture(t, "-config", path, "user", "add", "alice", "-profile", "nl")
+	before, err := capture(t, "-config", path, "device", "add", "alice/phone")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -340,7 +308,7 @@ func TestCLIRejectsSubnetHostBits(t *testing.T) {
 	if err := os.WriteFile(path, invalid, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for _, args := range [][]string{{"config", "check"}, {"user", "add", "bob", "-profile", "nl"}} {
+	for _, args := range [][]string{{"config", "check"}, {"device", "add", "bob/phone"}} {
 		out, err := capture(t, append([]string{"-config", path}, args...)...)
 		if err == nil || !strings.Contains(err.Error(), "subnet: host bits must be zero") || out != "" {
 			t.Errorf("%v: output = %q, error = %v; want subnet host-bits error", args, out, err)
@@ -355,7 +323,7 @@ func TestCLIRejectsSubnetHostBits(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	after, err := capture(t, "-config", path, "user", "show", "alice", "-profile", "nl")
+	after, err := capture(t, "-config", path, "device", "show", "alice/phone")
 	if err != nil || after != before {
 		t.Errorf("canonical config no longer reproduces stored peer: %v", err)
 	}
@@ -391,7 +359,7 @@ func TestCLIRejectsInvalidEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	before, err := capture(t, "-config", path, "user", "add", "alice", "-profile", "nl")
+	before, err := capture(t, "-config", path, "device", "add", "alice/phone")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +378,7 @@ func TestCLIRejectsInvalidEndpoint(t *testing.T) {
 			if err := os.WriteFile(path, []byte(invalid), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			for _, args := range [][]string{{"config", "check"}, {"user", "add", "bob", "-profile", "nl"}, {"user", "show", "alice", "-profile", "nl"}} {
+			for _, args := range [][]string{{"config", "check"}, {"device", "add", "bob/phone"}, {"device", "show", "alice/phone"}} {
 				out, err := capture(t, append([]string{"-config", path}, args...)...)
 				if err == nil || !strings.HasPrefix(err.Error(), "endpoint:") || out != "" {
 					t.Errorf("%v: printed output = %v, error = %v; want endpoint error without output", args, out != "", err)
@@ -427,13 +395,13 @@ func TestCLIRejectsInvalidEndpoint(t *testing.T) {
 	if err := os.WriteFile(path, original, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	after, err := capture(t, "-config", path, "user", "show", "alice", "-profile", "nl")
+	after, err := capture(t, "-config", path, "device", "show", "alice/phone")
 	if err != nil || after != before {
 		t.Errorf("valid endpoint no longer reproduces stored peer: %v", err)
 	}
 }
 
-// Client configs depend on provider MTU and S4 only, so user commands must work
+// Client configs depend on provider MTU and S4 only, so device commands must work
 // while DNS fails. config check still resolves provider endpoints.
 func TestUserCommandsWithoutDNS(t *testing.T) {
 	path := testConfig(t)
@@ -458,16 +426,16 @@ func TestUserCommandsWithoutDNS(t *testing.T) {
 	if _, err := capture(t, "-config", path, "config", "check"); err == nil || !strings.Contains(err.Error(), "resolve endpoint") {
 		t.Fatalf("config check error = %v, want a resolve error", err)
 	}
-	added, err := capture(t, "-config", path, "user", "add", "alice", "-profile", "nl")
+	added, err := capture(t, "-config", path, "device", "add", "alice/phone")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if client, err := awgconf.Parse(strings.NewReader(added)); err != nil || client.Interface.MTU != 1392 {
-		t.Errorf("user add output is not a config with MTU 1392: %v\n%s", err, added)
+		t.Errorf("device add output is not a config with MTU 1392: %v\n%s", err, added)
 	}
-	shown, err := capture(t, "-config", path, "user", "show", "alice", "-profile", "nl")
+	shown, err := capture(t, "-config", path, "device", "show", "alice/phone")
 	if err != nil || shown != added {
-		t.Errorf("user show: %v\n%s", err, shown)
+		t.Errorf("device show: %v\n%s", err, shown)
 	}
 }
 
@@ -491,77 +459,67 @@ func userState(t *testing.T, cfg string) string {
 	return fmt.Sprintf("%+v\n%+v", users, peers)
 }
 
-// An empty -profile, typically an unset shell variable, must not widen
-// `user rm` to the whole device or the whole user.
-func TestUserRemoveRejectsEmptyProfile(t *testing.T) {
+// A device is always named in full: an empty half, typically an unset
+// shell variable, must not reach the store.
+func TestDeviceNeedsUserAndDevice(t *testing.T) {
 	cfg := testConfig(t)
-	for _, add := range [][]string{
-		{"alice", "-profile", "nl"},
-		{"alice", "-profile", "auto"},
-		{"alice", "-profile", "nl", "-device", "phone"},
-		{"alice", "-profile", "auto", "-device", "phone"},
-	} {
-		if _, err := capture(t, append([]string{"-config", cfg, "user", "add"}, add...)...); err != nil {
-			t.Fatal(err)
-		}
-	}
+	mustRun(t, "-config", cfg, "device", "add", "alice/phone")
 	before := userState(t, cfg)
-	for _, args := range [][]string{
-		{"alice", "-profile", ""},
-		{"alice", "-profile="},
-		{"alice", "-profile", "", "-device", "phone"},
-		{"alice", "-device", "phone", "-profile="},
-		{"alice", "-device", "default", "-profile", ""},
-	} {
-		_, err := capture(t, append([]string{"-config", cfg, "user", "rm"}, args...)...)
-		if err == nil || !strings.Contains(err.Error(), "-profile must not be empty") {
-			t.Errorf("user rm %q: err = %v", args, err)
-		}
-		if after := userState(t, cfg); after != before {
-			t.Fatalf("user rm %q changed the store:\nbefore %s\nafter  %s", args, before, after)
+	for _, cmd := range []string{"add", "route", "show", "rm"} {
+		for _, name := range []string{"", "alice", "alice/", "/phone", "-qr"} {
+			_, err := capture(t, "-config", cfg, "device", cmd, name)
+			if err == nil || !strings.Contains(err.Error(), "USER/DEVICE") {
+				t.Errorf("device %s %q: err = %v, want a USER/DEVICE error", cmd, name, err)
+			}
 		}
 	}
-	for _, cmd := range []string{"add", "show"} {
-		if _, err := capture(t, "-config", cfg, "user", cmd, "alice", "-profile", ""); err == nil {
-			t.Errorf("user %s accepted an empty profile", cmd)
-		}
+	if after := userState(t, cfg); after != before {
+		t.Fatalf("a rejected command changed the store:\nbefore %s\nafter  %s", before, after)
 	}
-	// The documented forms still work when -profile is omitted.
-	if _, err := capture(t, "-config", cfg, "user", "rm", "alice", "-device", "phone"); err != nil {
-		t.Fatal(err)
+	// A device name may hold a slash; the user's may not.
+	mustRun(t, "-config", cfg, "device", "add", "alice/work/laptop")
+	if _, err := capture(t, "-config", cfg, "device", "show", "alice/work/laptop"); err != nil {
+		t.Errorf("device show of a device with a slash: %v", err)
 	}
-	if list, _ := capture(t, "-config", cfg, "user", "list"); strings.Contains(list, "phone") || strings.Count(list, "alice") != 2 {
-		t.Errorf("whole-device removal:\n%s", list)
-	}
-	if _, err := capture(t, "-config", cfg, "user", "rm", "alice"); err != nil {
-		t.Fatal(err)
-	}
-	if list, _ := capture(t, "-config", cfg, "user", "list"); strings.Contains(list, "alice") {
-		t.Errorf("whole-user removal:\n%s", list)
+	if _, err := capture(t, "-config", cfg, "user", "add", "bob/x"); err == nil {
+		t.Error("user add accepted a name with a slash")
 	}
 }
 
-// A rejected `user add` must leave users and peers exactly as they were.
-func TestUserAddFailureLeavesNothingBehind(t *testing.T) {
+// A rejected `device add` must leave users and peers exactly as they were.
+func TestDeviceAddFailureLeavesNothingBehind(t *testing.T) {
 	t.Run("unreadable provider file", func(t *testing.T) {
 		cfg := testConfig(t)
-		if _, err := capture(t, "-config", cfg, "user", "add", "alice", "-profile", "nl"); err != nil {
-			t.Fatal(err)
-		}
+		mustRun(t, "-config", cfg, "device", "add", "alice/phone")
 		before := userState(t, cfg)
 		if err := os.Remove(filepath.Join(filepath.Dir(cfg), "nl.conf")); err != nil {
 			t.Fatal(err)
 		}
-		for _, args := range [][]string{
-			{"alice", "-profile", "auto"}, // existing user
-			{"bob", "-profile", "nl"},     // new user
+		for _, device := range []string{
+			"alice/laptop", // existing user
+			"bob/phone",    // new user
 		} {
-			out, err := capture(t, append([]string{"-config", cfg, "user", "add"}, args...)...)
+			out, err := capture(t, "-config", cfg, "device", "add", device)
 			if err == nil || out != "" {
-				t.Fatalf("user add %q: out %q, err %v", args, out, err)
+				t.Fatalf("device add %s: out %q, err %v", device, out, err)
 			}
 			if after := userState(t, cfg); after != before {
-				t.Errorf("user add %q changed the store:\nbefore %s\nafter  %s", args, before, after)
+				t.Errorf("device add %s changed the store:\nbefore %s\nafter  %s", device, before, after)
+			}
+		}
+	})
+
+	t.Run("invalid route", func(t *testing.T) {
+		cfg := testConfig(t)
+		mustRun(t, "-config", cfg, "device", "add", "alice/phone")
+		before := userState(t, cfg)
+		for _, args := range [][]string{{"alice/laptop", "FR"}, {"bob/phone", "NL:beta"}} {
+			out, err := capture(t, append([]string{"-config", cfg, "device", "add"}, args...)...)
+			if err == nil || !strings.HasPrefix(err.Error(), "route: ") || out != "" {
+				t.Fatalf("device add %q: out %q, err %v", args, out, err)
+			}
+			if after := userState(t, cfg); after != before {
+				t.Errorf("device add %q changed the store:\nbefore %s\nafter  %s", args, before, after)
 			}
 		}
 	})
@@ -575,31 +533,26 @@ func TestUserAddFailureLeavesNothingBehind(t *testing.T) {
 		if err := os.WriteFile(cfg, append(data, "subnet: 10.77.0.0/24\n"...), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := capture(t, "-config", cfg, "user", "add", "alice", "-profile", "nl"); err != nil {
-			t.Fatal(err)
-		}
+		mustRun(t, "-config", cfg, "device", "add", "alice/phone")
 		// Fill the rest of the /24: .2-.254 are usable.
 		e, err := openEnv(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for i := 0; i < 252; i++ {
-			if _, err := e.store.AddUserPeer("filler", fmt.Sprintf("d%d", i), "nl", e.cfg.Subnet); err != nil {
+			if _, err := e.store.AddUserPeer("filler", fmt.Sprintf("d%d", i), policy.DefaultRoute(), e.cfg.Subnet); err != nil {
 				t.Fatal(err)
 			}
 		}
 		e.store.Close()
 		before := userState(t, cfg)
-		for _, args := range [][]string{
-			{"alice", "-profile", "auto"},
-			{"bob", "-profile", "nl"},
-		} {
-			out, err := capture(t, append([]string{"-config", cfg, "user", "add"}, args...)...)
+		for _, device := range []string{"alice/laptop", "bob/phone"} {
+			out, err := capture(t, "-config", cfg, "device", "add", device)
 			if !errors.Is(err, store.ErrSubnetFull) || out != "" {
-				t.Fatalf("user add %q: out %q, err %v", args, out, err)
+				t.Fatalf("device add %s: out %q, err %v", device, out, err)
 			}
 			if after := userState(t, cfg); after != before {
-				t.Errorf("user add %q changed the store:\nbefore %s\nafter  %s", args, before, after)
+				t.Errorf("device add %s changed the store:\nbefore %s\nafter  %s", device, before, after)
 			}
 		}
 	})
@@ -607,23 +560,23 @@ func TestUserAddFailureLeavesNothingBehind(t *testing.T) {
 
 // Once the peer is committed, a failed write of its config is reported with
 // the way to get the config again.
-func TestUserAddReportsStdoutFailure(t *testing.T) {
+func TestDeviceAddReportsStdoutFailure(t *testing.T) {
 	cfg := testConfig(t)
 	r, w, _ := os.Pipe()
 	r.Close() // writes to w now fail with EPIPE
 	old := os.Stdout
 	os.Stdout = w
-	err := run([]string{"-config", cfg, "user", "add", "alice", "-profile", "nl", "-device", "phone"})
+	err := run([]string{"-config", cfg, "device", "add", "alice/phone"})
 	os.Stdout = old
 	w.Close()
-	if err == nil || !strings.Contains(err.Error(), "`user show alice -profile nl -device phone`") {
-		t.Fatalf("err = %v, want the user show hint", err)
+	if err == nil || !strings.Contains(err.Error(), "`device show alice/phone`") {
+		t.Fatalf("err = %v, want the device show hint", err)
 	}
-	shown, err := capture(t, "-config", cfg, "user", "show", "alice", "-profile", "nl", "-device", "phone")
+	shown, err := capture(t, "-config", cfg, "device", "show", "alice/phone")
 	if err != nil {
 		t.Fatalf("the peer should have been committed: %v", err)
 	}
 	if _, err := awgconf.Parse(strings.NewReader(shown)); err != nil {
-		t.Errorf("user show is not a config: %v", err)
+		t.Errorf("device show is not a config: %v", err)
 	}
 }

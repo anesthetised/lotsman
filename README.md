@@ -7,8 +7,8 @@ routes each user to a working upstream VPN provider.
 Users connect with the official Amnezia app to a single server you run. Lotsman terminates their
 tunnel and forwards traffic into one of several upstreams — AmneziaWG tunnels, Outline
 (Shadowsocks) servers or VLESS + REALITY (Xray) servers, your own VPN subscriptions — choosing
-the upstream by the user's profile (geo, provider) and by
-live health. When an upstream dies, its users move to the next one without reconnecting.
+the upstream by each device's route (countries, optionally providers, in order or by latency) and
+by live health. When an upstream dies, its users move to the next one without reconnecting.
 
 ```
 Amnezia app ──AWG──▶ Lotsman ──AWG──▶ provider NL ──▶ internet
@@ -24,13 +24,14 @@ Amnezia app ──AWG──▶ Lotsman ──AWG──▶ provider NL ──▶ 
 
 ## What you get
 
-- One server, one config per device per profile, zero custom client software.
+- One server, one config per device, zero custom client software. A device's route lives on the
+  server: changing it never touches the client config or the tunnel.
 - Automatic failover between upstreams with sticky selection (no flapping); connections already
   open through a live upstream stay on it while new ones move.
 - Fail-closed: if no upstream is healthy for a user, their traffic is dropped, never leaked through
   the server's own IP.
 - MTU and TCP MSS handled for the double encapsulation; DNS follows the chosen upstream.
-- Three upstream kinds, mixed freely in one profile so it can fail over between protocols:
+- Three upstream kinds, mixed freely in one route so it can fail over between protocols:
   - `awg` (default): plain WireGuard or AmneziaWG 2.0/3.x provider configs (including header
     protection and random trailers); AmneziaWG 1.5 configs are not supported.
   - `outline`: an Outline (Shadowsocks) access key, static `ss://…` or dynamic `ssconf://…`
@@ -44,8 +45,8 @@ Amnezia app ──AWG──▶ Lotsman ──AWG──▶ provider NL ──▶ 
   `awg: 2` for older apps and Android 7–8.
 - Optional Prometheus metrics: per-upstream health and per-client traffic.
 - A web panel (`lotsman web`, behind your reverse proxy): operators sign in with passkeys and manage
-  upstreams, profiles, users and devices, with live rates, history and connections; users get a
-  secret link to a page with their own configs, traffic and devices.
+  upstreams, users, their rights and devices, with live rates, history and connections; users get
+  a secret link to a page with their own configs, traffic, devices and, if allowed, their routes.
 - A single static binary, a YAML file, and SQLite.
 
 ## What you do not get (yet)
@@ -69,11 +70,10 @@ sudo install -m 0755 dist/lotsman-linux-amd64 /usr/local/bin/lotsman
 sudo mkdir -p /etc/lotsman/upstreams
 sudo cp deploy/lotsman.example.yaml /etc/lotsman/lotsman.yaml
 # put your provider configs into /etc/lotsman/upstreams/ and edit lotsman.yaml
-sudo lotsman profile add nl geo=NL         # profiles live in the database, not in lotsman.yaml
 sudo lotsman config check
 sudo cp deploy/lotsman.service /etc/systemd/system/
 sudo systemctl enable --now lotsman
-sudo lotsman user add alice -profile nl -qr # prints the config (and a QR code) for the Amnezia app
+sudo lotsman device add alice/phone -qr NL  # the config (and a QR code) for the Amnezia app, routed via NL
 sudo lotsman upstream status
 ```
 

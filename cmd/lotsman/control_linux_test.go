@@ -53,10 +53,9 @@ listen: 127.0.0.1:51820
 endpoint: 127.0.0.1:51820
 state_dir: `+filepath.Join(dir, "state")+`
 upstreams:
-  - {name: nl, conf: `+filepath.Join(dir, "nl.conf")+`, geo: NL, provider: acme, tags: [eu]}
+  - {name: nl, conf: `+filepath.Join(dir, "nl.conf")+`, geo: NL, provider: acme}
 health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 `), 0o600)
-	mustRun(t, "-config", cfgPath, "profile", "add", "nl", "geo=NL")
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
 	go func() { served <- serve(ctx, cfgPath, slog.LevelInfo) }()
@@ -84,7 +83,7 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 		t.Errorf("socket mode %v gid %s, want socket 0660 gid %s", fi.Mode(), gid, group.Gid)
 	}
 
-	if _, err := capture(t, "-config", cfgPath, "user", "add", "alice", "-profile", "nl"); err != nil {
+	if _, err := capture(t, "-config", cfgPath, "device", "add", "alice/phone", "NL"); err != nil {
 		t.Fatal(err)
 	}
 	stream, err := controlClient(control.SocketPath).Watch(t.Context(), &lotsmanv1.WatchStatusRequest{})
@@ -92,7 +91,7 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 		t.Fatal(err)
 	}
 	// alice is the first peer in the store; routing her may take a round.
-	want := &lotsmanv1.PeerStatus{PeerId: "p_1", User: "alice", Device: "default", Profile: "nl", Address: "10.77.0.2", Upstream: "nl",
+	want := &lotsmanv1.PeerStatus{PeerId: "p_1", User: "alice", Device: "phone", Address: "10.77.0.2", Upstream: "nl",
 		Traffic: &lotsmanv1.Traffic{}}
 	var got *lotsmanv1.StatusSnapshot
 	deadline := time.Now().Add(15 * time.Second)
@@ -110,7 +109,7 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 		}
 	}
 	if u := got.Upstreams; len(u) != 1 || u[0].Name != "nl" || u[0].Kind != lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG ||
-		u[0].Geo != "NL" || u[0].Provider != "acme" || len(u[0].Tags) != 1 || u[0].State != lotsmanv1.UpstreamState_UPSTREAM_STATE_UP || u[0].Routed != 1 {
+		u[0].Geo != "NL" || u[0].Provider != "acme" || u[0].State != lotsmanv1.UpstreamState_UPSTREAM_STATE_UP || u[0].Routed != 1 {
 		t.Errorf("upstreams = %v", u)
 	}
 	if got.ClientMtu == 0 {

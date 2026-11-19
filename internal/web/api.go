@@ -24,7 +24,7 @@ const (
 	// /lotsman.v1.StatusService/Watch.
 	apiPrefix = "/api"
 	// maxRequestBytes bounds a request body. The API has no client streams,
-	// and its largest request, a profile, is a few hundred bytes.
+	// and its largest request, a route, is a few hundred bytes.
 	maxRequestBytes = 64 << 10
 	// bodyTimeout bounds reading a request body. The server has no
 	// ReadTimeout: on HTTP/1 it would also cancel long-running streams.

@@ -28,8 +28,9 @@ or existing deployments.
 
 Terminology: an *agent tier* (`agent:light`, `agent:strong`; see
 [AGENTS.md](../AGENTS.md)) selects who implements an issue. A *preference tier* is
-a priority level of a profile's `prefer` list in `lotsman.yaml`: the
-upstreams whose first matching `prefer` entry (a matcher) is that one.
+a priority level of a device's route, compiled by `policy.Route.Tiers`: one country
+of the route in order, all of them with `fastest`, or the "any allowed exit" fallback.
+(Before #161 it was a level of a profile's `prefer` list.)
 
 ## Second audit (2026-11-07)
 

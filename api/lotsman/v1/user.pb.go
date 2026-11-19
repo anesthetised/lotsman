@@ -31,6 +31,7 @@ type User struct {
 	Devices       []*Device              `protobuf:"bytes,2,rep,name=devices,proto3" json:"devices,omitempty"`
 	HasLink       bool                   `protobuf:"varint,3,opt,name=has_link,json=hasLink,proto3" json:"has_link,omitempty"`
 	Created       *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created,proto3" json:"created,omitempty"`
+	Rights        *Rights                `protobuf:"bytes,5,opt,name=rights,proto3" json:"rights,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -93,17 +94,89 @@ func (x *User) GetCreated() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *User) GetRights() *Rights {
+	if x != nil {
+		return x.Rights
+	}
+	return nil
+}
+
+// What the operator lets a user do on their page.
+type Rights struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EditRoutes    bool                   `protobuf:"varint,1,opt,name=edit_routes,json=editRoutes,proto3" json:"edit_routes,omitempty"`          // false: only the operator sets the user's routes
+	ShowProviders bool                   `protobuf:"varint,2,opt,name=show_providers,json=showProviders,proto3" json:"show_providers,omitempty"` // false: the user's page and API show countries only
+	Exits         []string               `protobuf:"bytes,3,rep,name=exits,proto3" json:"exits,omitempty"`                                       // upstream names the user's devices may use; empty = all
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Rights) Reset() {
+	*x = Rights{}
+	mi := &file_lotsman_v1_user_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Rights) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Rights) ProtoMessage() {}
+
+func (x *Rights) ProtoReflect() protoreflect.Message {
+	mi := &file_lotsman_v1_user_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Rights.ProtoReflect.Descriptor instead.
+func (*Rights) Descriptor() ([]byte, []int) {
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Rights) GetEditRoutes() bool {
+	if x != nil {
+		return x.EditRoutes
+	}
+	return false
+}
+
+func (x *Rights) GetShowProviders() bool {
+	if x != nil {
+		return x.ShowProviders
+	}
+	return false
+}
+
+func (x *Rights) GetExits() []string {
+	if x != nil {
+		return x.Exits
+	}
+	return nil
+}
+
+// One device is one tunnel: one key, one address, one client config.
 type Device struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Peers         []*DevicePeer          `protobuf:"bytes,2,rep,name=peers,proto3" json:"peers,omitempty"` // one per profile
+	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Address       string                 `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
+	Created       *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created,proto3" json:"created,omitempty"`
+	Route         *Route                 `protobuf:"bytes,5,opt,name=route,proto3" json:"route,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Device) Reset() {
 	*x = Device{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[1]
+	mi := &file_lotsman_v1_user_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -115,7 +188,7 @@ func (x *Device) String() string {
 func (*Device) ProtoMessage() {}
 
 func (x *Device) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[1]
+	mi := &file_lotsman_v1_user_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -128,7 +201,14 @@ func (x *Device) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Device.ProtoReflect.Descriptor instead.
 func (*Device) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{1}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *Device) GetPeerId() string {
+	if x != nil {
+		return x.PeerId
+	}
+	return ""
 }
 
 func (x *Device) GetName() string {
@@ -138,38 +218,57 @@ func (x *Device) GetName() string {
 	return ""
 }
 
-func (x *Device) GetPeers() []*DevicePeer {
+func (x *Device) GetAddress() string {
 	if x != nil {
-		return x.Peers
+		return x.Address
+	}
+	return ""
+}
+
+func (x *Device) GetCreated() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Created
 	}
 	return nil
 }
 
-type DevicePeer struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
-	Profile       string                 `protobuf:"bytes,2,opt,name=profile,proto3" json:"profile,omitempty"`
-	Address       string                 `protobuf:"bytes,3,opt,name=address,proto3" json:"address,omitempty"`
-	Created       *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=created,proto3" json:"created,omitempty"`
+func (x *Device) GetRoute() *Route {
+	if x != nil {
+		return x.Route
+	}
+	return nil
+}
+
+// Which exits a device's traffic uses, among the user's allowed exits. The
+// route lives on the gateway, so changing it never touches the client config.
+type Route struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// false: the first country in order with an available exit wins;
+	// true: every listed country is one choice and the lowest latency wins.
+	Fastest bool `protobuf:"varint,1,opt,name=fastest,proto3" json:"fastest,omitempty"`
+	// true: when no listed country has an available exit the device is
+	// blocked; false: it falls back to any allowed exit.
+	Strict        bool       `protobuf:"varint,2,opt,name=strict,proto3" json:"strict,omitempty"`
+	Countries     []*Country `protobuf:"bytes,3,rep,name=countries,proto3" json:"countries,omitempty"` // empty: any allowed exit
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *DevicePeer) Reset() {
-	*x = DevicePeer{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[2]
+func (x *Route) Reset() {
+	*x = Route{}
+	mi := &file_lotsman_v1_user_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *DevicePeer) String() string {
+func (x *Route) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*DevicePeer) ProtoMessage() {}
+func (*Route) ProtoMessage() {}
 
-func (x *DevicePeer) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[2]
+func (x *Route) ProtoReflect() protoreflect.Message {
+	mi := &file_lotsman_v1_user_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -180,35 +279,80 @@ func (x *DevicePeer) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use DevicePeer.ProtoReflect.Descriptor instead.
-func (*DevicePeer) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{2}
+// Deprecated: Use Route.ProtoReflect.Descriptor instead.
+func (*Route) Descriptor() ([]byte, []int) {
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *DevicePeer) GetPeerId() string {
+func (x *Route) GetFastest() bool {
 	if x != nil {
-		return x.PeerId
+		return x.Fastest
+	}
+	return false
+}
+
+func (x *Route) GetStrict() bool {
+	if x != nil {
+		return x.Strict
+	}
+	return false
+}
+
+func (x *Route) GetCountries() []*Country {
+	if x != nil {
+		return x.Countries
+	}
+	return nil
+}
+
+type Country struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Geo           string                 `protobuf:"bytes,1,opt,name=geo,proto3" json:"geo,omitempty"`             // an upstream's geo, ISO 3166-1 alpha-2
+	Providers     []string               `protobuf:"bytes,2,rep,name=providers,proto3" json:"providers,omitempty"` // empty: every provider in the country
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Country) Reset() {
+	*x = Country{}
+	mi := &file_lotsman_v1_user_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Country) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Country) ProtoMessage() {}
+
+func (x *Country) ProtoReflect() protoreflect.Message {
+	mi := &file_lotsman_v1_user_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Country.ProtoReflect.Descriptor instead.
+func (*Country) Descriptor() ([]byte, []int) {
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *Country) GetGeo() string {
+	if x != nil {
+		return x.Geo
 	}
 	return ""
 }
 
-func (x *DevicePeer) GetProfile() string {
+func (x *Country) GetProviders() []string {
 	if x != nil {
-		return x.Profile
-	}
-	return ""
-}
-
-func (x *DevicePeer) GetAddress() string {
-	if x != nil {
-		return x.Address
-	}
-	return ""
-}
-
-func (x *DevicePeer) GetCreated() *timestamppb.Timestamp {
-	if x != nil {
-		return x.Created
+		return x.Providers
 	}
 	return nil
 }
@@ -223,7 +367,7 @@ type DeviceConfig struct {
 
 func (x *DeviceConfig) Reset() {
 	*x = DeviceConfig{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[3]
+	mi := &file_lotsman_v1_user_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -235,7 +379,7 @@ func (x *DeviceConfig) String() string {
 func (*DeviceConfig) ProtoMessage() {}
 
 func (x *DeviceConfig) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[3]
+	mi := &file_lotsman_v1_user_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -248,7 +392,7 @@ func (x *DeviceConfig) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeviceConfig.ProtoReflect.Descriptor instead.
 func (*DeviceConfig) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{3}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DeviceConfig) GetPeerId() string {
@@ -273,7 +417,7 @@ type ListUsersRequest struct {
 
 func (x *ListUsersRequest) Reset() {
 	*x = ListUsersRequest{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[4]
+	mi := &file_lotsman_v1_user_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -285,7 +429,7 @@ func (x *ListUsersRequest) String() string {
 func (*ListUsersRequest) ProtoMessage() {}
 
 func (x *ListUsersRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[4]
+	mi := &file_lotsman_v1_user_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -298,7 +442,7 @@ func (x *ListUsersRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUsersRequest.ProtoReflect.Descriptor instead.
 func (*ListUsersRequest) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{4}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{6}
 }
 
 type ListUsersResponse struct {
@@ -310,7 +454,7 @@ type ListUsersResponse struct {
 
 func (x *ListUsersResponse) Reset() {
 	*x = ListUsersResponse{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[5]
+	mi := &file_lotsman_v1_user_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -322,7 +466,7 @@ func (x *ListUsersResponse) String() string {
 func (*ListUsersResponse) ProtoMessage() {}
 
 func (x *ListUsersResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[5]
+	mi := &file_lotsman_v1_user_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -335,7 +479,7 @@ func (x *ListUsersResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListUsersResponse.ProtoReflect.Descriptor instead.
 func (*ListUsersResponse) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{5}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *ListUsersResponse) GetUsers() []*User {
@@ -345,18 +489,114 @@ func (x *ListUsersResponse) GetUsers() []*User {
 	return nil
 }
 
+type AddUserRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          string                 `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AddUserRequest) Reset() {
+	*x = AddUserRequest{}
+	mi := &file_lotsman_v1_user_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AddUserRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AddUserRequest) ProtoMessage() {}
+
+func (x *AddUserRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lotsman_v1_user_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AddUserRequest.ProtoReflect.Descriptor instead.
+func (*AddUserRequest) Descriptor() ([]byte, []int) {
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *AddUserRequest) GetUser() string {
+	if x != nil {
+		return x.User
+	}
+	return ""
+}
+
+type SetRightsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          string                 `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	Rights        *Rights                `protobuf:"bytes,2,opt,name=rights,proto3" json:"rights,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetRightsRequest) Reset() {
+	*x = SetRightsRequest{}
+	mi := &file_lotsman_v1_user_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetRightsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetRightsRequest) ProtoMessage() {}
+
+func (x *SetRightsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lotsman_v1_user_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetRightsRequest.ProtoReflect.Descriptor instead.
+func (*SetRightsRequest) Descriptor() ([]byte, []int) {
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *SetRightsRequest) GetUser() string {
+	if x != nil {
+		return x.User
+	}
+	return ""
+}
+
+func (x *SetRightsRequest) GetRights() *Rights {
+	if x != nil {
+		return x.Rights
+	}
+	return nil
+}
+
 type AddDeviceRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	User          string                 `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
 	Device        string                 `protobuf:"bytes,2,opt,name=device,proto3" json:"device,omitempty"`
-	Profile       string                 `protobuf:"bytes,3,opt,name=profile,proto3" json:"profile,omitempty"`
+	Route         *Route                 `protobuf:"bytes,3,opt,name=route,proto3" json:"route,omitempty"` // unset: the fastest of any allowed exit
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *AddDeviceRequest) Reset() {
 	*x = AddDeviceRequest{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[6]
+	mi := &file_lotsman_v1_user_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -368,7 +608,7 @@ func (x *AddDeviceRequest) String() string {
 func (*AddDeviceRequest) ProtoMessage() {}
 
 func (x *AddDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[6]
+	mi := &file_lotsman_v1_user_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -381,7 +621,7 @@ func (x *AddDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddDeviceRequest.ProtoReflect.Descriptor instead.
 func (*AddDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{6}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *AddDeviceRequest) GetUser() string {
@@ -398,25 +638,84 @@ func (x *AddDeviceRequest) GetDevice() string {
 	return ""
 }
 
-func (x *AddDeviceRequest) GetProfile() string {
+func (x *AddDeviceRequest) GetRoute() *Route {
 	if x != nil {
-		return x.Profile
+		return x.Route
+	}
+	return nil
+}
+
+type SetRouteRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          string                 `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
+	Device        string                 `protobuf:"bytes,2,opt,name=device,proto3" json:"device,omitempty"`
+	Route         *Route                 `protobuf:"bytes,3,opt,name=route,proto3" json:"route,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetRouteRequest) Reset() {
+	*x = SetRouteRequest{}
+	mi := &file_lotsman_v1_user_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetRouteRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetRouteRequest) ProtoMessage() {}
+
+func (x *SetRouteRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lotsman_v1_user_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetRouteRequest.ProtoReflect.Descriptor instead.
+func (*SetRouteRequest) Descriptor() ([]byte, []int) {
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *SetRouteRequest) GetUser() string {
+	if x != nil {
+		return x.User
 	}
 	return ""
+}
+
+func (x *SetRouteRequest) GetDevice() string {
+	if x != nil {
+		return x.Device
+	}
+	return ""
+}
+
+func (x *SetRouteRequest) GetRoute() *Route {
+	if x != nil {
+		return x.Route
+	}
+	return nil
 }
 
 type RemoveDeviceRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	User          string                 `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"`
 	Device        string                 `protobuf:"bytes,2,opt,name=device,proto3" json:"device,omitempty"`
-	Profile       string                 `protobuf:"bytes,3,opt,name=profile,proto3" json:"profile,omitempty"` // empty = every profile
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *RemoveDeviceRequest) Reset() {
 	*x = RemoveDeviceRequest{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[7]
+	mi := &file_lotsman_v1_user_proto_msgTypes[12]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -428,7 +727,7 @@ func (x *RemoveDeviceRequest) String() string {
 func (*RemoveDeviceRequest) ProtoMessage() {}
 
 func (x *RemoveDeviceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[7]
+	mi := &file_lotsman_v1_user_proto_msgTypes[12]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -441,7 +740,7 @@ func (x *RemoveDeviceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveDeviceRequest.ProtoReflect.Descriptor instead.
 func (*RemoveDeviceRequest) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{7}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{12}
 }
 
 func (x *RemoveDeviceRequest) GetUser() string {
@@ -458,13 +757,6 @@ func (x *RemoveDeviceRequest) GetDevice() string {
 	return ""
 }
 
-func (x *RemoveDeviceRequest) GetProfile() string {
-	if x != nil {
-		return x.Profile
-	}
-	return ""
-}
-
 type RemoveDeviceResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -473,7 +765,7 @@ type RemoveDeviceResponse struct {
 
 func (x *RemoveDeviceResponse) Reset() {
 	*x = RemoveDeviceResponse{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[8]
+	mi := &file_lotsman_v1_user_proto_msgTypes[13]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -485,7 +777,7 @@ func (x *RemoveDeviceResponse) String() string {
 func (*RemoveDeviceResponse) ProtoMessage() {}
 
 func (x *RemoveDeviceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[8]
+	mi := &file_lotsman_v1_user_proto_msgTypes[13]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -498,7 +790,7 @@ func (x *RemoveDeviceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveDeviceResponse.ProtoReflect.Descriptor instead.
 func (*RemoveDeviceResponse) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{8}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{13}
 }
 
 type RemoveUserRequest struct {
@@ -510,7 +802,7 @@ type RemoveUserRequest struct {
 
 func (x *RemoveUserRequest) Reset() {
 	*x = RemoveUserRequest{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[9]
+	mi := &file_lotsman_v1_user_proto_msgTypes[14]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -522,7 +814,7 @@ func (x *RemoveUserRequest) String() string {
 func (*RemoveUserRequest) ProtoMessage() {}
 
 func (x *RemoveUserRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[9]
+	mi := &file_lotsman_v1_user_proto_msgTypes[14]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -535,7 +827,7 @@ func (x *RemoveUserRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveUserRequest.ProtoReflect.Descriptor instead.
 func (*RemoveUserRequest) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{9}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{14}
 }
 
 func (x *RemoveUserRequest) GetUser() string {
@@ -553,7 +845,7 @@ type RemoveUserResponse struct {
 
 func (x *RemoveUserResponse) Reset() {
 	*x = RemoveUserResponse{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[10]
+	mi := &file_lotsman_v1_user_proto_msgTypes[15]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -565,7 +857,7 @@ func (x *RemoveUserResponse) String() string {
 func (*RemoveUserResponse) ProtoMessage() {}
 
 func (x *RemoveUserResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[10]
+	mi := &file_lotsman_v1_user_proto_msgTypes[15]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -578,7 +870,7 @@ func (x *RemoveUserResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveUserResponse.ProtoReflect.Descriptor instead.
 func (*RemoveUserResponse) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{10}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{15}
 }
 
 type GetConfigRequest struct {
@@ -590,7 +882,7 @@ type GetConfigRequest struct {
 
 func (x *GetConfigRequest) Reset() {
 	*x = GetConfigRequest{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[11]
+	mi := &file_lotsman_v1_user_proto_msgTypes[16]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -602,7 +894,7 @@ func (x *GetConfigRequest) String() string {
 func (*GetConfigRequest) ProtoMessage() {}
 
 func (x *GetConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[11]
+	mi := &file_lotsman_v1_user_proto_msgTypes[16]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -615,7 +907,7 @@ func (x *GetConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetConfigRequest.ProtoReflect.Descriptor instead.
 func (*GetConfigRequest) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{11}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{16}
 }
 
 func (x *GetConfigRequest) GetPeerId() string {
@@ -634,7 +926,7 @@ type IssueLinkRequest struct {
 
 func (x *IssueLinkRequest) Reset() {
 	*x = IssueLinkRequest{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[12]
+	mi := &file_lotsman_v1_user_proto_msgTypes[17]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -646,7 +938,7 @@ func (x *IssueLinkRequest) String() string {
 func (*IssueLinkRequest) ProtoMessage() {}
 
 func (x *IssueLinkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[12]
+	mi := &file_lotsman_v1_user_proto_msgTypes[17]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -659,7 +951,7 @@ func (x *IssueLinkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IssueLinkRequest.ProtoReflect.Descriptor instead.
 func (*IssueLinkRequest) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{12}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{17}
 }
 
 func (x *IssueLinkRequest) GetUser() string {
@@ -678,7 +970,7 @@ type IssueLinkResponse struct {
 
 func (x *IssueLinkResponse) Reset() {
 	*x = IssueLinkResponse{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[13]
+	mi := &file_lotsman_v1_user_proto_msgTypes[18]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -690,7 +982,7 @@ func (x *IssueLinkResponse) String() string {
 func (*IssueLinkResponse) ProtoMessage() {}
 
 func (x *IssueLinkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[13]
+	mi := &file_lotsman_v1_user_proto_msgTypes[18]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -703,7 +995,7 @@ func (x *IssueLinkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IssueLinkResponse.ProtoReflect.Descriptor instead.
 func (*IssueLinkResponse) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{13}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{18}
 }
 
 func (x *IssueLinkResponse) GetToken() string {
@@ -722,7 +1014,7 @@ type RevokeLinkRequest struct {
 
 func (x *RevokeLinkRequest) Reset() {
 	*x = RevokeLinkRequest{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[14]
+	mi := &file_lotsman_v1_user_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -734,7 +1026,7 @@ func (x *RevokeLinkRequest) String() string {
 func (*RevokeLinkRequest) ProtoMessage() {}
 
 func (x *RevokeLinkRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[14]
+	mi := &file_lotsman_v1_user_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -747,7 +1039,7 @@ func (x *RevokeLinkRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeLinkRequest.ProtoReflect.Descriptor instead.
 func (*RevokeLinkRequest) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{14}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RevokeLinkRequest) GetUser() string {
@@ -765,7 +1057,7 @@ type RevokeLinkResponse struct {
 
 func (x *RevokeLinkResponse) Reset() {
 	*x = RevokeLinkResponse{}
-	mi := &file_lotsman_v1_user_proto_msgTypes[15]
+	mi := &file_lotsman_v1_user_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -777,7 +1069,7 @@ func (x *RevokeLinkResponse) String() string {
 func (*RevokeLinkResponse) ProtoMessage() {}
 
 func (x *RevokeLinkResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_user_proto_msgTypes[15]
+	mi := &file_lotsman_v1_user_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -790,7 +1082,7 @@ func (x *RevokeLinkResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RevokeLinkResponse.ProtoReflect.Descriptor instead.
 func (*RevokeLinkResponse) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{15}
+	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{20}
 }
 
 var File_lotsman_v1_user_proto protoreflect.FileDescriptor
@@ -798,35 +1090,53 @@ var File_lotsman_v1_user_proto protoreflect.FileDescriptor
 const file_lotsman_v1_user_proto_rawDesc = "" +
 	"\n" +
 	"\x15lotsman/v1/user.proto\x12\n" +
-	"lotsman.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\x99\x01\n" +
+	"lotsman.v1\x1a\x1fgoogle/protobuf/timestamp.proto\"\xc5\x01\n" +
 	"\x04User\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
 	"\adevices\x18\x02 \x03(\v2\x12.lotsman.v1.DeviceR\adevices\x12\x19\n" +
 	"\bhas_link\x18\x03 \x01(\bR\ahasLink\x124\n" +
-	"\acreated\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\acreated\"J\n" +
-	"\x06Device\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
-	"\x05peers\x18\x02 \x03(\v2\x16.lotsman.v1.DevicePeerR\x05peers\"\x8f\x01\n" +
-	"\n" +
-	"DevicePeer\x12\x17\n" +
-	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x18\n" +
-	"\aprofile\x18\x02 \x01(\tR\aprofile\x12\x18\n" +
+	"\acreated\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\acreated\x12*\n" +
+	"\x06rights\x18\x05 \x01(\v2\x12.lotsman.v1.RightsR\x06rights\"f\n" +
+	"\x06Rights\x12\x1f\n" +
+	"\vedit_routes\x18\x01 \x01(\bR\n" +
+	"editRoutes\x12%\n" +
+	"\x0eshow_providers\x18\x02 \x01(\bR\rshowProviders\x12\x14\n" +
+	"\x05exits\x18\x03 \x03(\tR\x05exits\"\xae\x01\n" +
+	"\x06Device\x12\x17\n" +
+	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x18\n" +
 	"\aaddress\x18\x03 \x01(\tR\aaddress\x124\n" +
-	"\acreated\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\acreated\"?\n" +
+	"\acreated\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\acreated\x12'\n" +
+	"\x05route\x18\x05 \x01(\v2\x11.lotsman.v1.RouteR\x05route\"l\n" +
+	"\x05Route\x12\x18\n" +
+	"\afastest\x18\x01 \x01(\bR\afastest\x12\x16\n" +
+	"\x06strict\x18\x02 \x01(\bR\x06strict\x121\n" +
+	"\tcountries\x18\x03 \x03(\v2\x13.lotsman.v1.CountryR\tcountries\"9\n" +
+	"\aCountry\x12\x10\n" +
+	"\x03geo\x18\x01 \x01(\tR\x03geo\x12\x1c\n" +
+	"\tproviders\x18\x02 \x03(\tR\tproviders\"?\n" +
 	"\fDeviceConfig\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x16\n" +
 	"\x06config\x18\x02 \x01(\tR\x06config\"\x12\n" +
 	"\x10ListUsersRequest\";\n" +
 	"\x11ListUsersResponse\x12&\n" +
-	"\x05users\x18\x01 \x03(\v2\x10.lotsman.v1.UserR\x05users\"X\n" +
+	"\x05users\x18\x01 \x03(\v2\x10.lotsman.v1.UserR\x05users\"$\n" +
+	"\x0eAddUserRequest\x12\x12\n" +
+	"\x04user\x18\x01 \x01(\tR\x04user\"R\n" +
+	"\x10SetRightsRequest\x12\x12\n" +
+	"\x04user\x18\x01 \x01(\tR\x04user\x12*\n" +
+	"\x06rights\x18\x02 \x01(\v2\x12.lotsman.v1.RightsR\x06rights\"g\n" +
 	"\x10AddDeviceRequest\x12\x12\n" +
 	"\x04user\x18\x01 \x01(\tR\x04user\x12\x16\n" +
-	"\x06device\x18\x02 \x01(\tR\x06device\x12\x18\n" +
-	"\aprofile\x18\x03 \x01(\tR\aprofile\"[\n" +
+	"\x06device\x18\x02 \x01(\tR\x06device\x12'\n" +
+	"\x05route\x18\x03 \x01(\v2\x11.lotsman.v1.RouteR\x05route\"f\n" +
+	"\x0fSetRouteRequest\x12\x12\n" +
+	"\x04user\x18\x01 \x01(\tR\x04user\x12\x16\n" +
+	"\x06device\x18\x02 \x01(\tR\x06device\x12'\n" +
+	"\x05route\x18\x03 \x01(\v2\x11.lotsman.v1.RouteR\x05route\"A\n" +
 	"\x13RemoveDeviceRequest\x12\x12\n" +
 	"\x04user\x18\x01 \x01(\tR\x04user\x12\x16\n" +
-	"\x06device\x18\x02 \x01(\tR\x06device\x12\x18\n" +
-	"\aprofile\x18\x03 \x01(\tR\aprofile\"\x16\n" +
+	"\x06device\x18\x02 \x01(\tR\x06device\"\x16\n" +
 	"\x14RemoveDeviceResponse\"'\n" +
 	"\x11RemoveUserRequest\x12\x12\n" +
 	"\x04user\x18\x01 \x01(\tR\x04user\"\x14\n" +
@@ -839,10 +1149,13 @@ const file_lotsman_v1_user_proto_rawDesc = "" +
 	"\x05token\x18\x01 \x01(\tR\x05token\"'\n" +
 	"\x11RevokeLinkRequest\x12\x12\n" +
 	"\x04user\x18\x01 \x01(\tR\x04user\"\x14\n" +
-	"\x12RevokeLinkResponse2\x93\x04\n" +
+	"\x12RevokeLinkResponse2\xc6\x05\n" +
 	"\vUserService\x12C\n" +
-	"\x04List\x12\x1c.lotsman.v1.ListUsersRequest\x1a\x1d.lotsman.v1.ListUsersResponse\x12C\n" +
-	"\tAddDevice\x12\x1c.lotsman.v1.AddDeviceRequest\x1a\x18.lotsman.v1.DeviceConfig\x12Q\n" +
+	"\x04List\x12\x1c.lotsman.v1.ListUsersRequest\x1a\x1d.lotsman.v1.ListUsersResponse\x127\n" +
+	"\aAddUser\x12\x1a.lotsman.v1.AddUserRequest\x1a\x10.lotsman.v1.User\x12;\n" +
+	"\tSetRights\x12\x1c.lotsman.v1.SetRightsRequest\x1a\x10.lotsman.v1.User\x12C\n" +
+	"\tAddDevice\x12\x1c.lotsman.v1.AddDeviceRequest\x1a\x18.lotsman.v1.DeviceConfig\x12;\n" +
+	"\bSetRoute\x12\x1b.lotsman.v1.SetRouteRequest\x1a\x12.lotsman.v1.Device\x12Q\n" +
 	"\fRemoveDevice\x12\x1f.lotsman.v1.RemoveDeviceRequest\x1a .lotsman.v1.RemoveDeviceResponse\x12K\n" +
 	"\n" +
 	"RemoveUser\x12\x1d.lotsman.v1.RemoveUserRequest\x1a\x1e.lotsman.v1.RemoveUserResponse\x12C\n" +
@@ -863,51 +1176,67 @@ func file_lotsman_v1_user_proto_rawDescGZIP() []byte {
 	return file_lotsman_v1_user_proto_rawDescData
 }
 
-var file_lotsman_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 16)
+var file_lotsman_v1_user_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
 var file_lotsman_v1_user_proto_goTypes = []any{
 	(*User)(nil),                  // 0: lotsman.v1.User
-	(*Device)(nil),                // 1: lotsman.v1.Device
-	(*DevicePeer)(nil),            // 2: lotsman.v1.DevicePeer
-	(*DeviceConfig)(nil),          // 3: lotsman.v1.DeviceConfig
-	(*ListUsersRequest)(nil),      // 4: lotsman.v1.ListUsersRequest
-	(*ListUsersResponse)(nil),     // 5: lotsman.v1.ListUsersResponse
-	(*AddDeviceRequest)(nil),      // 6: lotsman.v1.AddDeviceRequest
-	(*RemoveDeviceRequest)(nil),   // 7: lotsman.v1.RemoveDeviceRequest
-	(*RemoveDeviceResponse)(nil),  // 8: lotsman.v1.RemoveDeviceResponse
-	(*RemoveUserRequest)(nil),     // 9: lotsman.v1.RemoveUserRequest
-	(*RemoveUserResponse)(nil),    // 10: lotsman.v1.RemoveUserResponse
-	(*GetConfigRequest)(nil),      // 11: lotsman.v1.GetConfigRequest
-	(*IssueLinkRequest)(nil),      // 12: lotsman.v1.IssueLinkRequest
-	(*IssueLinkResponse)(nil),     // 13: lotsman.v1.IssueLinkResponse
-	(*RevokeLinkRequest)(nil),     // 14: lotsman.v1.RevokeLinkRequest
-	(*RevokeLinkResponse)(nil),    // 15: lotsman.v1.RevokeLinkResponse
-	(*timestamppb.Timestamp)(nil), // 16: google.protobuf.Timestamp
+	(*Rights)(nil),                // 1: lotsman.v1.Rights
+	(*Device)(nil),                // 2: lotsman.v1.Device
+	(*Route)(nil),                 // 3: lotsman.v1.Route
+	(*Country)(nil),               // 4: lotsman.v1.Country
+	(*DeviceConfig)(nil),          // 5: lotsman.v1.DeviceConfig
+	(*ListUsersRequest)(nil),      // 6: lotsman.v1.ListUsersRequest
+	(*ListUsersResponse)(nil),     // 7: lotsman.v1.ListUsersResponse
+	(*AddUserRequest)(nil),        // 8: lotsman.v1.AddUserRequest
+	(*SetRightsRequest)(nil),      // 9: lotsman.v1.SetRightsRequest
+	(*AddDeviceRequest)(nil),      // 10: lotsman.v1.AddDeviceRequest
+	(*SetRouteRequest)(nil),       // 11: lotsman.v1.SetRouteRequest
+	(*RemoveDeviceRequest)(nil),   // 12: lotsman.v1.RemoveDeviceRequest
+	(*RemoveDeviceResponse)(nil),  // 13: lotsman.v1.RemoveDeviceResponse
+	(*RemoveUserRequest)(nil),     // 14: lotsman.v1.RemoveUserRequest
+	(*RemoveUserResponse)(nil),    // 15: lotsman.v1.RemoveUserResponse
+	(*GetConfigRequest)(nil),      // 16: lotsman.v1.GetConfigRequest
+	(*IssueLinkRequest)(nil),      // 17: lotsman.v1.IssueLinkRequest
+	(*IssueLinkResponse)(nil),     // 18: lotsman.v1.IssueLinkResponse
+	(*RevokeLinkRequest)(nil),     // 19: lotsman.v1.RevokeLinkRequest
+	(*RevokeLinkResponse)(nil),    // 20: lotsman.v1.RevokeLinkResponse
+	(*timestamppb.Timestamp)(nil), // 21: google.protobuf.Timestamp
 }
 var file_lotsman_v1_user_proto_depIdxs = []int32{
-	1,  // 0: lotsman.v1.User.devices:type_name -> lotsman.v1.Device
-	16, // 1: lotsman.v1.User.created:type_name -> google.protobuf.Timestamp
-	2,  // 2: lotsman.v1.Device.peers:type_name -> lotsman.v1.DevicePeer
-	16, // 3: lotsman.v1.DevicePeer.created:type_name -> google.protobuf.Timestamp
-	0,  // 4: lotsman.v1.ListUsersResponse.users:type_name -> lotsman.v1.User
-	4,  // 5: lotsman.v1.UserService.List:input_type -> lotsman.v1.ListUsersRequest
-	6,  // 6: lotsman.v1.UserService.AddDevice:input_type -> lotsman.v1.AddDeviceRequest
-	7,  // 7: lotsman.v1.UserService.RemoveDevice:input_type -> lotsman.v1.RemoveDeviceRequest
-	9,  // 8: lotsman.v1.UserService.RemoveUser:input_type -> lotsman.v1.RemoveUserRequest
-	11, // 9: lotsman.v1.UserService.GetConfig:input_type -> lotsman.v1.GetConfigRequest
-	12, // 10: lotsman.v1.UserService.IssueLink:input_type -> lotsman.v1.IssueLinkRequest
-	14, // 11: lotsman.v1.UserService.RevokeLink:input_type -> lotsman.v1.RevokeLinkRequest
-	5,  // 12: lotsman.v1.UserService.List:output_type -> lotsman.v1.ListUsersResponse
-	3,  // 13: lotsman.v1.UserService.AddDevice:output_type -> lotsman.v1.DeviceConfig
-	8,  // 14: lotsman.v1.UserService.RemoveDevice:output_type -> lotsman.v1.RemoveDeviceResponse
-	10, // 15: lotsman.v1.UserService.RemoveUser:output_type -> lotsman.v1.RemoveUserResponse
-	3,  // 16: lotsman.v1.UserService.GetConfig:output_type -> lotsman.v1.DeviceConfig
-	13, // 17: lotsman.v1.UserService.IssueLink:output_type -> lotsman.v1.IssueLinkResponse
-	15, // 18: lotsman.v1.UserService.RevokeLink:output_type -> lotsman.v1.RevokeLinkResponse
-	12, // [12:19] is the sub-list for method output_type
-	5,  // [5:12] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	2,  // 0: lotsman.v1.User.devices:type_name -> lotsman.v1.Device
+	21, // 1: lotsman.v1.User.created:type_name -> google.protobuf.Timestamp
+	1,  // 2: lotsman.v1.User.rights:type_name -> lotsman.v1.Rights
+	21, // 3: lotsman.v1.Device.created:type_name -> google.protobuf.Timestamp
+	3,  // 4: lotsman.v1.Device.route:type_name -> lotsman.v1.Route
+	4,  // 5: lotsman.v1.Route.countries:type_name -> lotsman.v1.Country
+	0,  // 6: lotsman.v1.ListUsersResponse.users:type_name -> lotsman.v1.User
+	1,  // 7: lotsman.v1.SetRightsRequest.rights:type_name -> lotsman.v1.Rights
+	3,  // 8: lotsman.v1.AddDeviceRequest.route:type_name -> lotsman.v1.Route
+	3,  // 9: lotsman.v1.SetRouteRequest.route:type_name -> lotsman.v1.Route
+	6,  // 10: lotsman.v1.UserService.List:input_type -> lotsman.v1.ListUsersRequest
+	8,  // 11: lotsman.v1.UserService.AddUser:input_type -> lotsman.v1.AddUserRequest
+	9,  // 12: lotsman.v1.UserService.SetRights:input_type -> lotsman.v1.SetRightsRequest
+	10, // 13: lotsman.v1.UserService.AddDevice:input_type -> lotsman.v1.AddDeviceRequest
+	11, // 14: lotsman.v1.UserService.SetRoute:input_type -> lotsman.v1.SetRouteRequest
+	12, // 15: lotsman.v1.UserService.RemoveDevice:input_type -> lotsman.v1.RemoveDeviceRequest
+	14, // 16: lotsman.v1.UserService.RemoveUser:input_type -> lotsman.v1.RemoveUserRequest
+	16, // 17: lotsman.v1.UserService.GetConfig:input_type -> lotsman.v1.GetConfigRequest
+	17, // 18: lotsman.v1.UserService.IssueLink:input_type -> lotsman.v1.IssueLinkRequest
+	19, // 19: lotsman.v1.UserService.RevokeLink:input_type -> lotsman.v1.RevokeLinkRequest
+	7,  // 20: lotsman.v1.UserService.List:output_type -> lotsman.v1.ListUsersResponse
+	0,  // 21: lotsman.v1.UserService.AddUser:output_type -> lotsman.v1.User
+	0,  // 22: lotsman.v1.UserService.SetRights:output_type -> lotsman.v1.User
+	5,  // 23: lotsman.v1.UserService.AddDevice:output_type -> lotsman.v1.DeviceConfig
+	2,  // 24: lotsman.v1.UserService.SetRoute:output_type -> lotsman.v1.Device
+	13, // 25: lotsman.v1.UserService.RemoveDevice:output_type -> lotsman.v1.RemoveDeviceResponse
+	15, // 26: lotsman.v1.UserService.RemoveUser:output_type -> lotsman.v1.RemoveUserResponse
+	5,  // 27: lotsman.v1.UserService.GetConfig:output_type -> lotsman.v1.DeviceConfig
+	18, // 28: lotsman.v1.UserService.IssueLink:output_type -> lotsman.v1.IssueLinkResponse
+	20, // 29: lotsman.v1.UserService.RevokeLink:output_type -> lotsman.v1.RevokeLinkResponse
+	20, // [20:30] is the sub-list for method output_type
+	10, // [10:20] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_lotsman_v1_user_proto_init() }
@@ -921,7 +1250,7 @@ func file_lotsman_v1_user_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lotsman_v1_user_proto_rawDesc), len(file_lotsman_v1_user_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   16,
+			NumMessages:   21,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -24,7 +24,7 @@ func TestClientConfigSubtractsContentPadding(t *testing.T) {
 	if err := os.WriteFile(providerPath, []byte(padded), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	out, err := capture(t, "-config", path, "user", "add", "alice", "-profile", "nl")
+	out, err := capture(t, "-config", path, "device", "add", "alice/phone")
 	if err != nil {
 		t.Fatal(err)
 	}

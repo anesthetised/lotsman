@@ -122,7 +122,7 @@ func (d *Daemon) Metrics() []metrics.Sample {
 		}
 	}
 	for key, p := range d.devicePeers {
-		labels := []metrics.Label{{Name: "user", Value: p.User}, {Name: "device", Value: p.Device}, {Name: "profile", Value: p.Profile}}
+		labels := []metrics.Label{{Name: "user", Value: p.User}, {Name: "device", Value: p.Device}}
 		if st, ok := status[key]; ok {
 			out = append(out,
 				sample("lotsman_peer_receive_bytes_total", float64(st.RxBytes), labels...),

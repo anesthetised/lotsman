@@ -51,7 +51,7 @@ test("enroll a passkey, sign out, sign in with it", async ({ page }) => {
   expect((await credentials())[0]?.signCount).toBeGreaterThan(passkey?.signCount ?? 0);
 
   await page.getByRole("link", { name: "Upstreams" }).click();
-  await expect(page.getByRole("table").first().getByRole("row")).toHaveCount(5);
+  await expect(page.getByRole("table").first().getByRole("row")).toHaveCount(6); // header + 5 upstreams
 });
 
 test("an enrollment link works once", async ({ page }) => {

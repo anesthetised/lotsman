@@ -1,16 +1,14 @@
 import { create, type MessageInitShape } from "@bufbuild/protobuf";
 import { durationFromMs, timestampFromMs } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError } from "@connectrpc/connect";
-import { describe, expect, test, vi } from "vitest";
+import { describe, expect, test } from "vitest";
 import { HistoryResponseSchema, SampleSchema } from "../../gen/lotsman/v1/history_pb";
-import { DeviceConfigSchema } from "../../gen/lotsman/v1/user_pb";
 import { SelfServiceLimit_Reason, SelfServiceLimitSchema } from "../../gen/lotsman/v1/user_self_pb";
 import { en } from "../../i18n/en";
 import { ru } from "../../i18n/ru";
 import { confFilename } from "./config";
 import { failureOf, failureText } from "./errors";
 import { chartPaths, mergeHistory } from "./history";
-import { changeProfile, ProfileChangeError } from "./profileChange";
 
 const failure = (code: Code, message = "") => failureOf(new ConnectError(message, code));
 
@@ -41,14 +39,9 @@ describe("failureOf", () => {
   });
 
   test("a refused name carries the daemon's reason; anything else its message", () => {
-    expect(failure(Code.InvalidArgument, "no such profile: x")).toEqual({ kind: "invalid", message: "no such profile: x" });
+    expect(failure(Code.InvalidArgument, "route: no exit in country FI")).toEqual({ kind: "invalid", message: "route: no exit in country FI" });
     expect(failure(Code.Internal, "users: internal error")).toEqual({ kind: "other", message: "users: internal error" });
     expect(failureOf(new TypeError("Failed to fetch")).kind).toBe("other");
-  });
-
-  test("a profile change fails for the reason of the call that failed", () => {
-    expect(failureOf(new ProfileChangeError("add", new ConnectError("", Code.PermissionDenied)))).toEqual({ kind: "denied" });
-    expect(failureOf(new ProfileChangeError("remove", new ConnectError("", Code.Unauthenticated)))).toEqual({ kind: "revoked" });
   });
 
   test("every failure has words in both languages", () => {
@@ -76,53 +69,16 @@ describe("failureOf", () => {
   });
 });
 
-describe("changeProfile", () => {
-  const config = create(DeviceConfigSchema, { peerId: "peer-9", config: "[Interface]" });
-
-  test("adds the new profile first, then removes the old one, and returns the new config", async () => {
-    const calls: string[] = [];
-    const got = await changeProfile(
-      {
-        addDevice: async (req) => (calls.push(`add ${req.device}/${req.profile}`), config),
-        removeDevice: async (req) => void calls.push(`remove ${req.device}/${req.profile}`),
-      },
-      "phone",
-      "default",
-      "streaming",
-    );
-    expect(calls).toEqual(["add phone/streaming", "remove phone/default"]);
-    expect(got).toBe(config);
-  });
-
-  test("removes nothing when the add fails", async () => {
-    const removeDevice = vi.fn();
-    const denied = new ConnectError("adding is off", Code.PermissionDenied);
-    const error = await changeProfile({ addDevice: () => Promise.reject(denied), removeDevice }, "phone", "default", "streaming").catch((e) => e);
-    expect(error).toBeInstanceOf(ProfileChangeError);
-    expect(error).toMatchObject({ stage: "add", cause: denied, config: undefined });
-    expect(removeDevice).not.toHaveBeenCalled();
-  });
-
-  test("keeps the new config when the removal fails: the device has both profiles", async () => {
-    const gone = new ConnectError("no such device or profile", Code.NotFound);
-    const error = await changeProfile({ addDevice: async () => config, removeDevice: () => Promise.reject(gone) }, "phone", "default", "streaming").catch(
-      (e) => e,
-    );
-    expect(error).toMatchObject({ stage: "remove", cause: gone, config });
-  });
-});
-
 describe("confFilename", () => {
   test.each([
-    ["phone", "default", "phone-default.conf"],
-    ["laptop", "streaming", "laptop-streamin.conf"],
-    ["tablet", "streaming", "tablet-streamin.conf"],
-    ["my phone", "a/b", "my-phone-a-b.conf"],
-    ["телефон", "default", "default.conf"],
-    ["café", "eu", "cafe-eu.conf"],
-    ["телефон", "профиль", "lotsman.conf"],
-  ])("%s / %s → %s", (device, profile, want) => {
-    expect(confFilename(device, profile)).toBe(want);
+    ["phone", "phone.conf"],
+    ["my phone / work", "my-phone-work.conf"],
+    ["the-very-long-laptop", "the-very-long-l.conf"], // tunnel names are at most 15 characters
+    ["café", "cafe.conf"],
+    ["телефон 2", "2.conf"],
+    ["телефон", "lotsman.conf"],
+  ])("%s → %s", (device, want) => {
+    expect(confFilename(device)).toBe(want);
   });
 });
 

@@ -4,9 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
-	"io/fs"
 	"os"
 	"path/filepath"
 	"slices"
@@ -17,7 +15,6 @@ import (
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/proxy"
-	"github.com/anesthetised/lotsman/internal/store"
 )
 
 func pidPath(stateDir string) string    { return filepath.Join(stateDir, "lotsman.pid") }
@@ -81,15 +78,6 @@ func checkConfig(configPath string) error {
 	if err != nil {
 		return err
 	}
-	profiles, used, err := storedProfiles(cfg.StateDir)
-	if err != nil {
-		return err
-	}
-	// The daemon refuses to start with a profile that has no upstream to use.
-	profileWarnings, err := cfg.CheckProfiles(profiles)
-	if err != nil {
-		return err
-	}
 	// Dynamic keys first, each bounded like the daemon's fetch, so a slow
 	// URL does not eat the lookup budget below.
 	ups := make([]*daemon.Upstream, len(cfg.Upstreams))
@@ -104,7 +92,7 @@ func checkConfig(configPath string) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	warnings := profileWarnings
+	var warnings []string
 	for i, u := range cfg.Upstreams {
 		up := ups[i]
 		if err := fetchErrs[i]; err != nil {
@@ -116,8 +104,8 @@ func checkConfig(configPath string) error {
 		if err := up.Resolve(ctx); err != nil {
 			return err
 		}
-		line := fmt.Sprintf("upstream %-10s %s  kind %s  endpoint %s  address %s  mtu %d",
-			u.Name, u.InterfaceName(), u.Kind, up.Resolved, up.Addr, up.MTU)
+		line := fmt.Sprintf("upstream %-10s %s  kind %s  geo %s  provider %s  endpoint %s  address %s  mtu %d",
+			u.Name, u.InterfaceName(), u.Kind, u.Geo, u.Provider, up.Resolved, up.Addr, up.MTU)
 		if up.Key != nil {
 			// The key's description never includes its secret.
 			if up.Location != nil {
@@ -129,13 +117,6 @@ func checkConfig(configPath string) error {
 		}
 		fmt.Println(line)
 	}
-	for _, p := range profiles {
-		fmt.Printf("profile  %-10s prefer %s\n", p.Name, formatTiers(p.Prefer))
-	}
-	if len(profiles) == 0 {
-		warnings = append(warnings, "no profiles yet; add one with `profile add NAME [TIER...]`")
-	}
-	warnings = append(warnings, missingProfiles(profiles, used)...)
 	health := "health   probe " + cfg.Health.Probe.String()
 	if slices.ContainsFunc(cfg.Upstreams, config.Upstream.Proxy) {
 		health += "  dns " + cfg.Health.DNS.String()
@@ -149,31 +130,4 @@ func checkConfig(configPath string) error {
 	}
 	fmt.Println("config OK")
 	return nil
-}
-
-// storedProfiles reads the profiles and how many peers use each, without
-// creating a database that does not exist yet.
-func storedProfiles(stateDir string) ([]config.Profile, map[string]int, error) {
-	path := dbPath(stateDir)
-	if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
-		return nil, nil, nil
-	}
-	st, err := store.Open(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer st.Close()
-	profiles, err := st.ListProfiles()
-	if err != nil {
-		return nil, nil, err
-	}
-	peers, err := st.ListPeers()
-	if err != nil {
-		return nil, nil, err
-	}
-	used := map[string]int{}
-	for _, p := range peers {
-		used[p.Profile]++
-	}
-	return profiles, used, nil
 }

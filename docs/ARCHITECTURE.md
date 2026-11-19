@@ -3,7 +3,7 @@
 Lotsman is a self-hosted AmneziaWG gateway. Users connect with the official Amnezia client;
 Lotsman terminates their tunnel and forwards traffic into one of several upstreams, AmneziaWG tunnels,
 Outline (Shadowsocks) servers or VLESS + REALITY servers (the operator's own provider subscriptions),
-chosen by the user's profile preference and live health.
+chosen by each device's route and live health.
 
 ```
 user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing──▶ [lm-up-N TUN] ──AWG2──▶ provider ──▶ internet
@@ -20,8 +20,8 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 | Role | Data plane: Lotsman is in the packet path | Zero custom clients — only the official Amnezia app. Latency and a shared exit IP are accepted costs. |
 | AWG runtime | `amneziawg-go` embedded as a library | No open-source AWG 2.0 kernel module exists (see below), so crypto is userspace regardless. |
 | Forwarding | Kernel: real TUNs, policy routing (`ip rule`/tables), nftables | NAT, conntrack and MSS clamping come from the kernel; the Go code stays small. Linux only. |
-| Preference | One peer per (user, profile) | The preference is encoded in which key the user connects with; no side channel needed. |
-| State | YAML for upstreams, SQLite for profiles, users and peers | Operators edit and version the YAML; profiles and users change at runtime (CLI now, the web panel later) and apply without a restart. |
+| Preference | One peer per device, with a route on the gateway, within the user's allowed exits | A device's exit changes without a new key or client config, and the tunnel never reconnects; see [Routes and rights](#routes-and-rights-161). |
+| State | YAML for upstreams, SQLite for users, their rights and devices | Operators edit and version the YAML; users, devices and routes change at runtime (CLI and web panel) and apply without a restart. |
 | Fail-closed | Mandatory | User traffic must never leave via the host's own IP. nftables admits only authorized peers from `lm0` into an `lm-up-*`; all other forwarding from `lm0` is dropped. |
 | Host firewalls | Accept rules inserted into foreign forward chains | Docker's `FORWARD DROP` and ufw would otherwise silently drop forwarded traffic; same approach as Tailscale. |
 | Proxy upstreams | A userspace TCP/IP stack per upstream on its own TUN, flows re-originated through a pluggable dialer (Shadowsocks, VLESS + REALITY through embedded xray-core), each in its own unprivileged helper process | Keeps kernel routing, pinning and fail-closed identical for every upstream kind; a panic in the stack takes down one upstream, not the gateway; see [Proxy upstreams](#proxy-upstreams-outline). |
@@ -149,7 +149,7 @@ reachability probes, and requires it within `timeout`. Decided 2026-11-16:
   own results, so one slow sample does not flap. Reachability stays the separate signal
   (`upstream_up`).
 - Selection: a degraded upstream is a last resort (`policy.Select` tries healthy, not degraded
-  upstreams in every tier first, then the degraded ones by the same rules): slow connectivity
+  upstreams in every tier of the route first, then the degraded ones by the same rules): slow connectivity
   beats a blocked client.
 - Pinning: `alive` (what `SetAlive` gets) is up and either not degraded or still some peer's
   route. A frozen path holds old flows hostage as surely as a dead one, so once every peer has
@@ -165,6 +165,39 @@ reachability probes, and requires it within `timeout`. Decided 2026-11-16:
 - No built-in URL: any default would be a single third party every installation calls, and a
   recognisable signature. The URL's host is resolved by the host resolver; only the connection
   goes through the upstream, as for an AWG endpoint lookup.
+
+## Routes and rights (#161)
+
+Decided 2026-11-19; replaces profiles and upstream tags. A device is one tunnel with its own
+route; the operator sets per-user rights.
+
+- **Labels.** An upstream has two required labels, `geo` (ISO 3166-1 alpha-2, which the panel
+  names with `Intl.DisplayNames`) and `provider`. Free-form tags are gone: grouping by anything
+  else is out of scope, and two fixed labels are what a user can read and pick from.
+- **Route.** `policy.Route` is `{fastest, strict, countries}`, a country `{geo, providers}` with
+  no providers meaning every provider there. `Route.Tiers` compiles it into `policy.Select`'s
+  preference tiers, each tier a set of `{geo, provider}` matches that are OR'ed: one tier per
+  country in order, or with `fastest` a single tier of every country; then, unless `strict`, a
+  tier matching any upstream; a route without countries is that one tier. `Select` itself is
+  unchanged: the first tier with a healthy upstream, the degraded last resort, stickiness, then
+  latency and name. The route lives in `policy` with its compilation, its validation against the
+  upstreams and its CLI form (`String`); `config` cannot hold it, because `policy` already depends
+  on `config.Upstream`.
+- **Exits.** A user's `exits` (upstream names; empty means all) narrow the candidates before
+  `Select` (`policy.Exits`), so `strict: false` falls back only within them. A name the config no
+  longer has is ignored, and a list of only such names allows nothing: a restriction never turns
+  into "every upstream" by itself.
+- **Validation on write.** CLI and API check every route against the running (or, for the CLI,
+  the configured) upstreams the user's exits allow: every country has one, every provider one in
+  that country, nothing is listed twice. A stored route may go stale after an upstream is removed;
+  it then matches less, so a reload never refuses a config over routes, and a device left without
+  a match is blocked as any device without a healthy upstream is.
+- **Storage.** `peers` has `route` as JSON (read and written whole) and `UNIQUE (user_id,
+  device)`; `users` has `edit_routes`, `show_providers` and `exits` (JSON). Migration 7 drops
+  `profiles`, `profile_tiers`, every peer and its rows in `peer_samples` and `peer_hour_samples`:
+  nothing was in production, so devices are added again rather than converted. Users and their
+  links stay, and the peers' `AUTOINCREMENT` counter carries over, so a `peer_id` from before
+  never names a new device.
 
 ## Proxy upstreams (Outline)
 
@@ -332,7 +365,7 @@ expected to remain the bottleneck, as for AWG (see [Throughput](#throughput-2026
 
 **Addendum: VLESS upstreams (2026-11-16, #86).** VLESS with REALITY and XTLS Vision (Xray) disguises
 itself as TLS to a real third-party site, where Shadowsocks is increasingly caught by its
-fully-encrypted look; a profile can fail over between the two. VLESS is the stack's second dialer:
+fully-encrypted look; a route can fail over between the two. VLESS is the stack's second dialer:
 `kind: vless`, a static `vless://` share link, TCP transport, UDP as XUDP.
 
 | Option | For | Against |
@@ -423,16 +456,18 @@ file per service), over Connect on the unix socket `/run/lotsman/control.sock`. 
 of the agreed contract is registered; until the issue that implements an RPC lands, it answers
 `unimplemented`. `StatusService.Watch` streams a full `StatusSnapshot` at once and then every
 `interval` (default and minimum 1 s; shorter is raised to 1 s, an invalid duration is
-`invalid_argument`), built from the daemon's `Status` plus the upstreams' `geo`, `provider` and
-`tags`, each peer's tunnel address and the client MTU. A stream opened before the first reconcile
+`invalid_argument`), built from the daemon's `Status` plus the upstreams' `geo` and `provider`,
+each peer's tunnel address and the client MTU. A stream opened before the first reconcile
 waits for it, so no client sees an empty gateway. `peer_id` is `p_<row id>` of the store's peer:
 opaque to clients and unchanged by renames.
 
-`ProfileService` (#128) translates to the daemon's `Profiles`, `PutProfile` and `DeleteProfile`,
-which own validation and storage; `Matcher` maps 1:1 onto `config.Match`. Errors become codes:
-`daemon.ErrInvalidProfile` is `invalid_argument` with the reason, `store.ErrInUse`
-`failed_precondition`, `store.ErrNotFound` `not_found`, and anything else `internal` with no
-detail, so database paths and SQL never reach the browser. `ConnectionService.Watch` (#131) gives
+`UserService` and `UserSelfService` validate routes and exits themselves, against the daemon's
+running `Upstreams` (`policy.Route.Validate`, `policy.ValidateExits`), since only they know whose
+call it is, and apply through the daemon's `AddPeer`, `SetRoute`, `SetRights`, `RemovePeer` and
+`RemoveUser`, which store and reconcile. `Route` maps 1:1 onto `policy.Route`. Errors become
+codes: a refused route or exit list is `invalid_argument` with the reason, `store.ErrExists`
+`already_exists`, `store.ErrNotFound` `not_found`, and anything else `internal` with no detail, so
+database paths and SQL never reach the browser. `ConnectionService.Watch` (#131) gives
 each stream its own `flows.Meter` over conntrack, the client subnet and the daemon's `PeerRoutes`
 under their `peer_id`s, with the same interval rules and readiness wait as `StatusService.Watch`;
 rates are deltas between that stream's snapshots. Sources and destinations are `IP:port`, or the
@@ -655,20 +690,26 @@ reaches neither the reverse proxy's access log nor the panel with the page reque
 - Daemon: `UserSelfService` acts for the `Lotsman-User` user: none, more than one value or an
   unknown user is `unauthenticated`. Another user's peer is `not_found` with the same message as a
   missing one, never `permission_denied`, so a `peer_id` does not reveal whether it exists.
-  `AddDevice` enforces `users.max_devices` (default 5; a new profile on an existing device is no new
-  device, so a profile switch, add then remove, works at the limit; `0` refuses every addition, a
-  new profile included, with `permission_denied`) and a per-user token bucket of
-  10 additions, then one every 6 minutes; the count and the add happen under one lock. Mutations
-  go through `Daemon.AddPeer`, `RemovePeers` and `RemoveUser`: the store calls the CLI makes, then
-  a reconcile in place of the CLI's SIGUSR1, so a new device can connect when the call returns.
-  Before the daemon's first round they wake the round instead. Configs are `ClientConfig`, as
-  `user show` prints them. Names from the API must be printable UTF-8 of at most 64 bytes.
-- The user's `Watch` is the operator's snapshot narrowed: the user's own peers, and the upstreams
-  their peers' profiles may use (`policy.Allows`) or a peer of theirs is routed through. Other
-  users' peers make up an upstream's `routed`, `active` and `traffic`, so those stay unset; `total`
-  is the sum of the user's peers. The stream ends with `unauthenticated` once the user is removed.
+  `AddDevice` enforces `users.max_devices` (default 5; `0` refuses every addition with
+  `permission_denied`) and a per-user token bucket of 10 additions, then one every 6 minutes; the
+  count and the add happen under one lock. `AddDevice` and `SetRoute` apply the user's
+  [rights](#routes-and-rights-161): without `edit_routes` a route is `permission_denied` (an
+  `AddDevice` without one gets the default route), without `show_providers` a route naming
+  providers is `invalid_argument`, and the route must fit the user's exits. Mutations go through
+  `Daemon.AddPeer`, `SetRoute`, `RemovePeer` and `RemoveUser`: the store calls the CLI makes, then
+  a reconcile in place of the CLI's SIGUSR1, so a new device can connect, or a rerouted one has
+  moved, when the call returns. Before the daemon's first round they wake the round instead.
+  Configs are `ClientConfig`, as `device show` prints them. Names from the API must be printable
+  UTF-8 of at most 64 bytes, and a user's has no `/` (the CLI's `USER/DEVICE`).
+- The user's `Watch` is the operator's snapshot narrowed: the user's own peers, and their allowed
+  exits (`policy.Allows`) plus any upstream a peer of theirs is still routed through, as briefly
+  after their exits change. Other users' peers make up an upstream's `routed`, `active` and
+  `traffic`, so those stay unset; `total` is the sum of the user's peers. Without `show_providers`
+  every upstream's `provider` is empty, and `Get` drops the providers of routes the operator gave
+  them. The user is read again for every snapshot, so changed rights apply to the next one; the
+  stream ends with `unauthenticated` once the user is removed.
 - History: `UpstreamHistory` serves the upstreams that `Watch` shows (the same `userUpstreams`
-  over the daemon's status and the stored profiles) with `up_ratio` and `latency` only, as an
+  over the daemon's status and the user's exits) with `up_ratio` and `latency` only, as an
   upstream's bytes are every user's traffic; `PeerHistory` serves the user's own peers. Both take
   `HistoryService`'s request checks and error mapping (`historyRange`, `historyResponse`) and ask
   the daemon before checking the name, so any name the user may not see fails exactly as a missing

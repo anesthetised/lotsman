@@ -36,14 +36,13 @@ const (
 	UserSelfServiceWatchProcedure = "/lotsman.v1.UserSelfService/Watch"
 	// UserSelfServiceAddDeviceProcedure is the procedure name of the UserSelfService's AddDevice RPC.
 	UserSelfServiceAddDeviceProcedure = "/lotsman.v1.UserSelfService/AddDevice"
+	// UserSelfServiceSetRouteProcedure is the procedure name of the UserSelfService's SetRoute RPC.
+	UserSelfServiceSetRouteProcedure = "/lotsman.v1.UserSelfService/SetRoute"
 	// UserSelfServiceRemoveDeviceProcedure is the procedure name of the UserSelfService's RemoveDevice
 	// RPC.
 	UserSelfServiceRemoveDeviceProcedure = "/lotsman.v1.UserSelfService/RemoveDevice"
 	// UserSelfServiceGetConfigProcedure is the procedure name of the UserSelfService's GetConfig RPC.
 	UserSelfServiceGetConfigProcedure = "/lotsman.v1.UserSelfService/GetConfig"
-	// UserSelfServiceListProfilesProcedure is the procedure name of the UserSelfService's ListProfiles
-	// RPC.
-	UserSelfServiceListProfilesProcedure = "/lotsman.v1.UserSelfService/ListProfiles"
 	// UserSelfServiceUpstreamHistoryProcedure is the procedure name of the UserSelfService's
 	// UpstreamHistory RPC.
 	UserSelfServiceUpstreamHistoryProcedure = "/lotsman.v1.UserSelfService/UpstreamHistory"
@@ -81,6 +80,13 @@ var (
 			Procedure:  UserSelfServiceAddDeviceProcedure,
 		}
 	})
+	userSelfServiceSetRouteSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_lotsman_v1_user_self_proto.Services().ByName("UserSelfService").Methods().ByName("SetRoute"),
+			Procedure:  UserSelfServiceSetRouteProcedure,
+		}
+	})
 	userSelfServiceRemoveDeviceSpec = sync.OnceValue(func() connect.Spec {
 		return connect.Spec{
 			StreamType: connect.StreamTypeUnary,
@@ -93,13 +99,6 @@ var (
 			StreamType: connect.StreamTypeUnary,
 			Schema:     v1.File_lotsman_v1_user_self_proto.Services().ByName("UserSelfService").Methods().ByName("GetConfig"),
 			Procedure:  UserSelfServiceGetConfigProcedure,
-		}
-	})
-	userSelfServiceListProfilesSpec = sync.OnceValue(func() connect.Spec {
-		return connect.Spec{
-			StreamType: connect.StreamTypeUnary,
-			Schema:     v1.File_lotsman_v1_user_self_proto.Services().ByName("UserSelfService").Methods().ByName("ListProfiles"),
-			Procedure:  UserSelfServiceListProfilesProcedure,
 		}
 	})
 	userSelfServiceUpstreamHistorySpec = sync.OnceValue(func() connect.Spec {
@@ -122,19 +121,24 @@ var (
 type UserSelfServiceClient interface {
 	ResolveLink(context.Context, *v1.ResolveLinkRequest) (*v1.ResolveLinkResponse, error)
 	Get(context.Context, *v1.GetSelfRequest) (*v1.User, error)
-	// Own peers and the upstreams their profiles may use. Other users show
-	// through upstreams, so for those the daemon leaves traffic, routed and
-	// active unset, and the snapshot's total covers only the user's own peers.
+	// Own devices and the user's allowed exits. Other users show through
+	// upstreams, so for those the daemon leaves traffic, routed and active
+	// unset, and the snapshot's total covers only the user's own devices.
+	// Without rights.show_providers every upstream's provider is empty.
 	Watch(context.Context, *v1.WatchStatusRequest) (UserSelfServiceWatchClientStream, error)
+	// max_devices, rate limit. Without rights.edit_routes the route must be
+	// unset (PermissionDenied otherwise) and the device gets the default one.
 	AddDevice(context.Context, *v1.AddSelfDeviceRequest) (*v1.DeviceConfig, error)
+	// PermissionDenied without rights.edit_routes; a route naming providers is
+	// InvalidArgument without rights.show_providers.
+	SetRoute(context.Context, *v1.SetSelfRouteRequest) (*v1.Device, error)
 	RemoveDevice(context.Context, *v1.RemoveSelfDeviceRequest) (*v1.RemoveDeviceResponse, error)
 	GetConfig(context.Context, *v1.GetConfigRequest) (*v1.DeviceConfig, error)
-	ListProfiles(context.Context, *v1.ListProfilesRequest) (*v1.ListProfilesResponse, error)
-	// History of an upstream the user's profiles may use: up_ratio and latency
-	// only, no bytes. Any other upstream is NotFound.
+	// History of one of the user's allowed exits: up_ratio and latency only,
+	// no bytes. Any other upstream is NotFound.
 	UpstreamHistory(context.Context, *v1.HistoryRequest) (*v1.HistoryResponse, error)
-	// History of one of the user's own peers (name = peer_id). Any other peer
-	// is NotFound.
+	// History of one of the user's own devices (name = peer_id). Any other
+	// peer is NotFound.
 	PeerHistory(context.Context, *v1.HistoryRequest) (*v1.HistoryResponse, error)
 }
 
@@ -168,19 +172,24 @@ func (s UserSelfServiceWatchClientStream) Close() error {
 type UserSelfServiceHandler interface {
 	ResolveLink(context.Context, *v1.ResolveLinkRequest) (*v1.ResolveLinkResponse, error)
 	Get(context.Context, *v1.GetSelfRequest) (*v1.User, error)
-	// Own peers and the upstreams their profiles may use. Other users show
-	// through upstreams, so for those the daemon leaves traffic, routed and
-	// active unset, and the snapshot's total covers only the user's own peers.
+	// Own devices and the user's allowed exits. Other users show through
+	// upstreams, so for those the daemon leaves traffic, routed and active
+	// unset, and the snapshot's total covers only the user's own devices.
+	// Without rights.show_providers every upstream's provider is empty.
 	Watch(context.Context, *v1.WatchStatusRequest, UserSelfServiceWatchServerStream) error
+	// max_devices, rate limit. Without rights.edit_routes the route must be
+	// unset (PermissionDenied otherwise) and the device gets the default one.
 	AddDevice(context.Context, *v1.AddSelfDeviceRequest) (*v1.DeviceConfig, error)
+	// PermissionDenied without rights.edit_routes; a route naming providers is
+	// InvalidArgument without rights.show_providers.
+	SetRoute(context.Context, *v1.SetSelfRouteRequest) (*v1.Device, error)
 	RemoveDevice(context.Context, *v1.RemoveSelfDeviceRequest) (*v1.RemoveDeviceResponse, error)
 	GetConfig(context.Context, *v1.GetConfigRequest) (*v1.DeviceConfig, error)
-	ListProfiles(context.Context, *v1.ListProfilesRequest) (*v1.ListProfilesResponse, error)
-	// History of an upstream the user's profiles may use: up_ratio and latency
-	// only, no bytes. Any other upstream is NotFound.
+	// History of one of the user's allowed exits: up_ratio and latency only,
+	// no bytes. Any other upstream is NotFound.
 	UpstreamHistory(context.Context, *v1.HistoryRequest) (*v1.HistoryResponse, error)
-	// History of one of the user's own peers (name = peer_id). Any other peer
-	// is NotFound.
+	// History of one of the user's own devices (name = peer_id). Any other
+	// peer is NotFound.
 	PeerHistory(context.Context, *v1.HistoryRequest) (*v1.HistoryResponse, error)
 }
 
@@ -193,9 +202,9 @@ func RegisterUserSelfServiceHandler(server *connect.Server, svc UserSelfServiceH
 		connect.Method{Spec: userSelfServiceGetSpec(), Handler: adapter.get},
 		connect.Method{Spec: userSelfServiceWatchSpec(), Handler: adapter.watch},
 		connect.Method{Spec: userSelfServiceAddDeviceSpec(), Handler: adapter.addDevice},
+		connect.Method{Spec: userSelfServiceSetRouteSpec(), Handler: adapter.setRoute},
 		connect.Method{Spec: userSelfServiceRemoveDeviceSpec(), Handler: adapter.removeDevice},
 		connect.Method{Spec: userSelfServiceGetConfigSpec(), Handler: adapter.getConfig},
-		connect.Method{Spec: userSelfServiceListProfilesSpec(), Handler: adapter.listProfiles},
 		connect.Method{Spec: userSelfServiceUpstreamHistorySpec(), Handler: adapter.upstreamHistory},
 		connect.Method{Spec: userSelfServicePeerHistorySpec(), Handler: adapter.peerHistory},
 	)
@@ -235,16 +244,16 @@ func (UnimplementedUserSelfServiceHandler) AddDevice(context.Context, *v1.AddSel
 	return nil, connect.NewError(connect.CodeUnimplemented, "lotsman.v1.UserSelfService.AddDevice is not implemented")
 }
 
+func (UnimplementedUserSelfServiceHandler) SetRoute(context.Context, *v1.SetSelfRouteRequest) (*v1.Device, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "lotsman.v1.UserSelfService.SetRoute is not implemented")
+}
+
 func (UnimplementedUserSelfServiceHandler) RemoveDevice(context.Context, *v1.RemoveSelfDeviceRequest) (*v1.RemoveDeviceResponse, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "lotsman.v1.UserSelfService.RemoveDevice is not implemented")
 }
 
 func (UnimplementedUserSelfServiceHandler) GetConfig(context.Context, *v1.GetConfigRequest) (*v1.DeviceConfig, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, "lotsman.v1.UserSelfService.GetConfig is not implemented")
-}
-
-func (UnimplementedUserSelfServiceHandler) ListProfiles(context.Context, *v1.ListProfilesRequest) (*v1.ListProfilesResponse, error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, "lotsman.v1.UserSelfService.ListProfiles is not implemented")
 }
 
 func (UnimplementedUserSelfServiceHandler) UpstreamHistory(context.Context, *v1.HistoryRequest) (*v1.HistoryResponse, error) {
@@ -291,6 +300,14 @@ func (c *userSelfServiceClient) AddDevice(ctx context.Context, req *v1.AddSelfDe
 	return &res, nil
 }
 
+func (c *userSelfServiceClient) SetRoute(ctx context.Context, req *v1.SetSelfRouteRequest) (*v1.Device, error) {
+	var res v1.Device
+	if err := c.client.CallUnary(ctx, userSelfServiceSetRouteSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 func (c *userSelfServiceClient) RemoveDevice(ctx context.Context, req *v1.RemoveSelfDeviceRequest) (*v1.RemoveDeviceResponse, error) {
 	var res v1.RemoveDeviceResponse
 	if err := c.client.CallUnary(ctx, userSelfServiceRemoveDeviceSpec(), req, &res); err != nil {
@@ -302,14 +319,6 @@ func (c *userSelfServiceClient) RemoveDevice(ctx context.Context, req *v1.Remove
 func (c *userSelfServiceClient) GetConfig(ctx context.Context, req *v1.GetConfigRequest) (*v1.DeviceConfig, error) {
 	var res v1.DeviceConfig
 	if err := c.client.CallUnary(ctx, userSelfServiceGetConfigSpec(), req, &res); err != nil {
-		return nil, err
-	}
-	return &res, nil
-}
-
-func (c *userSelfServiceClient) ListProfiles(ctx context.Context, req *v1.ListProfilesRequest) (*v1.ListProfilesResponse, error) {
-	var res v1.ListProfilesResponse
-	if err := c.client.CallUnary(ctx, userSelfServiceListProfilesSpec(), req, &res); err != nil {
 		return nil, err
 	}
 	return &res, nil
@@ -377,6 +386,18 @@ func (h userSelfServiceHandler) addDevice(ctx context.Context, _ connect.Spec, s
 	return stream.Send(res)
 }
 
+func (h userSelfServiceHandler) setRoute(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.SetSelfRouteRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.SetRoute(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
+}
+
 func (h userSelfServiceHandler) removeDevice(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
 	var req v1.RemoveSelfDeviceRequest
 	if err := stream.Receive(&req); err != nil {
@@ -395,18 +416,6 @@ func (h userSelfServiceHandler) getConfig(ctx context.Context, _ connect.Spec, s
 		return err
 	}
 	res, err := h.svc.GetConfig(ctx, &req)
-	if err != nil {
-		return err
-	}
-	return stream.Send(res)
-}
-
-func (h userSelfServiceHandler) listProfiles(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
-	var req v1.ListProfilesRequest
-	if err := stream.Receive(&req); err != nil {
-		return err
-	}
-	res, err := h.svc.ListProfiles(ctx, &req)
 	if err != nil {
 		return err
 	}

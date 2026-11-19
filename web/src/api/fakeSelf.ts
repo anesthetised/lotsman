@@ -6,12 +6,11 @@
 import { create } from "@bufbuild/protobuf";
 import { Code, ConnectError, type HandlerContext, type ServiceImpl, type Transport } from "@connectrpc/connect";
 import { type HistoryRequest, type HistoryResponse, HistoryResponseSchema, SampleSchema } from "../gen/lotsman/v1/history_pb";
-import { ListProfilesResponseSchema, ProfileSchema } from "../gen/lotsman/v1/profile_pb";
 import type { Duration } from "@bufbuild/protobuf/wkt";
 import type { StatusSnapshot } from "../gen/lotsman/v1/status_pb";
-import { DeviceConfigSchema } from "../gen/lotsman/v1/user_pb";
+import { DeviceConfigSchema, type Route } from "../gen/lotsman/v1/user_pb";
 import { SelfServiceLimit_Reason, SelfServiceLimitSchema, UserSelfService } from "../gen/lotsman/v1/user_self_pb";
-import type { Simulation } from "./simulation";
+import { routeValue, type Simulation } from "./simulation";
 
 /** The user every ordinary fake `/u#<token>` link resolves to. */
 export const FAKE_USER = "alice";
@@ -30,6 +29,10 @@ export const FAKE_LINKS = /* @__PURE__ */ (() => ({
   noAdding: token("no-adding"),
   /** A user without devices. */
   empty: token("empty"),
+  /** bob: the operator sets his routes (no `edit_routes`) and allows him two exits. */
+  fixedRoutes: token("fixed-routes"),
+  /** carol: countries only (no `show_providers`); her one device is blocked, its only country down. */
+  countriesOnly: token("countries-only"),
   /** The panel cannot reach the daemon. */
   unavailable: token("unavailable"),
 }) as const)();
@@ -88,13 +91,23 @@ export function createSelfService(
     const link = ctx.requestHeader.get("Authorization")?.replace(/^Bearer /, "");
     if (link === FAKE_LINKS.revoked) throw new ConnectError("unknown link", Code.Unauthenticated);
     if (link === FAKE_LINKS.unavailable) throw new ConnectError("the daemon is not reachable", Code.Unavailable);
+    const users: Record<string, string> = { [FAKE_LINKS.empty]: "dave", [FAKE_LINKS.fixedRoutes]: "bob", [FAKE_LINKS.countriesOnly]: "carol" };
     return {
-      user: link === FAKE_LINKS.empty ? "dave" : FAKE_USER,
+      user: (link && users[link]) || FAKE_USER,
       maxDevices: link === FAKE_LINKS.noAdding ? 0 : (options.maxDevices ?? 5),
     };
   };
 
-  /** The daemon's checks on a device or profile name. */
+  /** What the user's rights allow of a route they send: PermissionDenied without edit_routes, no providers without show_providers. */
+  const checkRights = (user: string, route: Route | undefined) => {
+    const rights = sim.rights(user);
+    if (!rights.editRoutes) throw new ConnectError("the operator sets your routes", Code.PermissionDenied);
+    if (!rights.showProviders && route?.countries.some((c) => c.providers.length > 0)) {
+      throw new ConnectError("route: providers are not shown to you; name countries only", Code.InvalidArgument);
+    }
+  };
+
+  /** The daemon's checks on a device name. */
   const checkName = (what: string, value: string) => {
     if (value === "") throw new ConnectError(`${what} is required`, Code.InvalidArgument);
     if (new TextEncoder().encode(value).length > NAME_LIMIT || value !== value.trim()) {
@@ -109,13 +122,10 @@ export function createSelfService(
     addDevice: (req, ctx) => {
       const { user, maxDevices } = acting(ctx);
       checkName("device", req.device);
-      checkName("profile", req.profile);
-      if (sim.hasPeer(user, req.device, req.profile)) {
-        throw new ConnectError(`${user}/${req.device} already has profile ${req.profile}`, Code.AlreadyExists);
-      }
+      if (sim.hasDevice(user, req.device)) throw new ConnectError(`device ${user}/${req.device} already exists`, Code.AlreadyExists);
+      if (req.route) checkRights(user, req.route);
       if (maxDevices === 0) throw new ConnectError("adding devices is turned off; ask the operator", Code.PermissionDenied);
-      const devices = sim.devicesOf(user);
-      if (!devices.includes(req.device) && devices.length >= maxDevices) {
+      if (sim.devicesOf(user).length >= maxDevices) {
         throw new ConnectError(`at most ${maxDevices} devices; remove one first or ask the operator`, Code.ResourceExhausted, undefined, [
           { desc: SelfServiceLimitSchema, value: { reason: SelfServiceLimit_Reason.MAX_DEVICES, maxDevices } },
         ]);
@@ -125,15 +135,19 @@ export function createSelfService(
           { desc: SelfServiceLimitSchema, value: { reason: SelfServiceLimit_Reason.RATE_LIMITED, retryAfter: { seconds: 360n } } },
         ]);
       }
-      if (!sim.profileNames().includes(req.profile)) throw new ConnectError(`no such profile: ${req.profile}`, Code.InvalidArgument);
-      const peer = sim.addPeer(user, req.device, req.profile);
-      return create(DeviceConfigSchema, { peerId: peer.peerId, config: sim.config(peer.peerId) });
+      return create(DeviceConfigSchema, sim.addDevice(user, req.device, routeValue(req.route)));
+    },
+
+    setRoute: (req, ctx) => {
+      const { user } = acting(ctx);
+      checkRights(user, req.route);
+      return sim.setRoute(user, req.device, routeValue(req.route));
     },
 
     removeDevice: (req, ctx) => {
       const { user } = acting(ctx);
       if (req.device === "") throw new ConnectError("device is required", Code.InvalidArgument);
-      if (sim.removePeers(user, req.device, req.profile) === 0) throw new ConnectError("no such device or profile", Code.NotFound);
+      sim.removeDevice(user, req.device);
       return {};
     },
 
@@ -143,11 +157,6 @@ export function createSelfService(
       const config = sim.ownerOf(req.peerId) === user ? sim.config(req.peerId) : undefined;
       if (config === undefined) throw new ConnectError("no such peer", Code.NotFound);
       return create(DeviceConfigSchema, { peerId: req.peerId, config });
-    },
-
-    listProfiles: (_, ctx) => {
-      acting(ctx);
-      return create(ListProfilesResponseSchema, { profiles: sim.profileNames().map((name) => create(ProfileSchema, { name })) });
     },
 
     upstreamHistory: (req, ctx) => {

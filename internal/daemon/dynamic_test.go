@@ -18,7 +18,6 @@ import (
 
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/proxy"
-	"github.com/anesthetised/lotsman/internal/store"
 )
 
 // dynPath is the secret part of the dynamic key URLs in these tests.
@@ -184,7 +183,7 @@ func TestLoadDynamicUpstream(t *testing.T) {
 func TestDynamicKeyRefresh(t *testing.T) {
 	h, ks, logs := newDynamicHarness(t, http.StatusOK)
 	h.st.CreateUser("alice")
-	peer, _ := h.st.AddPeer("alice", store.DefaultDevice, "px", h.cfg.Subnet)
+	peer, _ := h.st.AddPeer("alice", "px", pxRoute, h.cfg.Subnet)
 	h.run(t)
 	routedVia := func(want string) func() bool {
 		return func() bool { got, _ := h.dp.RouteOf(peer.IP); return got == want }
@@ -277,7 +276,7 @@ func TestDynamicKeyFromCache(t *testing.T) {
 	// The daemon starts on the key cached for this URL while the URL fails.
 	cache(loc, "ss.other.test:8388")
 	h.st.CreateUser("alice")
-	peer, _ := h.st.AddPeer("alice", store.DefaultDevice, "px", h.cfg.Subnet)
+	peer, _ := h.st.AddPeer("alice", "px", pxRoute, h.cfg.Subnet)
 	h.run(t)
 	eventually(t, "routed via ol", func() bool { got, _ := h.dp.RouteOf(peer.IP); return got == "lm-up-ol" })
 	if u := h.upstream("ol"); u.Resolved != "192.0.2.20:8388" {
@@ -291,10 +290,10 @@ func TestDynamicKeyFromCache(t *testing.T) {
 func TestDynamicKeyWithoutFetchOrCache(t *testing.T) {
 	h, ks, logs := newDynamicHarness(t, http.StatusNotFound)
 	h.st.CreateUser("alice")
-	peer, _ := h.st.AddPeer("alice", store.DefaultDevice, "px", h.cfg.Subnet)
+	peer, _ := h.st.AddPeer("alice", "px", pxRoute, h.cfg.Subnet)
 	h.run(t) // fails the test if the daemon stops
 
-	// ol stays down and nl carries the profile; ol is retried every round.
+	// ol stays down and nl carries the device; ol is retried every round.
 	eventually(t, "routed via nl", func() bool { got, _ := h.dp.RouteOf(peer.IP); return got == "lm-up-nl" })
 	if h.upstream("ol") != nil {
 		t.Fatal("ol runs without a key")
@@ -339,7 +338,7 @@ func TestDynamicKeyReload(t *testing.T) {
 	}
 
 	// Removing the upstream deletes its cached key.
-	without := strings.Replace(fmt.Sprintf(proxyConfig, h.dir, ""), "  - {name: ol, kind: outline, conf: "+h.dir+"/ol.key, geo: OL}\n", "", 1)
+	without := strings.Replace(fmt.Sprintf(proxyConfig, h.dir, ""), "  - {name: ol, kind: outline, conf: "+h.dir+"/ol.key, geo: OL, provider: acme}\n", "", 1)
 	cfg, err := config.Parse([]byte(without))
 	if err != nil || len(cfg.Upstreams) != 1 {
 		t.Fatalf("config without ol: %v, %d upstreams", err, len(cfg.Upstreams))

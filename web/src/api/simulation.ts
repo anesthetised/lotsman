@@ -1,7 +1,7 @@
 // A small simulation behind the fake API: a fixed set of upstreams, peers
-// whose rates take a random walk, the connections they open, and the
-// profiles, users and links the operator changes. It is deterministic for a
-// given seed, clock and sequence of calls, so tests can assert on it.
+// whose rates take a random walk, the connections they open, and the users,
+// their rights, devices, routes and links the operator changes. It is
+// deterministic for a given seed, clock and sequence of calls, so tests can assert on it.
 
 import { create } from "@bufbuild/protobuf";
 import { durationFromMs, timestampFromMs } from "@bufbuild/protobuf/wkt";
@@ -19,8 +19,7 @@ import {
   UpstreamState,
   UpstreamStatusSchema,
 } from "../gen/lotsman/v1/status_pb";
-import { type DevicePeer, DevicePeerSchema, DeviceSchema, type User, UserSchema } from "../gen/lotsman/v1/user_pb";
-import { TAG, type Tier, tierMatches, tierProblem, tierString } from "./profiles";
+import { type Device, DeviceSchema, type Route, type User, UserSchema } from "../gen/lotsman/v1/user_pb";
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -35,7 +34,6 @@ interface Upstream {
   kind: UpstreamKind;
   geo: string;
   provider: string;
-  tags: readonly string[];
   state: UpstreamState;
   latencyMs: number;
 }
@@ -44,8 +42,9 @@ interface Peer {
   id: string;
   user: string;
   device: string;
-  profile: string;
+  route: RouteValue;
   address: string;
+  /** Where its route takes it now, among the user's allowed exits; "" = blocked. */
   upstream: string;
   created: number; // ms since the epoch
   /** Whether the device ever connected; an added one never does. */
@@ -71,48 +70,61 @@ interface Flow {
   upRate: number;
 }
 
+/** A route as the store keeps it (see Route in user.proto). */
+export interface RouteValue {
+  fastest: boolean;
+  strict: boolean;
+  countries: { geo: string; providers: string[] }[];
+}
+
+/** A user's rights (see Rights in user.proto). */
+export interface RightsValue {
+  editRoutes: boolean;
+  showProviders: boolean;
+  /** Upstream names; empty = all. */
+  exits: string[];
+}
+
 interface UserRecord {
   name: string;
   created: number;
   hasLink: boolean;
+  rights: RightsValue;
 }
 
-export interface Profile {
-  name: string;
-  prefer: Tier[];
-}
+const defaultRoute = (): RouteValue => ({ fastest: true, strict: true, countries: [] });
+const defaultRights = (): RightsValue => ({ editRoutes: true, showProviders: true, exits: [] });
 
 // The tables below are pure IIFEs: a production build drops the fake, and
 // without the annotation it would keep their enum reads and calls.
 const upstreams: readonly Upstream[] = /* @__PURE__ */ (() => [
-  { name: "lv-1", kind: UpstreamKind.AWG, geo: "LV", provider: "provider-a", tags: ["near", "eu"], state: UpstreamState.UP, latencyMs: 38 },
-  { name: "al-1", kind: UpstreamKind.OUTLINE, geo: "AL", provider: "provider-b", tags: [], state: UpstreamState.UP, latencyMs: 61 },
-  { name: "nl-1", kind: UpstreamKind.VLESS, geo: "NL", provider: "provider-c", tags: ["eu"], state: UpstreamState.DEGRADED, latencyMs: 140 },
-  { name: "de-1", kind: UpstreamKind.AWG, geo: "DE", provider: "provider-a", tags: ["near", "eu"], state: UpstreamState.DOWN, latencyMs: 45 },
+  { name: "lv-1", kind: UpstreamKind.AWG, geo: "LV", provider: "provider-a", state: UpstreamState.UP, latencyMs: 38 },
+  { name: "lv-2", kind: UpstreamKind.OUTLINE, geo: "LV", provider: "provider-b", state: UpstreamState.UP, latencyMs: 52 },
+  { name: "al-1", kind: UpstreamKind.OUTLINE, geo: "AL", provider: "provider-b", state: UpstreamState.UP, latencyMs: 61 },
+  { name: "nl-1", kind: UpstreamKind.VLESS, geo: "NL", provider: "provider-c", state: UpstreamState.DEGRADED, latencyMs: 140 },
+  { name: "de-1", kind: UpstreamKind.AWG, geo: "DE", provider: "provider-a", state: UpstreamState.DOWN, latencyMs: 45 },
 ])();
 
-const tier = (t: Partial<Tier>): Tier => ({ geo: "", provider: "", tag: "", ...t });
+// alice may do everything; the operator sets bob's routes and lets him use
+// two exits; carol sees countries only.
+const userSeeds: readonly (readonly [string, RightsValue])[] = [
+  ["alice", defaultRights()],
+  ["bob", { editRoutes: false, showProviders: true, exits: ["lv-2", "al-1"] }],
+  ["carol", { editRoutes: true, showProviders: false, exits: [] }],
+];
 
-// Stored profiles, as if `profile add` had made them. `default` has a tier
-// that never applies; `backup` routes new devices through al-1; `fi`'s only
-// tier matches no upstream, so its users are blocked (the daemon keeps such a
-// profile with a warning: its upstream was removed after it was stored).
-const profileSeeds: readonly Profile[] = /* @__PURE__ */ (() => [
-  { name: "default", prefer: [tier({ tag: "near" }), tier({ geo: "LV" }), tier({})] },
-  { name: "streaming", prefer: [tier({ geo: "NL" }), tier({ tag: "eu" })] },
-  { name: "backup", prefer: [tier({ geo: "AL" })] },
-  { name: "fi", prefer: [tier({ geo: "FI" })] },
-])();
-
-// The seeded peers keep these upstreams; peers added later are routed by their profile.
-const peerSeeds = [
-  ["alice", "phone", "default", "lv-1"],
-  ["alice", "laptop", "default", "lv-1"],
-  ["alice", "tv", "streaming", "nl-1"],
-  ["bob", "phone", "default", "al-1"],
-  ["bob", "laptop", "streaming", "nl-1"],
-  ["carol", "phone", "fi", ""], // blocked: no upstream fits her profile
-] as const;
+// Each seeded device with its route and, from it, its exit now.
+const peerSeeds: readonly (readonly [string, string, RouteValue])[] = [
+  // Latvia, else the Netherlands, else any exit: lv-1.
+  ["alice", "phone", { fastest: false, strict: false, countries: [{ geo: "LV", providers: [] }, { geo: "NL", providers: [] }] }],
+  // The default: the fastest of any exit, lv-1.
+  ["alice", "laptop", defaultRoute()],
+  // The faster of provider-b in Latvia (lv-2) and the Netherlands (nl-1, degraded): lv-2.
+  ["alice", "tv", { fastest: true, strict: true, countries: [{ geo: "LV", providers: ["provider-b"] }, { geo: "NL", providers: [] }] }],
+  ["bob", "phone", { fastest: false, strict: true, countries: [{ geo: "AL", providers: [] }] }], // al-1
+  ["bob", "laptop", defaultRoute()], // lv-2, the faster of his two exits
+  ["carol", "phone", { fastest: false, strict: true, countries: [{ geo: "DE", providers: [] }] }], // blocked: de-1 is down
+];
 
 /**
  * Where the simulated connections go (documentation addresses only, and the
@@ -128,8 +140,6 @@ const destinations: readonly (readonly [Protocol, string, number, number])[] = /
   [Protocol.UDP, "10.8.0.1", 53, 0.001],
   [Protocol.ICMP, "192.0.2.1", 0, 0.0001],
 ] as const)();
-
-const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,31}$/;
 
 /** mulberry32: a tiny seeded PRNG returning floats in [0, 1). */
 function random(seed: number): () => number {
@@ -159,7 +169,6 @@ export class Simulation {
   private readonly secretRand: () => number;
   private readonly peers: Peer[];
   private readonly users = new Map<string, UserRecord>();
-  private profiles: Profile[] = profileSeeds.map((p) => ({ name: p.name, prefer: p.prefer.map((t) => ({ ...t })) }));
   private flows: Flow[] = [];
   private nextPeer: number;
   private time: number;
@@ -172,26 +181,30 @@ export class Simulation {
     this.flowRand = random(seed ^ 0x5bd1e995);
     this.secretRand = random(seed ^ 0x27d4eb2f);
     this.time = clock();
-    this.peers = peerSeeds.map(([user, device, profile, upstream], i) => ({
-      id: `peer-${i + 1}`,
-      user,
-      device,
-      profile,
-      address: `10.8.0.${i + 2}`,
-      upstream,
-      created: this.time - (40 - i * 5) * DAY,
-      connected: upstream !== "",
-      // carol never connected; everyone else did recently.
-      lastHandshake: upstream ? this.time - Math.round(this.rand() * 100_000) : 0,
-      downRate: upstream ? this.rand() * MAX_RATE : 0,
-      upRate: upstream ? this.rand() * MAX_RATE * 0.2 : 0,
-      down: upstream ? this.rand() * 4e9 : 0,
-      up: upstream ? this.rand() * 4e8 : 0,
-    }));
-    this.nextPeer = this.peers.length + 1;
-    for (const [i, p] of this.peers.entries()) {
-      if (!this.users.has(p.user)) this.users.set(p.user, { name: p.user, created: p.created - DAY, hasLink: i === 0 });
+    for (const [i, [name, rights]] of userSeeds.entries()) {
+      const first = peerSeeds.findIndex(([user]) => user === name);
+      this.users.set(name, { name, created: this.time - (41 - first * 5) * DAY, hasLink: i === 0, rights: copyRights(rights) });
     }
+    this.peers = peerSeeds.map(([user, device, route], i) => {
+      const upstream = this.exitFor(user, route);
+      return {
+        id: `peer-${i + 1}`,
+        user,
+        device,
+        route: copyRoute(route),
+        address: `10.8.0.${i + 2}`,
+        upstream,
+        created: this.time - (40 - i * 5) * DAY,
+        connected: upstream !== "",
+        // carol never connected; everyone else did recently.
+        lastHandshake: upstream ? this.time - Math.round(this.rand() * 100_000) : 0,
+        downRate: upstream ? this.rand() * MAX_RATE : 0,
+        upRate: upstream ? this.rand() * MAX_RATE * 0.2 : 0,
+        down: upstream ? this.rand() * 4e9 : 0,
+        up: upstream ? this.rand() * 4e8 : 0,
+      };
+    });
+    this.nextPeer = this.peers.length + 1;
     for (const p of this.peers.filter((p) => p.connected)) {
       const count = 4 + Math.floor(this.flowRand() * 5);
       for (let i = 0; i < count; i++) this.flows.push(this.newFlow(p, 0));
@@ -255,15 +268,16 @@ export class Simulation {
 
   /**
    * The current state: everything, or the view of one user. That view has the
-   * user's own peers and the upstreams they may use (here: the ones their peers
-   * are routed through), without the routed and active counts or the traffic
-   * of those upstreams, which would show other users.
+   * user's own peers and their allowed exits, without the routed and active
+   * counts or the traffic of those exits, which would show other users, and
+   * without providers unless the user may see them.
    */
   snapshot(user?: string): StatusSnapshot {
     this.advance();
     const all = user === undefined;
     const peers = all ? this.peers : this.peers.filter((p) => p.user === user);
     const used = this.upstreamsOf(user);
+    const providers = all || this.rights(user).showProviders;
     const sum = (list: Peer[]) =>
       list.reduce(
         (t, p) => ({ down: t.down + p.down, up: t.up + p.up, downRate: t.downRate + p.downRate, upRate: t.upRate + p.upRate }),
@@ -283,8 +297,7 @@ export class Simulation {
             name: u.name,
             kind: u.kind,
             geo: u.geo,
-            provider: u.provider,
-            tags: [...u.tags],
+            provider: providers ? u.provider : "",
             state: u.state,
             latency: u.state === UpstreamState.DOWN ? undefined : durationFromMs(Math.round(u.latencyMs * jitter)),
             lastHandshake: u.kind === UpstreamKind.AWG && u.state !== UpstreamState.DOWN ? timestampFromMs(this.time - 20_000) : undefined,
@@ -315,19 +328,15 @@ export class Simulation {
     });
   }
 
-  /** The user with their devices, one peer per profile. */
+  /** The user with their rights and devices. */
   user(name: string): User {
     const record = this.users.get(name);
-    const devices = new Map<string, DevicePeer[]>();
-    for (const p of this.peers.filter((p) => p.user === name)) {
-      const peer = create(DevicePeerSchema, { peerId: p.id, profile: p.profile, address: p.address, created: timestampFromMs(p.created) });
-      devices.set(p.device, [...(devices.get(p.device) ?? []), peer]);
-    }
     return create(UserSchema, {
       name,
       hasLink: record?.hasLink ?? false,
       created: record ? timestampFromMs(record.created) : undefined,
-      devices: [...devices].map(([device, peers]) => create(DeviceSchema, { name: device, peers })),
+      rights: this.rights(name),
+      devices: this.peers.filter((p) => p.user === name).map((p) => device(p)),
     });
   }
 
@@ -336,38 +345,49 @@ export class Simulation {
     return [...this.users.keys()].map((name) => this.user(name));
   }
 
-  /**
-   * Adds a peer for the user's device with the profile, creating the user if
-   * needed, as `user add` does. An empty device is the default one.
-   */
-  addDevice(user: string, device: string, profile: string): { peerId: string; config: string } {
-    device ||= "default";
-    checkNames("user", user, "device", device, "profile", profile);
-    const p = this.profiles.find((p) => p.name === profile);
-    if (!p) throw new ConnectError(`no such profile: ${profile}`, Code.InvalidArgument);
-    if (this.peers.some((x) => x.user === user && x.device === device && x.profile === profile)) {
-      throw new ConnectError(`${user}/${device} already has profile ${profile}`, Code.AlreadyExists);
+  /** Adds a user without devices, with the default rights, as `user add` does. */
+  addUser(name: string): User {
+    checkNames("user", name);
+    if (this.users.has(name)) throw new ConnectError(`user ${name} already exists`, Code.AlreadyExists);
+    this.advance();
+    this.users.set(name, { name, created: this.time, hasLink: false, rights: defaultRights() });
+    return this.user(name);
+  }
+
+  /** The user's rights; the defaults for a user the store does not know. */
+  rights(user: string): RightsValue {
+    return copyRights(this.users.get(user)?.rights ?? defaultRights());
+  }
+
+  /** Replaces a user's rights, as `user rights` does, and routes their devices again within the exits now allowed. */
+  setRights(user: string, rights: RightsValue): User {
+    const record = this.users.get(user);
+    if (!record) throw new ConnectError(`no such user: ${user}`, Code.NotFound);
+    for (const name of rights.exits) {
+      if (!upstreams.some((u) => u.name === name)) throw new ConnectError(`rights: no upstream named ${name}`, Code.InvalidArgument);
     }
-    const peerId = this.addPeer(user, device, profile).peerId;
-    return { peerId, config: this.config(peerId) };
+    record.rights = { ...copyRights(rights), exits: [...new Set(rights.exits)] };
+    for (const p of this.peers.filter((p) => p.user === user)) p.upstream = this.exitFor(user, p.route);
+    return this.user(user);
   }
 
   /**
-   * Adds a peer for a known profile without the daemon's checks (the callers
-   * make them), creating the user if needed. It is routed by its profile and
-   * never connects.
+   * Adds a device with its route (the default when unset), creating the user
+   * if needed, as `device add` does. The device is routed at once and never connects.
    */
-  addPeer(user: string, device: string, profile: string): DevicePeer {
+  addDevice(user: string, device: string, route: RouteValue = defaultRoute()): { peerId: string; config: string } {
+    checkNames("user", user, "device", device);
+    if (this.hasDevice(user, device)) throw new ConnectError(`device ${user}/${device} already exists`, Code.AlreadyExists);
+    this.checkRoute(user, route);
     this.advance();
-    if (!this.users.has(user)) this.users.set(user, { name: user, created: this.time, hasLink: false });
-    const p = this.profiles.find((p) => p.name === profile);
+    if (!this.users.has(user)) this.users.set(user, { name: user, created: this.time, hasLink: false, rights: defaultRights() });
     const peer: Peer = {
       id: `peer-${this.nextPeer++}`,
       user,
       device,
-      profile,
+      route: copyRoute(route),
       address: this.freeAddress(),
-      upstream: p ? selectUpstream(p) : "",
+      upstream: this.exitFor(user, route),
       created: this.time,
       connected: false,
       lastHandshake: 0,
@@ -377,23 +397,27 @@ export class Simulation {
       up: 0,
     };
     this.peers.push(peer);
-    return create(DevicePeerSchema, { peerId: peer.id, profile, address: peer.address, created: timestampFromMs(peer.created) });
+    return { peerId: peer.id, config: this.config(peer.id) };
   }
 
-  /** Removes the device's peer of that profile, or every peer of the device when profile is empty. */
-  removeDevice(user: string, device: string, profile: string): void {
-    device ||= "default";
-    if (this.removePeers(user, device, profile) === 0) throw new ConnectError("no such device or profile", Code.NotFound);
+  /** Replaces a device's route, as `device route` does: the device moves to the exit it now picks; its config stays. */
+  setRoute(user: string, deviceName: string, route: RouteValue): Device {
+    const peer = this.peers.find((p) => p.user === user && p.device === deviceName);
+    if (!peer) throw new ConnectError(`no such device: ${user}/${deviceName}`, Code.NotFound);
+    this.checkRoute(user, route);
+    peer.route = copyRoute(route);
+    peer.upstream = this.exitFor(user, route);
+    return device(peer);
   }
 
-  /** Removes one profile of a device, or all of them when `profile` is empty; how many peers went. */
-  removePeers(user: string, device: string, profile: string): number {
-    const gone = this.peers.filter((p) => p.user === user && p.device === device && (!profile || p.profile === profile));
+  /** Removes a device: its config stops working. */
+  removeDevice(user: string, device: string): void {
+    const gone = this.peers.filter((p) => p.user === user && p.device === device);
+    if (gone.length === 0) throw new ConnectError(`no such device: ${user}/${device}`, Code.NotFound);
     this.dropPeers(gone);
-    return gone.length;
   }
 
-  /** Removes the user with every peer and the link. */
+  /** Removes the user with every device and the link. */
   removeUser(user: string): void {
     if (!this.users.delete(user)) throw new ConnectError("no such user", Code.NotFound);
     this.dropPeers(this.peers.filter((p) => p.user === user));
@@ -420,54 +444,38 @@ export class Simulation {
     return clientConfig(p.id, p.address);
   }
 
-  /** The stored profiles, their warnings against the upstreams, and the upstreams' labels. */
-  listProfiles(): { profiles: Profile[]; warnings: string[]; upstreams: { name: string; geo: string; provider: string; tags: string[] }[] } {
-    return {
-      profiles: this.profiles,
-      warnings: profileWarnings(this.profiles),
-      upstreams: upstreams.map((u) => ({ name: u.name, geo: u.geo, provider: u.provider, tags: [...u.tags] })),
-    };
-  }
-
-  /** Creates or replaces a profile, as `profile add` and `profile set` do; returns every profile's warnings. */
-  putProfile(profile: Profile): string[] {
-    if (profile.name === "") throw new ConnectError("profile: name is required", Code.InvalidArgument);
-    if (!NAME_RE.test(profile.name)) {
-      throw new ConnectError(`invalid profile: profile name "${profile.name}" must match ${NAME_RE.source}`, Code.InvalidArgument);
-    }
-    // Every tier must match an upstream now, as the daemon checks a write.
-    for (const [j, t] of profile.prefer.entries()) {
-      const problem = tierProblem(t, upstreams);
-      if (problem?.kind === "value") {
-        const rule = problem.field === "tag" ? `must match ${TAG.source}` : "must be at most 64 characters without spaces, commas or =";
-        throw new ConnectError(`invalid profile: profile "${profile.name}": tier ${j + 1}: ${problem.field} "${t[problem.field]}" ${rule}`, Code.InvalidArgument);
-      }
-      if (problem) throw new ConnectError(`invalid profile: profile "${profile.name}": tier ${j + 1} ${tierString(t)} matches no upstream`, Code.InvalidArgument);
-    }
-    const stored = { name: profile.name, prefer: profile.prefer.map((t) => ({ geo: t.geo, provider: t.provider, tag: t.tag })) };
-    const i = this.profiles.findIndex((p) => p.name === profile.name);
-    // Names are unique ignoring case, as in the store.
-    if (i < 0 && this.profiles.some((p) => p.name.toLowerCase() === profile.name.toLowerCase())) {
-      throw new ConnectError(`profile "${profile.name}": another profile has this name, ignoring case`, Code.AlreadyExists);
-    }
-    if (i < 0) this.profiles.push(stored);
-    else this.profiles[i] = stored;
-    return profileWarnings(this.profiles);
-  }
-
-  /** Deletes a profile no peer uses. */
-  deleteProfile(name: string): void {
-    if (!this.profiles.some((p) => p.name === name)) throw new ConnectError(`profile "${name}" not found`, Code.NotFound);
-    if (this.peers.some((p) => p.profile === name)) {
-      throw new ConnectError(`profile "${name}" is in use: remove its peers first`, Code.FailedPrecondition);
-    }
-    this.profiles = this.profiles.filter((p) => p.name !== name);
-  }
-
-  /** The upstreams `user` may use; every upstream when `user` is unset. */
+  /** The upstreams `user` may use (their rights' exits; stale names are ignored); every upstream when `user` is unset. */
   upstreamsOf(user?: string): Set<string> {
-    if (user === undefined) return new Set(upstreams.map((u) => u.name));
-    return new Set(this.peers.filter((p) => p.user === user && p.upstream).map((p) => p.upstream));
+    return new Set(this.allowedExits(user).map((u) => u.name));
+  }
+
+  private allowedExits(user?: string): Upstream[] {
+    const exits = user === undefined ? [] : this.rights(user).exits;
+    return upstreams.filter((u) => exits.length === 0 || exits.includes(u.name));
+  }
+
+  /** Where `route` takes a device of `user` now: see selectExit. */
+  private exitFor(user: string, route: RouteValue): string {
+    return selectExit(route, this.allowedExits(user));
+  }
+
+  /**
+   * The daemon's checks of a route being written: every country has an exit
+   * the user may use, every provider one in that country, and nothing is listed twice.
+   */
+  private checkRoute(user: string, route: RouteValue): void {
+    const exits = this.allowedExits(user);
+    const seen = new Set<string>();
+    for (const c of route.countries) {
+      const invalid = (why: string) => new ConnectError(`route: ${why}`, Code.InvalidArgument);
+      if (seen.has(c.geo)) throw invalid(`country ${c.geo} is listed twice`);
+      seen.add(c.geo);
+      const inCountry = exits.filter((u) => u.geo === c.geo);
+      if (inCountry.length === 0) throw invalid(`no exit in country ${c.geo}`);
+      if (new Set(c.providers).size !== c.providers.length) throw invalid(`a provider is listed twice in ${c.geo}`);
+      const missing = c.providers.find((p) => !inCountry.some((u) => u.provider === p));
+      if (missing !== undefined) throw invalid(`no exit of provider ${missing} in ${c.geo}`);
+    }
   }
 
   /** The peer's user, or undefined for an unknown peer. */
@@ -506,19 +514,13 @@ export class Simulation {
     return create(HistoryResponseSchema, { step: durationFromMs(step), samples });
   }
 
-  /** The profiles users may choose from, in the order the daemon lists them. */
-  profileNames(): string[] {
-    return this.profiles.map((p) => p.name);
-  }
-
   /** The device names of `user`, in the order they were added. */
   devicesOf(user: string): string[] {
-    return [...new Set(this.peers.filter((p) => p.user === user).map((p) => p.device))];
+    return this.peers.filter((p) => p.user === user).map((p) => p.device);
   }
 
-  /** Whether `user` has the device with this profile. */
-  hasPeer(user: string, device: string, profile: string): boolean {
-    return this.peers.some((p) => p.user === user && p.device === device && p.profile === profile);
+  hasDevice(user: string, device: string): boolean {
+    return this.peers.some((p) => p.user === user && p.device === device);
   }
 
   private dropPeers(gone: readonly Peer[]): void {
@@ -541,7 +543,6 @@ export class Simulation {
       peerId: p.id,
       user: p.user,
       device: p.device,
-      profile: p.profile,
       address: p.address,
       upstream: p.upstream,
       lastHandshake: p.lastHandshake ? timestampFromMs(p.lastHandshake) : undefined,
@@ -562,49 +563,48 @@ function connection(f: Flow): Connection {
   });
 }
 
+function device(p: Peer): Device {
+  return create(DeviceSchema, { peerId: p.id, name: p.device, address: p.address, created: timestampFromMs(p.created), route: p.route });
+}
+
+/** A route as the store keeps it, from the API's message; unset is the default route. */
+export function routeValue(route: Route | undefined): RouteValue {
+  if (!route) return defaultRoute();
+  return { fastest: route.fastest, strict: route.strict, countries: route.countries.map((c) => ({ geo: c.geo, providers: [...c.providers] })) };
+}
+
+function copyRoute(r: RouteValue): RouteValue {
+  return { fastest: r.fastest, strict: r.strict, countries: r.countries.map((c) => ({ geo: c.geo, providers: [...c.providers] })) };
+}
+
+function copyRights(r: RightsValue): RightsValue {
+  return { editRoutes: r.editRoutes, showProviders: r.showProviders, exits: [...r.exits] };
+}
+
+/** What a tier matches: an upstream with this geo and provider; an empty field matches any. */
+interface Match {
+  geo: string;
+  provider: string;
+}
+
 /**
- * Per tier, as the daemon counts them: the upstreams it matches, those for
- * which it is the first match (its own), and the earlier tiers that took the rest.
+ * The daemon's choice, simplified: the route becomes tiers (each country one
+ * in order, or all of them one when fastest; any exit for an empty route, and
+ * as a last tier unless strict), and the first tier with an exit up wins,
+ * lowest latency first. A degraded exit is the last resort. "" when nothing fits: blocked.
  */
-function tierSizes(p: Profile): { matched: number; own: number; shadowers: number[] }[] {
-  const tiers = p.prefer.map(() => ({ matched: 0, own: 0, shadowers: [] as number[] }));
-  for (const u of upstreams) {
-    let first = -1;
-    for (const [j, t] of p.prefer.entries()) {
-      if (!tierMatches(t, u)) continue;
-      const size = tiers[j]!;
-      size.matched++;
-      if (first < 0) {
-        first = j;
-        size.own++;
-      } else if (!size.shadowers.includes(first)) size.shadowers.push(first);
+function selectExit(route: RouteValue, candidates: readonly Upstream[]): string {
+  const any: Match[] = [{ geo: "", provider: "" }];
+  const matches = (c: RouteValue["countries"][number]): Match[] =>
+    c.providers.length > 0 ? c.providers.map((provider) => ({ geo: c.geo, provider })) : [{ geo: c.geo, provider: "" }];
+  const tiers = route.countries.length === 0 ? [any] : route.fastest ? [route.countries.flatMap(matches)] : route.countries.map(matches);
+  if (!route.strict && route.countries.length > 0) tiers.push(any);
+  for (const state of [UpstreamState.UP, UpstreamState.DEGRADED]) {
+    for (const tier of tiers) {
+      const fits = (u: Upstream) => u.state === state && tier.some((m) => (!m.geo || m.geo === u.geo) && (!m.provider || m.provider === u.provider));
+      const best = candidates.filter(fits).sort((a, b) => a.latencyMs - b.latencyMs)[0];
+      if (best) return best.name;
     }
-  }
-  for (const t of tiers) t.shadowers.sort((a, b) => a - b);
-  return tiers;
-}
-
-/** The daemon's profile warnings, word for word: tiers that match nothing, or only what earlier tiers took. */
-export function profileWarnings(profiles: readonly Profile[]): string[] {
-  const out: string[] = [];
-  for (const p of profiles) {
-    for (const [j, t] of tierSizes(p).entries()) {
-      const m = tierString(p.prefer[j]!);
-      if (t.matched === 0) out.push(`profile "${p.name}": tier ${j + 1} ${m} matches no upstream and is ignored`);
-      else if (t.own === 0) {
-        const by = t.shadowers.map((k) => `tier ${k + 1} ${tierString(p.prefer[k]!)}`).join(", ");
-        out.push(`profile "${p.name}": tier ${j + 1} ${m} never applies: every upstream it matches is taken by ${by}`);
-      }
-    }
-  }
-  return out;
-}
-
-/** The upstream a new peer of the profile gets: the first tier with one up, lowest latency first; "" if none. */
-function selectUpstream(p: Profile): string {
-  for (const t of p.prefer.length > 0 ? p.prefer : [{ geo: "", provider: "", tag: "" }]) {
-    const up = upstreams.filter((u) => u.state === UpstreamState.UP && tierMatches(t, u)).sort((a, b) => a.latencyMs - b.latencyMs);
-    if (up[0]) return up[0].name;
   }
   return "";
 }

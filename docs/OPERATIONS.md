@@ -95,8 +95,7 @@ docker run -d --name lotsman \
   -p 51820:51820/udp \
   -v /etc/lotsman:/etc/lotsman:ro -v lotsman-state:/var/lib/lotsman \
   lotsman
-docker exec lotsman lotsman profile add nl geo=NL
-docker exec lotsman lotsman user add alice -profile nl
+docker exec lotsman lotsman device add alice/phone NL
 ```
 
 The two `--sysctl` flags matter: `/proc/sys` is read-only inside the container, so Lotsman can
@@ -117,8 +116,10 @@ sudo systemctl try-restart lotsman-web      # the web panel, if installed, runs 
 sudo lotsman upstream status
 ```
 
-Coming from a version that kept profiles in `lotsman.yaml`, `config check` fails until they are
-moved; see [Moving profiles out of lotsman.yaml](#moving-profiles-out-of-lotsmanyaml).
+Coming from a version with profiles, `config check` refuses the `tags:` of upstreams and wants
+`geo` and `provider` on every one. The database migration drops every peer, its traffic history
+and the profiles, keeping users and their links: add the devices again with `device add` and hand
+out the new configs.
 
 If the new version changes the database schema, the daemon snapshots the old database to
 `state_dir/lotsman.db.v<N>-<timestamp>.bak` before migrating. To roll back: stop the service,
@@ -137,15 +138,15 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | Key | Meaning |
 |---|---|
 | `listen` | Numeric UDP address and family the downstream device binds to; `0.0.0.0` is IPv4-only and `[::]` is IPv6-only. |
-| `awg` | AmneziaWG generation of the listener, for all clients: `3` (default; header protection and random trailers, Amnezia app 5.0.1.5 or later) or `2` (AWG 2.0). Restart only. Changing it invalidates issued client configs; re-show them with `user show`. |
+| `awg` | AmneziaWG generation of the listener, for all clients: `3` (default; header protection and random trailers, Amnezia app 5.0.1.5 or later) or `2` (AWG 2.0). Restart only. Changing it invalidates issued client configs; re-show them with `device show`. |
 | `endpoint` | Nonempty host and numeric UDP port (1–65535) written into client configs; hostname, IPv4, and bracketed IPv6 forms are supported. |
 | `subnet` | Canonical IPv4 network prefix, /24 or larger; the first host address is the gateway. |
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
 | `state_dir` | Server identity, SQLite database, pid, status and `serve.lock` files, cached dynamic Outline keys. |
-| `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, `outline` or `vless`), `conf` path (the provider's AmneziaWG config, for `outline` a file with the access key or its `ssconf://` URL, for `vless` a file with the `vless://` link), free-form `geo` and `provider` labels, `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates), and for the proxy kinds `outline` and `vless` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams) and [VLESS upstreams](#vless-upstreams)). |
+| `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, `outline` or `vless`), `conf` path (the provider's AmneziaWG config, for `outline` a file with the access key or its `ssconf://` URL, for `vless` a file with the `vless://` link), the required labels routes select by, `geo` (the exit's country, ISO 3166-1 alpha-2 in capitals, such as `NL`) and `provider` (lowercase letters, digits and `-`, up to 32 characters), and for the proxy kinds `outline` and `vless` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams) and [VLESS upstreams](#vless-upstreams)). |
 | `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline and VLESS upstream; default `1.1.1.1:53`), `down_after`, `up_after`, and the optional `transfer` block (off when absent; see [Throttled upstreams](#throttled-upstreams-transfer-probe)). |
 | `history` | `minute_retention` (default `168h`, 7 days; at least `1h`) and `hour_retention` (default `2160h`, 90 days; not shorter than `minute_retention`): how long the [history](#history) keeps samples of a minute and of an hour. Go durations, so hours (`168h`), not days. Applies on reload. |
-| `users` | `max_devices`: how many devices a user may have when adding one on their [page](#user-links), default 5; another profile on a device they have does not count. `0` turns adding off, another profile included. The operator's commands are not limited. |
+| `users` | `max_devices`: how many devices a user may have when adding one on their [page](#user-links), default 5. `0` turns adding off. The operator's commands are not limited. |
 
 `listen` binds exactly the configured numeric address; hostnames and an omitted
 host are unsupported. An occupied port, unavailable family, or unassigned address
@@ -200,17 +201,14 @@ rules when ownership is clear. If a legacy rule's deletion could also remove a
 foreign rule, startup stops with a manual-cleanup error. Uninstall also reports
 the collision and preserves ambiguous interfaces and routes for inspection.
 
-Profiles are not in this file: they live in the database, see [Profiles](#profiles). A config that
-still has the `profiles:` key of earlier versions fails `config check` and `serve` with the command
-that moves them.
+Users, devices and their routes are not in this file: they live in the database, see
+[Users and devices](#users-and-devices).
 
 `systemctl reload lotsman` (SIGHUP) applies the file live, without dropping tunnels: upstreams are
 added, removed or replaced (a changed provider config counts as a replacement), `health` is swapped
-in, and every client is re-evaluated. A reload that takes the last upstream from a stored profile the
-running config serves is rejected as a whole; change the profile first. A profile that has no
-upstream anyway (say, after a restart with an upstream removed) does not stop the start or later
-reloads: it is logged as a warning and its peers stay blocked until the profile or the upstreams
-change. A replacement is read, validated and its
+in, and every client is re-evaluated against its route. Removing an upstream that routes name never
+rejects a reload: such a route simply matches less, and a device left without a matching upstream
+is blocked until its route or the upstreams change. A replacement is read, validated and its
 endpoint resolved before the running upstream is touched (the lookup is bounded by the probe
 timeout and does not block status, metrics or client changes); if any of that fails, including an
 unreadable provider file, the old upstream keeps running and routing its clients, and the error is
@@ -223,12 +221,6 @@ blocked for a moment and rerouted on the same pass. `listen`, `subnet` and `stat
 live; a reload that touches them is rejected as a whole and logged. A config that fails validation is
 logged and ignored. A changed client MTU only reaches clients that re-import their config.
 
-A peer whose profile is missing from the database (only possible for a database from before
-profiles moved there, until they are imported) is blocked on the next reconciliation, even if an
-upstream it used stays healthy. Its routes and flow pins are removed and its current assignment is
-cleared; reconciliation reports the missing profile until it is added or the peer is removed, and
-`config check` and `profile list` warn about it.
-
 If route cleanup fails, the daemon logs the error and retries on subsequent reconciliations.
 It retains the previous assignment in status until cleanup succeeds, and finishes removing old
 routes and flow pins before routing that peer again, including through a replacement upstream
@@ -239,13 +231,13 @@ revokes its downstream key even while route cleanup is pending.
 
 ### Outline upstreams
 
-An Outline (Shadowsocks) server is an upstream like any other: profiles prefer it by its labels,
+An Outline (Shadowsocks) server is an upstream like any other: routes select it by its labels,
 health decides, flows are pinned and fail-closed applies. Put the access key the Outline manager
 gave you, one `ss://…` line, into a file and point `conf` at it:
 
 ```yaml
 upstreams:
-  - {name: ol-fi, kind: outline, conf: /etc/lotsman/upstreams/ol-fi.key, geo: FI, tags: [eu]}
+  - {name: ol-fi, kind: outline, conf: /etc/lotsman/upstreams/ol-fi.key, geo: FI, provider: acme}
 ```
 
 ```bash
@@ -369,7 +361,7 @@ one `vless://…` line, into a file and point `conf` at it:
 
 ```yaml
 upstreams:
-  - {name: vl-nl, kind: vless, conf: /etc/lotsman/upstreams/vl-nl.key, geo: NL, tags: [eu]}
+  - {name: vl-nl, kind: vless, conf: /etc/lotsman/upstreams/vl-nl.key, geo: NL, provider: beta}
 ```
 
 ```bash
@@ -514,98 +506,92 @@ A helper that stops answering the daemon for 2 s is killed and handled the same 
 stack stopped because reading its TUN failed exits with status 1 (`read tun, the upstream stops`
 just before) and is restarted too.
 
-## Profiles
+## Users and devices
 
-A profile is what a client's traffic prefers: an ordered list of tiers. The first tier with a
-healthy upstream wins, and within a tier the lowest latency, so a tag such as `near` groups several
-countries into one tier. Profiles live in the database and change without a restart:
-
-```bash
-lotsman profile add nl geo=NL                       # one tier
-lotsman profile add eu tag=near tag=eu any          # near, else eu, else anything
-lotsman profile add de geo=DE,provider=acme geo=DE  # an upstream must match every key of a tier
-lotsman profile add auto                            # no tiers: any upstream
-lotsman profile set eu tag=eu                       # replaces every tier
-lotsman profile list
-lotsman profile rename nl Netherlands               # its peers follow
-lotsman profile rm de                               # refused while a peer uses it
-```
-
-Each argument after the name is one tier, best first, so no quoting is needed: `key=value` pairs
-joined by commas, with keys `geo`, `provider` and `tag`, or `any` for every upstream. `profile list`
-prints tiers in the same form. Names are Latin letters, digits and `-`, up to 32 characters, and
-users see them, so `Netherlands` reads better than `nl`. Names are unique ignoring case: with
-`Netherlands` stored, `netherlands` is refused.
-
-`profile rename OLD NEW` renames a profile and moves its peers to the new name in one transaction.
-Nothing a client holds changes: a peer keeps its keys, address and traffic history, so its config
-stays valid and its tunnel stays up. Afterwards `user show`, `user rm` and `user add` take the new
-name; the `profile` label of the peer metrics changes with it. A config saved from the web panel
-after the rename gets a file name from the new profile name, and the Amnezia apps take the tunnel's
-name from that file name, cut to 15 characters.
-
-`profile add` and `set` check the profile against the upstreams in `lotsman.yaml`: every tier must
-match at least one upstream, so a typo in a geo or provider is refused, and a `geo` or `provider`
-value is at most 64 characters without spaces, commas or `=`. A tier that only matches upstreams an
-earlier tier already took is stored with a warning (also in `config check` and the start and reload
-logs). A stored tier that matches nothing after an upstream is removed also only warns, so an
-upstream can be removed without editing every profile; only a profile left with no upstream at all
-fails the check. The daemon checks the stored profiles again at start and on every reload
-against the config it applies. A change applies at once when the daemon is running: like `user
-add`, the command sends SIGUSR1 and the daemon reroutes the clients of that profile on the spot,
-keeping their open connections pinned to an upstream that is still alive. `user add -profile`
-must name a stored profile.
-
-### Moving profiles out of lotsman.yaml
-
-Earlier versions kept profiles under `profiles:` in `lotsman.yaml`. After upgrading, `config
-check` names the command that copies them into the database; run it once, then delete the key:
+A device is one tunnel: one key, one address, one client config. Each device has a *route*, which
+picks its exit among its user's allowed exits; the route lives on the gateway, so changing it never
+touches the client config or the tunnel. Users, their rights and devices live in the database and
+change without a restart:
 
 ```bash
-sudo lotsman -config /etc/lotsman/lotsman.yaml profile import /etc/lotsman/lotsman.yaml
-sudoedit /etc/lotsman/lotsman.yaml   # delete profiles:
-sudo lotsman config check
-```
-
-`profile import FILE` reads the `profiles:` key of FILE, validates every profile before storing
-any, and skips profiles already in the database, so running it again is harmless. Until the
-profiles are imported, existing clients are blocked.
-
-## Users
-
-```bash
-lotsman user add alice -profile nl                   # config for alice's "default" device
-lotsman user add alice -profile nl -device phone -qr # her phone: own key, QR on stderr
-lotsman user add alice -profile eu -device phone     # a second profile on the same phone
-lotsman user show alice -profile nl -device phone
+lotsman device add alice/phone -qr          # creates alice; her phone: the fastest of any upstream
+lotsman device add alice/laptop NL DE:acme  # NL first, else acme in DE, else blocked
+lotsman device route alice/laptop -fastest -fallback NL DE  # the faster of NL and DE, else any
+lotsman device route alice/laptop           # back to the fastest of any upstream
+lotsman device show alice/laptop
 lotsman user list
-lotsman user rm alice -profile eu -device phone      # one config
-lotsman user rm alice -device phone                  # every config of that device
-lotsman user rm alice                                # everything
+lotsman device rm alice/laptop
+lotsman user add bob                        # a user without devices, for their rights or link
+lotsman user rm alice                       # her devices and her link too
 ```
 
-`user rm` removes the wider set only when `-profile` is left out; an explicitly empty `-profile ""`
-(for instance an unset shell variable) is rejected. `user add` validates the profile and the
-upstream configs before it writes anything, and creates the user together with the first config in
-one step, so a rejected command leaves nothing behind. If it cannot write the config to stdout
-after saving it, it says so; print it again with `user show`.
+A device is named `USER/DEVICE`; the first `/` separates the two, so a user name has none.
+`device add` creates the user if needed, validates the route and the upstream configs before it
+writes anything, and creates the user together with the device in one step, so a rejected command
+leaves nothing behind. If it cannot write the config to stdout after saving it, it says so; print
+it again with `device show`.
 
 WireGuard binds one key to one endpoint, so a config must never be active on two devices at the
-same time — give each device its own with `-device`. A device has one config per profile; which
-config is active decides where the traffic exits. The config goes to stdout (redirect it to a
-file), the QR code to stderr. Adding or removing takes effect immediately when the daemon is
-running: the CLI sends it SIGUSR1, which reconciles users and profiles from the database but does
-not re-read `lotsman.yaml` (use `systemctl reload lotsman` for that). Before signalling, the CLI checks that the
-pid in `lotsman.pid` belongs to this same `lotsman` executable; otherwise it signals nothing, says
-why on stderr, and the change applies on the next reconcile or start. After replacing the binary,
-restart the daemon. Run these commands as the daemon's user (normally root).
+same time: give each device its own. The config goes to stdout (redirect it to a file), the QR code
+to stderr. Changes take effect immediately when the daemon is running: the CLI sends it SIGUSR1,
+which reconciles users, devices, routes and rights from the database but does not re-read
+`lotsman.yaml` (use `systemctl reload lotsman` for that). A new route moves the device's new
+connections on the spot and keeps its open ones pinned to an upstream that is still alive. Before
+signalling, the CLI checks that the pid in `lotsman.pid` belongs to this same `lotsman`
+executable; otherwise it signals nothing, says why on stderr, and the change applies on the next
+reconcile or start. After replacing the binary, restart the daemon. Run these commands as the
+daemon's user (normally root).
+
+### Routes
+
+A route is the arguments after the flags: countries, each an upstream's `geo`, optionally narrowed
+to providers as `COUNTRY:PROVIDER,PROVIDER` (`DE:acme,beta`); a country without providers means
+every provider there. The countries are in order, best first: the first country with a healthy
+upstream wins, and within it the lowest latency. With `-fastest` every listed country is one
+choice and the lowest latency of all of them wins. When no listed country has a healthy upstream
+the device is blocked (fail closed); with `-fallback` it uses any allowed upstream instead. A route
+without countries is the fastest of any allowed upstream, the default of a new device. `user list`
+prints routes as `NL > DE:acme` (in order), `fastest NL DE` and `… > any` (with `-fallback`).
+
+A route being written is checked against the upstreams in `lotsman.yaml` and the user's
+[exits](#rights): every country must have an upstream, for a user with restricted exits an allowed
+one, every provider one in that country, and nothing may be listed twice, so a typo is refused. A
+stored route may go stale later, when an upstream is removed: it then simply matches less, and a
+device left without a matching upstream is blocked. Geos are accepted in lowercase and stored in
+capitals.
+
+### Rights
+
+```bash
+lotsman user rights alice                                    # show them
+lotsman user rights alice -edit-routes=false -exits ac-nl,ac-de
+lotsman user rights alice -show-providers=false
+lotsman user rights alice -exits all
+```
+
+Each flag changes one right and the others stay; the command prints the result. A new user may
+edit their routes, sees providers and may use every upstream.
+
+- `-edit-routes`: whether the user sets their devices' routes on their [page](#user-links).
+  Without it the page shows the routes read-only, and a device the user adds gets the default
+  route.
+- `-show-providers`: whether the user's page shows providers. Without it every upstream's
+  provider is empty in their view and their routes may name countries only. Upstream names still
+  reach the user's page (they key the history), so an operator who hides providers should name
+  upstreams neutrally (`nl1` rather than `acme-nl`).
+- `-exits`: the upstreams the user's devices may use, by name and joined by commas, or `all` (the
+  default). The daemon narrows every route to them before choosing, `-fallback` included, and the
+  user's page shows only them and the upstreams a device of theirs is still routed through. Names
+  must exist when written; one removed from the config later is ignored, so a list of only removed
+  names allows nothing and the user's devices are blocked. Changing the exits leaves the routes as
+  they are: they match less, or nothing.
 
 ### User links
 
 A user's link opens their own page in the [web panel](#web-panel), `<public_url>/u#<token>`.
-There they see their devices and the exits their profiles use, with their availability, download
-each config (text and QR code), add or remove their own devices and switch a device's profile (add
-the new profile, then remove the old one).
+There they see their devices, each with its current exit, and their allowed exits with their
+availability; download each config (text and QR code); add or remove their own devices; and, with
+the [right](#rights) to, change a device's route.
 
 ```bash
 lotsman user link alice                  # print a new link; her previous one stops working
@@ -625,9 +611,11 @@ revoked link stops working within 30 seconds, and a live view it opened within a
 Users are limited on their page, not in the CLI:
 
 - `users.max_devices` in `lotsman.yaml` (default 5) caps the devices a user can have when adding
-  one; another profile on an existing device does not count, so profile switches keep working. `0`
-  turns adding off, another profile included (`permission_denied`); users can still remove
-  devices. Reload with `systemctl reload lotsman`.
+  one; a new route is no new device. `0` turns adding off (`permission_denied`); users can still
+  remove devices and change routes. Reload with `systemctl reload lotsman`.
+- Their [rights](#rights): without `edit_routes` a route of theirs is `permission_denied`, without
+  `show_providers` a route naming providers is `invalid_argument`, and a route outside their exits
+  is `invalid_argument`.
 - At most 10 additions at once, then one every 6 minutes, per user (`resource_exhausted` past it).
   Both limits answer `resource_exhausted` with a `SelfServiceLimit` detail that names the limit and
   carries `max_devices` or `retry_after`.
@@ -664,7 +652,7 @@ a proxy upstream has none and shows `-`. `ROUTED` counts clients whose traffic i
 database is routed somewhere whether or not it is connected. `ACTIVE` counts those with a
 WireGuard handshake in the last three minutes, which is what "connected" means for WireGuard;
 `user list` shows each client's last handshake and current upstream (`blocked` when no healthy
-upstream matches its profile, `-` when the daemon is not running).
+upstream matches its route, `-` when the daemon is not running).
 
 ### Control socket
 
@@ -687,19 +675,18 @@ group and restart. The unit provides `/run/lotsman` (`RuntimeDirectory=lotsman`)
 
 - `StatusService.Watch`: the gateway's status and traffic, at once and then every second or
   `interval`.
-- `ProfileService` (`List`, `Put`, `Delete`): the [profiles](#profiles) of `lotsman profile`, with
-  the same checks and warnings. `Put` creates or replaces one and reroutes its clients before it
-  answers. `List` also returns the running upstreams' labels (`geo`, `provider`, `tags`), which the
-  panel suggests in its tier fields. Errors: `invalid_argument` for a profile the checks refuse (no
-  name, a tier that matches no upstream), `failed_precondition` for deleting one that peers use, `not_found` for one that does
-  not exist.
 - `ConnectionService.Watch`: [live connections](#live-connections), for one `peer_id` or every
   peer. Errors: `not_found` for an unknown `peer_id`, `unavailable` when the kernel's table cannot
   be read.
 - `HistoryService` (`Upstream`, `Peer`): the [history](#history) of an upstream or a `peer_id`.
   Errors: `invalid_argument` for a bad range or step, `not_found` for an unknown name.
-- `UserService` and `UserSelfService`: users, devices, configs and [links](#user-links), and a
-  user's own view, history included.
+- `UserService` (`List`, `AddUser`, `SetRights`, `AddDevice`, `SetRoute`, `RemoveDevice`,
+  `RemoveUser`, `GetConfig`, `IssueLink`, `RevokeLink`): users, their [rights](#rights), devices
+  with their [routes](#routes), configs and [links](#user-links), with the CLI's checks.
+  `SetRoute` and `SetRights` move the devices before they answer. Errors: `invalid_argument` for a
+  route or exits the checks refuse, `already_exists` for a taken user or device name, `not_found`
+  for a missing one.
+- `UserSelfService`: a user's own view, devices, routes within their rights and history.
 
 Every other RPC returns `unimplemented`. Self-service RPCs act for the user named in the `Lotsman-User` request header,
 which only the [web panel](#web-panel) sets.
@@ -720,11 +707,8 @@ warning at start.
 The operator console is under `/admin`. **Upstreams** lists each upstream's state, latency, live
 rate and 7-day availability; an upstream's own page adds the peers routed through it, the last 5
 minutes' rate and its history over 1 hour to 90 days (availability, average rate, latency).
-**Profiles** creates, edits and deletes profiles, with the daemon's warnings and the matching
-`lotsman profile add` or `set` command; the tier fields suggest the upstreams' geo, provider and tag
-values that fit the rest of the tier, and a tier that matches no upstream is flagged before saving; a profile that devices use cannot be deleted. **Users** lists users
-with their devices and profiles: add a device (which creates its user), remove devices or whole
-users, show a device's config as a QR code, as text or as a `.conf` download, and issue or revoke a
+**Users** lists users with their devices, routes and current exits: add a device (which creates
+its user), edit a device's route, set a user's [rights](#rights), remove devices or whole users, show a device's config as a QR code, as text or as a `.conf` download, and issue or revoke a
 user's [link](#user-links). A link is shown once, when it is issued: only its hash is kept, so to
 see it again, issue a new one, which ends the old one. **Connections** shows the open connections
 of one peer or of all peers, live from conntrack: nothing is stored, destinations are `IP:port`
@@ -955,8 +939,8 @@ metrics:
 ```
 
 `GET /metrics` serves the Prometheus text format. The endpoint is off unless `metrics.listen` is
-set, and an unspecified address (`0.0.0.0`, `::`) is refused: the per-client series carry user,
-device and profile names. On the gateway address every connected client can read it (Lotsman's
+set, and an unspecified address (`0.0.0.0`, `::`) is refused: the per-client series carry user
+and device names. On the gateway address every connected client can read it (Lotsman's
 firewall lets clients reach only that address and port on the host); on loopback only a scraper on
 the host can. Changing `metrics.listen` needs a restart.
 
@@ -976,9 +960,9 @@ the host can. Changing `metrics.listen` needs a restart.
 | `lotsman_upstream_clients` | `upstream` | clients routed through it, connected or not |
 | `lotsman_upstream_active_clients` | `upstream` | of those, with a handshake in the last 3 minutes |
 | `lotsman_upstream_receive_bytes_total`, `…_transmit_bytes_total` | `upstream` | AWG only: provider tunnel counters |
-| `lotsman_peer_receive_bytes_total`, `…_transmit_bytes_total` | `user`, `device`, `profile` | client tunnel counters |
-| `lotsman_peer_last_handshake_timestamp_seconds` | `user`, `device`, `profile` | 0 if never |
-| `lotsman_peer_upstream` | `user`, `device`, `profile`, `upstream` | 1 for the current upstream |
+| `lotsman_peer_receive_bytes_total`, `…_transmit_bytes_total` | `user`, `device` | client tunnel counters |
+| `lotsman_peer_last_handshake_timestamp_seconds` | `user`, `device` | 0 if never |
+| `lotsman_peer_upstream` | `user`, `device`, `upstream` | 1 for the current upstream |
 | `lotsman_reroutes_total` | `upstream` | routes to it, first assignment included |
 | `lotsman_reloads_total` | `result` | `ok` / `error` |
 | `lotsman_firewall_repairs_total` | | firewall reinstalls after another tool removed Lotsman's rules |
@@ -1088,13 +1072,14 @@ the host anyway (`conntrack -L`); Lotsman adds no record of it.
   `(up_after − 1) × interval`: 15–38 s at the defaults. With several `health.probe`
   targets a round tries all of them at once and passes if any answers, reporting the fastest, so
   one blocked or rate-limited destination does not take an upstream down. `probe` applies on reload.
-- A client stays on its upstream while it is healthy, even if a sibling in the same tier becomes
-  faster. It moves when its upstream goes down, or when an upstream in a *better* tier recovers.
+- A client stays on its upstream while it is healthy, even if a sibling in the same country (or,
+  with `-fastest`, any listed country) becomes faster. It moves when its upstream goes down, when
+  an upstream in an earlier country of its route recovers, or when its route or exits change.
 - Moving changes the exit IP for *new* connections only. Connections a client already has open
   through an upstream that is still alive stay pinned to it (conntrack marks plus a per-client
   `fwmark` rule) until they close; only when the old upstream is dead do they fail. The tunnel to
   Lotsman itself never drops.
-- No healthy upstream for a profile: nftables denies the client, then its routes and pins are
+- No healthy upstream for a route: nftables denies the client, then its routes and pins are
   removed. A client without an assignment is denied from the start, including destinations in an
   upstream's connected subnet. Nothing leaves through the server's own address.
 
@@ -1136,8 +1121,8 @@ health:
   per upstream at a time, outside the health round. A result that arrives after the upstream went
   down is discarded.
 - A degraded upstream is a last resort. A client moves to the best healthy, not degraded upstream
-  of its profile in any tier, with the usual tier, latency and stickiness rules. Only when its
-  profile has none does it stay on (or go to) a degraded one, chosen by the same rules: slow
+  its route allows, with the usual order, latency and stickiness rules. Only when its route has
+  none does it stay on (or go to) a degraded one, chosen by the same rules: slow
   connectivity beats none. `upstream status` shows it as `degraded`, `lotsman_upstream_up` stays 1
   and `lotsman_upstream_degraded` is 1.
 - Pinned connections: once no client is routed through a degraded upstream, its pins are released

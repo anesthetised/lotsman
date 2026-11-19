@@ -10,8 +10,8 @@ import (
 const withOutline = `
 endpoint: vpn.example.org:51820
 upstreams:
-  - {name: nl, conf: /etc/lotsman/upstreams/nl.conf}
-  - {name: ol, kind: outline, conf: /etc/lotsman/upstreams/ol.key, max_flows: 100}
+  - {name: nl, conf: /etc/lotsman/upstreams/nl.conf, geo: NL, provider: acme}
+  - {name: ol, kind: outline, conf: /etc/lotsman/upstreams/ol.key, geo: NL, provider: beta, max_flows: 100}
 `
 
 func TestUpstreamKinds(t *testing.T) {
@@ -49,7 +49,7 @@ func TestUpstreamKinds(t *testing.T) {
 func TestUpstreamKindErrors(t *testing.T) {
 	for name, tc := range map[string]struct{ config, want string }{
 		"unknown kind":              {strings.Replace(withOutline, "kind: outline", "kind: trojan", 1), `kind must be awg, outline or vless, got "trojan"`},
-		"max_flows on awg":          {strings.Replace(withOutline, "nl.conf}", "nl.conf, max_flows: 5}", 1), "max_flows applies to proxy upstreams only"},
+		"max_flows on awg":          {strings.Replace(withOutline, "nl.conf, geo: NL, provider: acme}", "nl.conf, max_flows: 5}", 1), "max_flows applies to proxy upstreams only"},
 		"negative max_flows":        {strings.Replace(withOutline, "max_flows: 100", "max_flows: -1", 1), "max_flows must not be negative"},
 		"no dns targets":            {withOutline + "health: {dns: []}\n", "health.dns: at least one resolver"},
 		"bad dns target":            {withOutline + "health: {dns: [1.1.1.1]}\n", "health.dns[0]:"},

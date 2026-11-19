@@ -4,17 +4,13 @@
 import { createContext, useContext } from "solid-js";
 import type { selfApi } from "../../api/client";
 import type { PeerStatus, UpstreamStatus } from "../../gen/lotsman/v1/status_pb";
-import type { User } from "../../gen/lotsman/v1/user_pb";
+import type { Rights, User } from "../../gen/lotsman/v1/user_pb";
 import type { Failure } from "./errors";
 
 /** A config the user was just given, shown at the top of the devices until they dismiss it. */
 export interface Issued {
-  kind: "added" | "changed";
   device: string;
-  profile: string;
   config: string;
-  /** The change gave the device the new profile but could not take the old one away. */
-  leftover?: string;
 }
 
 export type Outcome<T> = { ok: true; value: T } | { ok: false; failure: Failure };
@@ -22,10 +18,12 @@ export type Outcome<T> = { ok: true; value: T } | { ok: false; failure: Failure 
 export interface UserContext {
   self: ReturnType<typeof selfApi>;
   user: () => User;
+  /** What the operator lets the user do: change routes, see providers. */
+  rights: () => Rights;
   peer: (peerId: string) => PeerStatus | undefined;
   upstream: (name: string) => UpstreamStatus | undefined;
-  /** The profiles the user may choose from. */
-  profiles: () => string[];
+  /** The user's allowed exits, live: what a route may use. */
+  exits: () => readonly UpstreamStatus[];
   /** Configs fetched or issued during this visit, by peer: opened panels do not ask again. In memory only. */
   configs: Map<string, string>;
   issued: () => Issued | undefined;
