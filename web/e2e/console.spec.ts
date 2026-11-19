@@ -43,7 +43,7 @@ test("create, edit and delete a profile", async ({ page }) => {
   await expect(dialog.getByLabel("Name")).toHaveAttribute("aria-invalid", "true");
   await dialog.getByLabel("Name").fill("default");
   await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(dialog.getByText("A profile of this name exists.")).toBeVisible();
+  await expect(dialog.getByText("A profile of this name exists, ignoring case.")).toBeVisible();
 
   await dialog.getByLabel("Name").fill("eu");
   await dialog.getByRole("button", { name: "Add tier" }).click();

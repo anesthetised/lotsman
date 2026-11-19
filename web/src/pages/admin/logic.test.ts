@@ -29,12 +29,14 @@ test("tier rows move, change and go, keeping their keys", () => {
 
 test("profile names are checked before the daemon sees them", () => {
   expect(nameProblem("", [], false)).toBe("required");
-  expect(nameProblem("EU", [], false)).toBe("pattern");
+  expect(nameProblem("Albania", [], false)).toBeUndefined();
+  expect(nameProblem("Bad Name", [], false)).toBe("pattern");
   expect(nameProblem("-eu", [], false)).toBe("pattern");
   expect(nameProblem("a".repeat(33), [], false)).toBe("pattern");
   expect(nameProblem("eu-2", ["default"], false)).toBeUndefined();
   expect(nameProblem("default", ["default"], false)).toBe("taken"); // Put would replace it
   expect(nameProblem("default", ["default"], true)).toBeUndefined();
+  expect(nameProblem("ALBANIA", ["Albania"], false)).toBe("taken"); // the store ignores case
 });
 
 function conn(source: string, downRate: number, upRate = 0, downBytes = 0): Connection {

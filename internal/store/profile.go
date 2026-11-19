@@ -12,7 +12,11 @@ import (
 
 // ListProfiles returns every profile by name, each with its tiers in order.
 func (s *Store) ListProfiles() ([]config.Profile, error) {
-	rows, err := s.db.Query(`SELECT p.name, t.geo, t.provider, t.tag
+	return listProfiles(s.db)
+}
+
+func listProfiles(q querier) ([]config.Profile, error) {
+	rows, err := q.Query(`SELECT p.name, t.geo, t.provider, t.tag
 		FROM profiles p LEFT JOIN profile_tiers t ON t.profile = p.name
 		ORDER BY p.name, t.position`)
 	if err != nil {
@@ -63,6 +67,11 @@ func (s *Store) putProfile(p config.Profile, create, replace bool) error {
 	case created == 0 && !replace:
 		return ErrExists
 	}
+	if created == 1 {
+		if err := nameFree(tx, p.Name, p.Name); err != nil {
+			return err
+		}
+	}
 	if _, err := tx.Exec(`DELETE FROM profile_tiers WHERE profile = ?`, p.Name); err != nil {
 		return err
 	}
@@ -73,6 +82,57 @@ func (s *Store) putProfile(p config.Profile, create, replace bool) error {
 		}
 	}
 	return tx.Commit()
+}
+
+// RenameProfile gives profile from the name to, and its peers with it, in
+// one transaction. The peers keep their keys and addresses, so their clients
+// notice nothing, and their history is kept by peer id. ErrNotFound without
+// the profile; ErrExists when to belongs to another profile.
+func (s *Store) RenameProfile(from, to string) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := profileExists(tx, from); errors.Is(err, ErrNoProfile) {
+		return ErrNotFound
+	} else if err != nil {
+		return err
+	}
+	if from == to {
+		return nil
+	}
+	if err := nameFree(tx, to, from); err != nil {
+		return err
+	}
+	for _, q := range []string{
+		`INSERT INTO profiles (name) VALUES (?2)`,
+		`UPDATE profile_tiers SET profile = ?2 WHERE profile = ?1`,
+		`UPDATE peers SET profile = ?2 WHERE profile = ?1`,
+		`DELETE FROM profiles WHERE name = ?1`,
+	} {
+		if _, err := tx.Exec(q, from, to); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// nameFree is ErrExists when a profile other than except, or a peer of
+// another profile, already uses name, ignoring case: Albania and albania
+// would be told apart only by a typo. Peers count because older databases
+// may hold peers whose profile was never imported.
+func nameFree(tx *sql.Tx, name, except string) error {
+	var taken int
+	err := tx.QueryRow(`SELECT (SELECT count(*) FROM profiles WHERE name = ?1 COLLATE NOCASE AND name != ?2)
+		+ (SELECT count(*) FROM peers WHERE profile = ?1 COLLATE NOCASE AND profile != ?2)`, name, except).Scan(&taken)
+	if err != nil {
+		return err
+	}
+	if taken > 0 {
+		return ErrExists
+	}
+	return nil
 }
 
 // DeleteProfile removes a profile no peer uses; ErrInUse while one does.

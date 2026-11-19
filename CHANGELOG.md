@@ -6,6 +6,11 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- `lotsman profile rename OLD NEW`: renames a profile and moves its peers with it in one
+  transaction; their keys, addresses and history stay, so their configs keep working. Profile names
+  may now be capitalized (`Netherlands`) and are unique ignoring case; tags stay lowercase. The
+  daemon reads peers and profiles in one transaction, so a rename never leaves a peer unrouted for a
+  pass, and its status shows the new name at once.
 - Web panel: the user page behind the secret link (#137) — devices with QR configs, `.conf`
   download and copy; own live traffic and its 24 h and 7 d history; the upstreams in use with their
   7-day availability; adding and removing devices and switching their profile; import

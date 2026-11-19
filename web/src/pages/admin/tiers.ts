@@ -38,18 +38,19 @@ export function toTiers(rows: readonly TierRow[]): Tier[] {
   return rows.map((r) => ({ geo: r.geo.trim(), provider: r.provider.trim(), tag: r.tag.trim() }));
 }
 
-export const PROFILE_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
+export const PROFILE_NAME = /^[A-Za-z0-9][A-Za-z0-9-]{0,31}$/;
 
 export type NameProblem = "required" | "pattern" | "taken";
 
 /**
  * What is wrong with the name before the daemon sees it: the daemon checks
  * the pattern too, but a new profile must not silently replace an existing
- * one, since Put creates or replaces.
+ * one, since Put creates or replaces. Names are unique ignoring case, as
+ * the store keeps them.
  */
 export function nameProblem(name: string, existing: readonly string[], editing: boolean): NameProblem | undefined {
   if (name === "") return "required";
   if (!PROFILE_NAME.test(name)) return "pattern";
-  if (!editing && existing.includes(name)) return "taken";
+  if (!editing && existing.some((e) => e.toLowerCase() === name.toLowerCase())) return "taken";
   return undefined;
 }

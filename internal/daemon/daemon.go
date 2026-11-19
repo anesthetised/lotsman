@@ -1193,13 +1193,10 @@ func (d *Daemon) Reconcile() error {
 
 // reconcile is Reconcile for callers that hold d.mu.
 func (d *Daemon) reconcile() error {
-	peers, err := d.store.ListPeers()
-	if err != nil {
-		return err
-	}
-	// Read every pass, so a profile edited in the store applies on the next
-	// reconcile, as a new peer does.
-	stored, err := d.store.ListProfiles()
+	// Profiles are read every pass, so a profile edited in the store applies
+	// on the next reconcile, as a new peer does; with the peers, so a
+	// renamed profile is never missing for its peers.
+	peers, stored, err := d.store.PeersAndProfiles()
 	if err != nil {
 		return err
 	}
@@ -1240,8 +1237,10 @@ func (d *Daemon) reconcile() error {
 				errs = append(errs, err)
 				continue
 			}
-			d.devicePeers[p.PublicKey] = p
 		}
+		// Kept fresh, not only when added: a profile rename changes a peer
+		// that is already on the device.
+		d.devicePeers[p.PublicKey] = p
 		errs = append(errs, d.route(p, profiles))
 	}
 	d.syncAlive()

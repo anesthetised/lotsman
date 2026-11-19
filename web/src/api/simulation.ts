@@ -129,7 +129,7 @@ const destinations: readonly (readonly [Protocol, string, number, number])[] = /
   [Protocol.ICMP, "192.0.2.1", 0, 0.0001],
 ] as const)();
 
-const NAME_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9-]{0,31}$/;
 
 /** mulberry32: a tiny seeded PRNG returning floats in [0, 1). */
 function random(seed: number): () => number {
@@ -446,6 +446,10 @@ export class Simulation {
     }
     const stored = { name: profile.name, prefer: profile.prefer.map((t) => ({ geo: t.geo, provider: t.provider, tag: t.tag })) };
     const i = this.profiles.findIndex((p) => p.name === profile.name);
+    // Names are unique ignoring case, as in the store.
+    if (i < 0 && this.profiles.some((p) => p.name.toLowerCase() === profile.name.toLowerCase())) {
+      throw new ConnectError(`profile "${profile.name}": another profile has this name, ignoring case`, Code.AlreadyExists);
+    }
     if (i < 0) this.profiles.push(stored);
     else this.profiles[i] = stored;
     return profileWarnings(this.profiles);

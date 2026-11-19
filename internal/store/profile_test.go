@@ -102,6 +102,71 @@ func TestProfileReferences(t *testing.T) {
 	}
 }
 
+// A rename moves the tiers and the peers, which keep their ids, keys and
+// addresses, and is seen whole by PeersAndProfiles.
+func TestRenameProfile(t *testing.T) {
+	s := open(t)
+	nl := config.Profile{Name: "nl", Prefer: []config.Match{{Geo: "NL"}, {}}}
+	for _, p := range []config.Profile{nl, {Name: "auto"}} {
+		if err := s.AddProfile(p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.AddUserPeer("alice", "phone", "nl", subnet); err != nil {
+		t.Fatal(err)
+	}
+	peer, err := s.Peer("alice", "phone", "nl") // with the stored, rounded time
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.RenameProfile("nl", "Netherlands"); err != nil {
+		t.Fatal(err)
+	}
+	peers, profiles, err := s.PeersAndProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	peer.Profile = "Netherlands"
+	if len(peers) != 1 || !reflect.DeepEqual(peers[0], peer) {
+		t.Errorf("peers = %+v, want %+v", peers, peer)
+	}
+	want := []config.Profile{{Name: "Netherlands", Prefer: nl.Prefer}, {Name: "auto"}}
+	if !reflect.DeepEqual(profiles, want) {
+		t.Errorf("profiles = %+v, want %+v", profiles, want)
+	}
+	var tiers int
+	s.db.QueryRow(`SELECT count(*) FROM profile_tiers WHERE profile = 'nl'`).Scan(&tiers)
+	if tiers != 0 {
+		t.Errorf("%d tiers kept the old name", tiers)
+	}
+
+	// Only the case may change; another profile's name, in any case, is taken.
+	if err := s.RenameProfile("Netherlands", "NETHERLANDS"); err != nil {
+		t.Errorf("rename to another case: %v", err)
+	}
+	for _, tc := range []struct {
+		from, to string
+		want     error
+	}{
+		{"nl", "fi", ErrNotFound},
+		{"auto", "netherlands", ErrExists},
+		{"auto", "NETHERLANDS", ErrExists},
+	} {
+		if err := s.RenameProfile(tc.from, tc.to); !errors.Is(err, tc.want) {
+			t.Errorf("RenameProfile(%q, %q) = %v, want %v", tc.from, tc.to, err, tc.want)
+		}
+	}
+	if err := s.RenameProfile("auto", "auto"); err != nil {
+		t.Errorf("rename to itself: %v", err)
+	}
+	if err := s.AddProfile(config.Profile{Name: "Auto"}); !errors.Is(err, ErrExists) {
+		t.Errorf("AddProfile of a name taken in another case: %v", err)
+	}
+	if got, _ := s.ListProfiles(); len(got) != 2 {
+		t.Errorf("a refused add stored a profile: %+v", got)
+	}
+}
+
 // The release before profiles moved into the store is schema version 2. Its
 // peers keep their profile names; the profiles themselves are imported later.
 func TestMigrateFromVersion2(t *testing.T) {

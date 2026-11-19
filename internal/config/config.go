@@ -276,7 +276,10 @@ func ParseLegacy(data []byte) (*Config, []Profile, error) {
 }
 
 var (
-	profileNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
+	// Profile names are shown to users, so they may be capitalized, e.g. a
+	// country; the store keeps them unique ignoring case.
+	profileNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,31}$`)
+	tagRe         = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 	// An upstream name becomes the TUN interface "lm-up-<name>", which must fit IFNAMSIZ (15).
 	upstreamNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,8}$`)
 )
@@ -347,8 +350,8 @@ func (c *Config) Validate() error {
 		// an empty one would read as "any" in a matcher, and a duplicate is
 		// a typo that cannot change what matches.
 		for j, tag := range u.Tags {
-			if !profileNameRe.MatchString(tag) {
-				return fmt.Errorf("upstream %q: tag %q must match %s", u.Name, tag, profileNameRe)
+			if !tagRe.MatchString(tag) {
+				return fmt.Errorf("upstream %q: tag %q must match %s", u.Name, tag, tagRe)
 			}
 			if slices.Contains(u.Tags[:j], tag) {
 				return fmt.Errorf("upstream %q: duplicate tag %q", u.Name, tag)
