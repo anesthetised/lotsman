@@ -2,3 +2,8 @@
 /dist/
 *.db
 *.db-*
+
+# Web panel build output: only .gitkeep stays tracked, so the directory (and
+# `//go:embed all:dist`) exists without a build.
+/internal/web/dist/*
+!/internal/web/dist/.gitkeep

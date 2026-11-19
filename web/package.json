@@ -1,0 +1,43 @@
+{
+  "name": "lotsman-web",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.28.10",
+  "engines": {
+    "node": ">=22.12"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:e2e": "vite build --mode e2e",
+    "preview:e2e": "vite preview --mode e2e --port 4173 --strictPort",
+    "typecheck": "tsc -p .",
+    "test": "vitest run",
+    "e2e": "playwright test",
+    "gen": "buf generate"
+  },
+  "dependencies": {
+    "@bufbuild/protobuf": "2.16.0",
+    "@connectrpc/connect": "2.3.0",
+    "@connectrpc/connect-web": "2.3.0",
+    "@kobalte/core": "2.0.0-alpha.4",
+    "@solidjs/router": "2.0.0",
+    "@solidjs/web": "2.0.1",
+    "solid-js": "2.0.1",
+    "uplot": "1.6.32"
+  },
+  "devDependencies": {
+    "@bufbuild/buf": "1.75.0",
+    "@bufbuild/protoc-gen-es": "2.16.0",
+    "@playwright/test": "1.64.1",
+    "@solidjs/testing-library": "1.0.0-rc.2",
+    "@solidjs/vite-plugin": "3.0.1",
+    "@tailwindcss/vite": "4.3.4",
+    "@types/node": "24.19.2",
+    "jsdom": "30.1.3",
+    "tailwindcss": "4.3.4",
+    "typescript": "7.0.2",
+    "vite": "8.3.5",
+    "vitest": "5.1.0"
+  }
+}

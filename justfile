@@ -44,3 +44,31 @@ gen-check:
     trap 'rm -rf "$out"' EXIT
     buf generate -o "$out"
     diff -r -x '*.proto' "$out/api" api || { echo "generated code is stale: run just gen" >&2; exit 1; }
+
+# Web panel (web/). Needs Node 22.12+ and corepack, which runs the pnpm version
+# pinned in web/package.json. Go builds need none of it: internal/web/dist then
+# holds only its committed .gitkeep, and lotsman web serves a "UI not built" page.
+
+# Install the locked dependencies and Playwright's Chromium.
+web-install:
+    cd web && pnpm install --frozen-lockfile
+    cd web && pnpm exec playwright install chromium
+
+# Dev server with hot reload, serving the in-memory fake daemon.
+web-dev:
+    cd web && pnpm dev
+
+# Production build into internal/web/dist, where the Go side embeds it. The
+# output is git-ignored; the build keeps the committed .gitkeep.
+web-build:
+    cd web && pnpm build
+
+# Typecheck, unit and component tests, then the Playwright smoke test.
+web-test:
+    cd web && pnpm typecheck
+    cd web && pnpm test
+    cd web && pnpm e2e
+
+# Regenerate the TypeScript client in web/src/gen from api/.
+web-gen:
+    cd web && pnpm gen

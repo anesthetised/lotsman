@@ -1,0 +1,10 @@
+# TypeScript for the browser client: `pnpm gen` (or `just web-gen`).
+# protoc-gen-es v2 emits messages and service descriptors; Connect v2 needs nothing else.
+version: v2
+inputs:
+  - directory: ../api
+plugins:
+  - local: protoc-gen-es
+    out: src/gen
+    opt: target=ts
+clean: true
