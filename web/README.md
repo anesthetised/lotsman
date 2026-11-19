@@ -95,7 +95,10 @@ preferences, else English. Units come from `Intl`, not the dictionaries.
   a message instead of the page. `<meta name="referrer" content="no-referrer">` is in
   `index.html`, and the panel also sends `Referrer-Policy: no-referrer`. The page's calls carry
   the token as `Authorization: Bearer <token>` (`withLink` in `src/api/link.ts`); the panel
-  resolves it and never forwards it. The fake ignores it.
+  resolves it and never forwards it. The fake reads it to pick a scenario: `FAKE_LINKS` in
+  `src/api/fakeSelf.ts` has a revoked link (`Unauthenticated`), one with adding turned off
+  (`permission_denied`), a user without devices and an unreachable daemon; any other token is the
+  ordinary user (`max_devices` 5, a burst of 10 additions).
 
 ## Pins and patches
 

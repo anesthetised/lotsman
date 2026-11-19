@@ -9,7 +9,7 @@ import { HistoryService } from "../gen/lotsman/v1/history_pb";
 import { StatusService } from "../gen/lotsman/v1/status_pb";
 import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
 import { createAuth, redirectToSignIn } from "./auth";
-import { createFakeTransport } from "./fake";
+import { createFakeTransport, withToken } from "./fake";
 import { createFakeAuthServer } from "./fakeAuth";
 import { withLink } from "./link";
 import { onUnauthenticated } from "./unauthenticated";
@@ -28,10 +28,10 @@ export const api = {
 /**
  * The user page's client. Every call carries the link's token as
  * `Authorization: Bearer <token>` (see link.ts); the panel resolves it to
- * the user and never forwards the header. The fake ignores it.
+ * the user and never forwards the header. The fake reads it to pick a scenario (see FAKE_LINKS).
  */
 export function selfApi(token: string) {
-  const linked = fakeAuth ? transport : createConnectTransport({ baseUrl: "/api", interceptors: [withLink(token)] });
+  const linked = fakeAuth ? withToken(transport, token) : createConnectTransport({ baseUrl: "/api", interceptors: [withLink(token)] });
   return createClient(UserSelfService, linked);
 }
 

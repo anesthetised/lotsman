@@ -16,6 +16,8 @@ export interface DialogProps {
   children?: JSX.Element;
   /** Style of the trigger button. */
   variant?: ButtonVariant;
+  /** Extra classes for the trigger, such as a larger touch target. */
+  triggerClass?: string;
   /** Controlled open state, for content that closes the dialog itself. */
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
@@ -25,7 +27,7 @@ export function Dialog(props: DialogProps) {
   const { t } = useI18n();
   return (
     <Kobalte open={props.open} onOpenChange={(open) => props.onOpenChange?.(open)}>
-      <Kobalte.Trigger class={buttonClass(props.variant)}>{props.trigger}</Kobalte.Trigger>
+      <Kobalte.Trigger class={[...buttonClass(props.variant), props.triggerClass]}>{props.trigger}</Kobalte.Trigger>
       <Kobalte.Portal>
         <Kobalte.Overlay class="fixed inset-0 z-40 bg-black/50" />
         <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
