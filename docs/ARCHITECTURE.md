@@ -537,6 +537,60 @@ Cost: the static linux/amd64 binary grows by about 0.2 MB (30,982,304 to 31,174,
 without a built UI). No new module: `net/http/httputil`, `embed` and the already linked
 `modernc.org/sqlite` and `connectrpc.com/connect/v2`.
 
+## Traffic counters (#129)
+
+`StatusService.Watch` carries each peer's and each upstream's bytes since the daemon started and
+their rates, plus a gateway total. Directions are from the client's side: down is towards the
+client.
+
+- Peers: the downstream device's per-peer counters, from the same UAPI dump that `Status` and the
+  metrics read. They count the tunnel's packets as sent and received, so encrypted, with AWG's
+  overhead.
+- Upstreams, every kind: the kernel's counters of the upstream's TUN, `lm-up-<name>`, read over
+  netlink (`traffic.InterfaceCounters`). The kernel transmits into the TUN what the clients send
+  (up) and receives from it what the AWG device or proxy stack writes back (down). Netlink, not
+  `/sys/class/net`, because sysfs shows the network namespace it was mounted in, not the daemon's.
+  The counts include the upstream's health probes: DNS and handshake probes are a few hundred
+  bytes a round, a transfer probe (#87) shows as a burst.
+- Total: every peer's bytes, peers removed since included; its rates are the current peers' sum.
+
+| Option for upstreams | For | Against |
+|---|---|---|
+| **A. The kernel's counters of the upstream's TUN (chosen)** | One meaning for every kind, so AWG and proxy upstreams compare; the daemon holds the TUN, so the counters survive a helper's crash; no change to the helper protocol and no helper request every second | Counts probes; IP bytes, not the provider's wire bytes |
+| B. Byte counters in the helper's relay, over the `stats` request | Exactly what the flows carried | A helper request per upstream every second, which waits up to 2 s for a stuck helper; counters restart with each helper; payload bytes, unlike AWG; a protocol change |
+| C. The provider peer's counters for AWG (as the metrics), B for proxies | Reuses an existing source for AWG | Two meanings of bytes side by side in one table |
+
+The helper still reports only flow counts; nothing in it changed.
+
+**Sampler.** `internal/traffic` holds the logic behind a `Source` interface (`Daemon.Counters`
+in production, a fake in tests). One sampler per daemon reads every counter each second
+(`TrafficInterval`), started by `Run` and stopped before the devices close; every Watch stream
+reads its latest sample, so the cost does not grow with viewers. A series' total is the sum of
+the deltas between readings:
+
+- the first reading of a series counts in full: the daemon creates its devices, so their counters
+  start with it, and a peer or upstream added later gained its bytes since the previous sample;
+- a counter that goes back restarted (an interface recreated on reload, a peer re-added): what it
+  holds is new, and the total keeps growing;
+- a series missing from a reading, such as an upstream whose interface is being recreated, leaves
+  the snapshot but not the sampler, so it keeps its total when it comes back. Peer rows and
+  upstream names are few, so they are never forgotten;
+- rates divide by the time since the series' previous reading, on `time.Now`'s monotonic clock, so
+  a wall-clock step changes nothing; no elapsed time means no rate rather than a huge one.
+
+A rate is over the daemon's last 1 s sample, whatever the stream's interval. The panel asks for
+1 s; a stream at 5 s gets 1 s rates every 5 s, not 5 s averages. A peer or upstream the sampler
+has not read yet, such as one added since its last sample, has no `traffic` in the snapshot, and
+`total` is unset before the first sample. `lotsman status` is unchanged: it reads the status file
+the daemon writes every health round, where a rate would be stale.
+
+**Cost.** Measured in the Linux test container (Docker on an Apple M1 Max, arm64,
+`BenchmarkTrafficSample` and `BenchmarkInterfaceCounters`): one sample of a gateway with 50 peers
+and two upstreams takes about 0.2 ms, 85 % of it the downstream device's UAPI dump, plus about
+0.1 ms per upstream for the netlink read. That is under 0.05 % of one core with a handful of
+upstreams. The static linux/amd64 binary grows by 24 KB (30,982,304 to 31,006,880 bytes); no new
+module.
+
 ## Open items
 
 - [x] The official Amnezia client (macOS) connects to a Lotsman downstream device on a real host

@@ -30,7 +30,7 @@ import (
 var quiet = slog.New(slog.NewTextHandler(io.Discard, nil))
 
 // providerConf writes a provider-style config for an upstream whose tunnel address is addr.
-func providerConf(t *testing.T, dir, name, addr string, mtu int) string {
+func providerConf(t testing.TB, dir, name, addr string, mtu int) string {
 	t.Helper()
 	key, _ := awgconf.GeneratePrivateKey()
 	peer, _ := awgconf.GeneratePrivateKey()
@@ -126,7 +126,7 @@ func (r *fakeResolver) lookup(_ context.Context, _ string, host string) ([]netip
 	return nil, errors.New("no such host")
 }
 
-func useResolver(t *testing.T, r *fakeResolver) {
+func useResolver(t testing.TB, r *fakeResolver) {
 	t.Helper()
 	old := lookupNetIP
 	lookupNetIP = r.lookup
@@ -292,7 +292,7 @@ var (
 	euProfile = config.Profile{Name: "eu", Prefer: []config.Match{{Geo: "NL"}, {Geo: "DE"}}}
 )
 
-func newHarness(t *testing.T) *harness {
+func newHarness(t testing.TB) *harness {
 	t.Helper()
 	// Provider endpoints are localhost; keep lookups off the system resolver,
 	// which can exceed the lookup timeout on a loaded CI runner.

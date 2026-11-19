@@ -184,7 +184,7 @@ type StatusSnapshot struct {
 	ClientMtu     uint32                 `protobuf:"varint,2,opt,name=client_mtu,json=clientMtu,proto3" json:"client_mtu,omitempty"`
 	Upstreams     []*UpstreamStatus      `protobuf:"bytes,3,rep,name=upstreams,proto3" json:"upstreams,omitempty"`
 	Peers         []*PeerStatus          `protobuf:"bytes,4,rep,name=peers,proto3" json:"peers,omitempty"`
-	Total         *Traffic               `protobuf:"bytes,5,opt,name=total,proto3" json:"total,omitempty"` // #129
+	Total         *Traffic               `protobuf:"bytes,5,opt,name=total,proto3" json:"total,omitempty"` // all peers' bytes, removed peers' included; unset before the first sample
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -266,7 +266,7 @@ type UpstreamStatus struct {
 	LastHandshake *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_handshake,json=lastHandshake,proto3" json:"last_handshake,omitempty"` // unset for proxy upstreams / never
 	Routed        uint32                 `protobuf:"varint,9,opt,name=routed,proto3" json:"routed,omitempty"`                                   // peers directed through it
 	Active        uint32                 `protobuf:"varint,10,opt,name=active,proto3" json:"active,omitempty"`                                  // of those, handshake inside the active window
-	Traffic       *Traffic               `protobuf:"bytes,11,opt,name=traffic,proto3" json:"traffic,omitempty"`                                 // #129
+	Traffic       *Traffic               `protobuf:"bytes,11,opt,name=traffic,proto3" json:"traffic,omitempty"`                                 // unset until the daemon has sampled it
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -387,7 +387,7 @@ type PeerStatus struct {
 	Address       string                 `protobuf:"bytes,5,opt,name=address,proto3" json:"address,omitempty"`   // client tunnel IP
 	Upstream      string                 `protobuf:"bytes,6,opt,name=upstream,proto3" json:"upstream,omitempty"` // "" when blocked
 	LastHandshake *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_handshake,json=lastHandshake,proto3" json:"last_handshake,omitempty"`
-	Traffic       *Traffic               `protobuf:"bytes,8,opt,name=traffic,proto3" json:"traffic,omitempty"` // #129
+	Traffic       *Traffic               `protobuf:"bytes,8,opt,name=traffic,proto3" json:"traffic,omitempty"` // unset until the daemon has sampled it
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -478,12 +478,14 @@ func (x *PeerStatus) GetTraffic() *Traffic {
 	return nil
 }
 
-// Directions are from the user's side: down = towards the client.
+// Directions are from the user's side: down = towards the client. A peer
+// counts its tunnel's packets as sent and received (encrypted); an upstream
+// counts the packets crossing its interface, its health probes included.
 type Traffic struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	DownBytes     uint64                 `protobuf:"varint,1,opt,name=down_bytes,json=downBytes,proto3" json:"down_bytes,omitempty"` // counter since the daemon started
 	UpBytes       uint64                 `protobuf:"varint,2,opt,name=up_bytes,json=upBytes,proto3" json:"up_bytes,omitempty"`
-	DownRate      uint64                 `protobuf:"varint,3,opt,name=down_rate,json=downRate,proto3" json:"down_rate,omitempty"` // bytes per second, last interval
+	DownRate      uint64                 `protobuf:"varint,3,opt,name=down_rate,json=downRate,proto3" json:"down_rate,omitempty"` // bytes per second over the daemon's last sample (1 s), whatever the stream's interval
 	UpRate        uint64                 `protobuf:"varint,4,opt,name=up_rate,json=upRate,proto3" json:"up_rate,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

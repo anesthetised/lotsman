@@ -19,6 +19,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/health"
+	"github.com/anesthetised/lotsman/internal/traffic"
 )
 
 // MinInterval is the shortest, and the default, interval between snapshots.
@@ -29,6 +30,7 @@ type Source interface {
 	Ready() <-chan struct{}
 	Status() daemon.Status
 	ClientMTU() int
+	Traffic() traffic.Snapshot
 }
 
 // NewServer registers every service of the API. Only StatusService.Watch is
@@ -72,7 +74,7 @@ func (s statusService) Watch(ctx context.Context, req *lotsmanv1.WatchStatusRequ
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for {
-		if err := stream.Send(snapshot(time.Now(), s.src.ClientMTU(), s.src.Status())); err != nil {
+		if err := stream.Send(snapshot(time.Now(), s.src.ClientMTU(), s.src.Status(), s.src.Traffic())); err != nil {
 			return err
 		}
 		select {
@@ -87,19 +89,27 @@ func (s statusService) Watch(ctx context.Context, req *lotsmanv1.WatchStatusRequ
 // peer's life. It is the store's row id.
 func PeerID(id int64) string { return "p_" + strconv.FormatInt(id, 10) }
 
-func snapshot(now time.Time, clientMTU int, st daemon.Status) *lotsmanv1.StatusSnapshot {
+// snapshot joins the status with the latest traffic sample. A peer or
+// upstream the sampler has not read, such as one added since, has no
+// traffic yet, and the total is unset before the first sample.
+func snapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Snapshot) *lotsmanv1.StatusSnapshot {
 	s := &lotsmanv1.StatusSnapshot{Time: timestamppb.New(now), ClientMtu: uint32(clientMTU)}
+	if !tr.Time.IsZero() {
+		s.Total = trafficOf(tr.Total, true)
+	}
 	for _, u := range st.Upstreams {
+		t, ok := tr.Upstreams[u.Name]
 		s.Upstreams = append(s.Upstreams, &lotsmanv1.UpstreamStatus{
 			Name: u.Name, Kind: upstreamKind(u.Kind), Geo: u.Geo, Provider: u.Provider, Tags: u.Tags,
 			State: upstreamState(u), Latency: duration(u.Latency), LastHandshake: timestamp(u.LastHandshake),
-			Routed: uint32(u.Routed), Active: uint32(u.Active),
+			Routed: uint32(u.Routed), Active: uint32(u.Active), Traffic: trafficOf(t, ok),
 		})
 	}
 	for _, p := range st.Peers {
+		t, ok := tr.Peers[p.ID]
 		ps := &lotsmanv1.PeerStatus{
 			PeerId: PeerID(p.ID), User: p.User, Device: p.Device, Profile: p.Profile,
-			Upstream: p.Upstream, LastHandshake: timestamp(p.LastHandshake),
+			Upstream: p.Upstream, LastHandshake: timestamp(p.LastHandshake), Traffic: trafficOf(t, ok),
 		}
 		if p.Address.IsValid() {
 			ps.Address = p.Address.String()
@@ -107,6 +117,13 @@ func snapshot(now time.Time, clientMTU int, st daemon.Status) *lotsmanv1.StatusS
 		s.Peers = append(s.Peers, ps)
 	}
 	return s
+}
+
+func trafficOf(t traffic.Traffic, ok bool) *lotsmanv1.Traffic {
+	if !ok {
+		return nil
+	}
+	return &lotsmanv1.Traffic{DownBytes: t.DownBytes, UpBytes: t.UpBytes, DownRate: t.DownRate, UpRate: t.UpRate}
 }
 
 func upstreamKind(kind string) lotsmanv1.UpstreamKind {

@@ -26,7 +26,7 @@ message StatusSnapshot {
   uint32 client_mtu = 2;
   repeated UpstreamStatus upstreams = 3;
   repeated PeerStatus peers = 4;
-  Traffic total = 5; // #129
+  Traffic total = 5; // all peers' bytes, removed peers' included; unset before the first sample
 }
 
 enum UpstreamState {
@@ -55,7 +55,7 @@ message UpstreamStatus {
   google.protobuf.Timestamp last_handshake = 8; // unset for proxy upstreams / never
   uint32 routed = 9; // peers directed through it
   uint32 active = 10; // of those, handshake inside the active window
-  Traffic traffic = 11; // #129
+  Traffic traffic = 11; // unset until the daemon has sampled it
 }
 
 message PeerStatus {
@@ -66,13 +66,15 @@ message PeerStatus {
   string address = 5; // client tunnel IP
   string upstream = 6; // "" when blocked
   google.protobuf.Timestamp last_handshake = 7;
-  Traffic traffic = 8; // #129
+  Traffic traffic = 8; // unset until the daemon has sampled it
 }
 
-// Directions are from the user's side: down = towards the client.
+// Directions are from the user's side: down = towards the client. A peer
+// counts its tunnel's packets as sent and received (encrypted); an upstream
+// counts the packets crossing its interface, its health probes included.
 message Traffic {
   uint64 down_bytes = 1; // counter since the daemon started
   uint64 up_bytes = 2;
-  uint64 down_rate = 3; // bytes per second, last interval
+  uint64 down_rate = 3; // bytes per second over the daemon's last sample (1 s), whatever the stream's interval
   uint64 up_rate = 4;
 }

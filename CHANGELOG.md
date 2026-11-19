@@ -30,6 +30,15 @@ All notable changes to Lotsman are documented here. The format follows
   lotsman-web`, and `user=lotsman-web` plus the unit and `/var/lib/lotsman-web` in the manifest;
   `deploy/uninstall.sh` also stops `lotsman-web`. The operations guide has Caddy and nginx
   examples. The binary grows by about 0.2 MB. No new dependency.
+- Live traffic in the control API: `StatusService.Watch` fills `traffic` on every peer and
+  upstream and the snapshot's `total`: bytes since the daemon started and bytes per second over the
+  last second, down meaning towards the client. Peers count their tunnel's packets on the
+  downstream device; upstreams of every kind count the packets crossing their `lm-up-*` interface,
+  read from the kernel over netlink, so a proxy helper needs no change and a helper restart loses
+  nothing. One sampler in the daemon reads every counter each second for all streams; it keeps
+  totals across counter restarts and series that come back, and keeps removed peers' bytes in
+  the total. About 0.4 ms of CPU per second with 50 peers and two upstreams; the binary grows
+  by 24 KB. `lotsman status` is unchanged (#129).
 - Control API for the web panel: `lotsman serve` serves `lotsman.v1` over Connect on the unix socket
   `/run/lotsman/control.sock` (`0660 root:lotsman-web`; root-only with a warning when the group is
   missing). The socket's peer is trusted, so its file mode is the boundary. It is created after the

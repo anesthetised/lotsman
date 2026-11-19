@@ -92,14 +92,16 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 		t.Fatal(err)
 	}
 	// alice is the first peer in the store; routing her may take a round.
-	want := &lotsmanv1.PeerStatus{PeerId: "p_1", User: "alice", Device: "default", Profile: "nl", Address: "10.77.0.2", Upstream: "nl"}
+	want := &lotsmanv1.PeerStatus{PeerId: "p_1", User: "alice", Device: "default", Profile: "nl", Address: "10.77.0.2", Upstream: "nl",
+		Traffic: &lotsmanv1.Traffic{}}
 	var got *lotsmanv1.StatusSnapshot
 	deadline := time.Now().Add(15 * time.Second)
 	for n := 0; ; n++ {
 		if got, err = stream.Receive(); err != nil {
 			t.Fatalf("snapshot %d: %v", n, err)
 		}
-		// She never connects, so her peer has no handshake.
+		// She never connects, so her peer has no handshake and no traffic
+		// once the sampler has read it.
 		if n >= 1 && len(got.Peers) == 1 && proto.Equal(got.Peers[0], want) {
 			break
 		}
