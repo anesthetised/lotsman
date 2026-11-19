@@ -2,7 +2,6 @@ package daemon
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -23,6 +22,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/dataplane/fake"
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/metrics"
+	"github.com/anesthetised/lotsman/internal/policy"
 	"github.com/anesthetised/lotsman/internal/proxy"
 	"github.com/anesthetised/lotsman/internal/store"
 )
@@ -234,7 +234,7 @@ func TestIdentity(t *testing.T) {
 }
 
 func TestClientConfig(t *testing.T) {
-	cfg, err := config.Parse([]byte("endpoint: vpn.example.org:51820\nupstreams: [{name: a, conf: /x}]\n"))
+	cfg, err := config.Parse([]byte("endpoint: vpn.example.org:51820\nupstreams: [{name: a, conf: /x, geo: NL, provider: acme}]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -281,16 +281,25 @@ const harnessConfig = `
 endpoint: vpn.example.org:51820
 state_dir: %s
 upstreams:
-  - {name: nl, conf: %s/nl.conf, geo: NL}
-  - {name: de, conf: %s/de.conf, geo: DE}
+  - {name: nl, conf: %s/nl.conf, geo: NL, provider: acme}
+  - {name: de, conf: %s/de.conf, geo: DE, provider: acme}
 health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 2, up_after: 1}
 `
 
-// The harness store starts with these profiles.
+// Routes of the harness's devices: nl only, or NL then DE.
 var (
-	nlProfile = config.Profile{Name: "nl", Prefer: []config.Match{{Geo: "NL"}}}
-	euProfile = config.Profile{Name: "eu", Prefer: []config.Match{{Geo: "NL"}, {Geo: "DE"}}}
+	nlRoute = route("NL")
+	euRoute = route("NL", "DE")
 )
+
+// route is a strict route through the countries in order.
+func route(geos ...string) policy.Route {
+	r := policy.Route{Strict: true}
+	for _, g := range geos {
+		r.Countries = append(r.Countries, policy.Country{Geo: g})
+	}
+	return r
+}
 
 func newHarness(t testing.TB) *harness {
 	t.Helper()
@@ -313,11 +322,6 @@ func newHarness(t testing.TB) *harness {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { st.Close() })
-	for _, p := range []config.Profile{nlProfile, euProfile} {
-		if err := st.AddProfile(p); err != nil {
-			t.Fatal(err)
-		}
-	}
 
 	h := &harness{st: st, dp: fake.New(), cfg: cfg, dir: dir, healthy: map[string]bool{}, dnsDown: map[string]bool{}, probed: map[string]int{}}
 	h.setHealthy("lm-up-nl", true)
@@ -373,20 +377,6 @@ func (h *harness) run(t *testing.T) (stop func()) {
 	return stop
 }
 
-// forgetProfile deletes a profile behind the store's back, leaving its
-// peers in place, as in a database from before profiles moved to the store.
-func (h *harness) forgetProfile(t *testing.T, name string) {
-	t.Helper()
-	db, err := sql.Open("sqlite", filepath.Join(h.dir, "lotsman.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer db.Close()
-	if _, err := db.Exec(`DELETE FROM profile_tiers WHERE profile = ?; DELETE FROM profiles WHERE name = ?`, name, name); err != nil {
-		t.Fatal(err)
-	}
-}
-
 func (h *harness) setHealthy(iface string, ok bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -431,8 +421,8 @@ func eventually(t *testing.T, what string, cond func() bool) {
 func TestDaemon(t *testing.T) {
 	h := newHarness(t)
 	h.st.CreateUser("alice")
-	nlPeer, _ := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
-	euPeer, _ := h.st.AddPeer("alice", store.DefaultDevice, "eu", h.cfg.Subnet)
+	nlPeer, _ := h.st.AddPeer("alice", "nl", nlRoute, h.cfg.Subnet)
+	euPeer, _ := h.st.AddPeer("alice", "eu", euRoute, h.cfg.Subnet)
 
 	stop := h.run(t)
 
@@ -462,10 +452,10 @@ func TestDaemon(t *testing.T) {
 	if v, ok := metric(m, "lotsman_upstream_clients", up); !ok || v != 2 {
 		t.Errorf("upstream_clients{nl} = %v, %v", v, ok)
 	}
-	if v, ok := metric(m, "lotsman_peer_upstream", metrics.Label{Name: "user", Value: "alice"}, metrics.Label{Name: "profile", Value: "eu"}, up); !ok || v != 1 {
+	if v, ok := metric(m, "lotsman_peer_upstream", metrics.Label{Name: "user", Value: "alice"}, metrics.Label{Name: "device", Value: "eu"}, up); !ok || v != 1 {
 		t.Errorf("peer_upstream{alice,eu,nl} = %v, %v", v, ok)
 	}
-	if _, ok := metric(m, "lotsman_peer_last_handshake_timestamp_seconds", metrics.Label{Name: "device", Value: store.DefaultDevice}); !ok {
+	if _, ok := metric(m, "lotsman_peer_last_handshake_timestamp_seconds", metrics.Label{Name: "device", Value: "nl"}); !ok {
 		t.Error("per-peer handshake metric missing")
 	}
 	if v, ok := metric(m, "lotsman_client_mtu"); !ok || v != 1392 {
@@ -475,7 +465,7 @@ func TestDaemon(t *testing.T) {
 		t.Error("build_info missing or wrong version")
 	}
 
-	// NL dies: the eu profile falls back to DE, the nl-only profile is blocked.
+	// NL dies: the eu device falls back to DE, the nl-only device is blocked.
 	h.setHealthy("lm-up-nl", false)
 	eventually(t, "failover to de", routedVia(euPeer.IP, "lm-up-de"))
 	eventually(t, "nl-only peer blocked", func() bool { _, ok := h.dp.RouteOf(nlPeer.IP); return !ok })
@@ -483,7 +473,7 @@ func TestDaemon(t *testing.T) {
 	if st.Upstreams[0].State != health.Down || st.Upstreams[1].State != health.Up || st.Upstreams[1].Routed != 1 || st.Upstreams[1].Active != 0 {
 		t.Errorf("status = %+v", st.Upstreams)
 	}
-	if len(st.Peers) != 2 || st.Peers[0].Profile != "eu" || st.Peers[0].Upstream != "de" || st.Peers[1].Profile != "nl" || st.Peers[1].Upstream != "" {
+	if len(st.Peers) != 2 || st.Peers[0].Device != "eu" || st.Peers[0].Upstream != "de" || st.Peers[1].Device != "nl" || st.Peers[1].Upstream != "" {
 		t.Errorf("peers = %+v", st.Peers)
 	}
 	// The control API identifies peers by their store row and shows the upstreams' grouping.
@@ -522,7 +512,7 @@ func TestDaemon(t *testing.T) {
 	}
 
 	// Removing a peer from the store removes it from the device and the kernel.
-	h.st.DeletePeer("alice", store.DefaultDevice, "nl")
+	h.st.DeletePeer("alice", "nl")
 	eventually(t, "peer removal", func() bool {
 		peers, _ := h.d.down.Peers()
 		_, routed := h.dp.RouteOf(nlPeer.IP)
@@ -561,25 +551,63 @@ func TestProbeFailureReresolvesEndpoint(t *testing.T) {
 	}
 }
 
-func TestReconcileUnknownProfile(t *testing.T) {
+// A device follows its route, and its user's exits narrow the route,
+// fallback included; both apply on the next reconcile.
+func TestRouteAndExits(t *testing.T) {
 	h := newHarness(t)
-	h.st.CreateUser("bob")
-	h.st.AddProfile(config.Profile{Name: "gone"})
-	if _, err := h.st.AddPeer("bob", store.DefaultDevice, "gone", h.cfg.Subnet); err != nil {
+	phone, _ := h.st.AddUserPeer("alice", "phone", route("DE"), h.cfg.Subnet)
+	open, _ := h.st.AddUserPeer("alice", "open", policy.Route{Countries: []policy.Country{{Geo: "DE"}}}, h.cfg.Subnet)
+	h.run(t)
+	routedVia := func(p store.Peer, want string) func() bool {
+		return func() bool { got, _ := h.dp.RouteOf(p.IP); return got == want }
+	}
+	eventually(t, "initial routing", func() bool { return routedVia(phone, "lm-up-de")() && routedVia(open, "lm-up-de")() })
+
+	// A new route applies without touching the device's tunnel.
+	if _, err := h.st.SetRoute("alice", "phone", route("NL")); err != nil {
 		t.Fatal(err)
 	}
-	h.forgetProfile(t, "gone")
-	h.run(t)
-	eventually(t, "start", h.dp.Ready)
-	if err := h.d.Reconcile(); err == nil || !strings.Contains(err.Error(), `profile "gone"`) {
-		t.Errorf("expected profile error, got %v", err)
+	if err := h.d.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := h.dp.RouteOf(phone.IP); got != "lm-up-nl" {
+		t.Errorf("phone after its new route: %q, want lm-up-nl", got)
+	}
+
+	// Exits without DE: the strict device is blocked, the other falls back
+	// to an allowed exit.
+	if _, err := h.st.SetRights("alice", store.Rights{Exits: []string{"nl"}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.st.SetRoute("alice", "phone", route("DE")); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.d.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := h.dp.RouteOf(phone.IP); ok {
+		t.Errorf("strict phone routed via %q outside its exits", got)
+	}
+	if got, _ := h.dp.RouteOf(open.IP); got != "lm-up-nl" {
+		t.Errorf("falling back device: %q, want lm-up-nl", got)
+	}
+
+	// Only stale exits: nothing is allowed, fallback or not.
+	if _, err := h.st.SetRights("alice", store.Rights{Exits: []string{"gone"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.d.Reconcile(); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok := h.dp.RouteOf(open.IP); ok {
+		t.Errorf("device routed via %q with only stale exits", got)
 	}
 }
 
 func TestReload(t *testing.T) {
 	h := newHarness(t)
 	h.st.CreateUser("alice")
-	euPeer, _ := h.st.AddPeer("alice", store.DefaultDevice, "eu", h.cfg.Subnet)
+	euPeer, _ := h.st.AddPeer("alice", "eu", euRoute, h.cfg.Subnet)
 	h.run(t)
 	ctx := context.Background()
 	routedVia := func(want string) func() bool {
@@ -627,18 +655,14 @@ func TestReload(t *testing.T) {
 endpoint: vpn.example.org:51820
 state_dir: %s
 upstreams:
-  - {name: de, conf: %s/de.conf, geo: DE}
-  - {name: fi, conf: %s/fi.conf, geo: FI}
+  - {name: de, conf: %s/de.conf, geo: DE, provider: acme}
+  - {name: fi, conf: %s/fi.conf, geo: FI, provider: acme}
 health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 1, up_after: 1}
 `, h.dir, h.dir, h.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Without NL the nl profile would have nothing to use; it goes first.
-	if err := h.st.DeleteProfile("nl"); err != nil {
-		t.Fatal(err)
-	}
-	if err := h.st.SetProfile(config.Profile{Name: "eu", Prefer: []config.Match{{Geo: "FI"}, {Geo: "DE"}}}); err != nil {
+	if _, err := h.st.SetRoute("alice", "eu", route("FI", "DE")); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.d.Reload(ctx, cfg2); err != nil {
@@ -672,21 +696,19 @@ health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 1, up_after: 1}
 		t.Errorf("mtu after replacing fi = %d", h.dp.MTU)
 	}
 
-	// A reload that leaves a stored profile no upstream at all is refused
-	// whole, as a config whose profile matched nothing was.
-	cfg3, err := config.Parse([]byte(fmt.Sprintf("endpoint: vpn.example.org:51820\nstate_dir: %s\nupstreams: [{name: de, conf: %s/de.conf, geo: DE}]\n", h.dir, h.dir)))
+	// Removing the last upstream a route names is no error: the route
+	// matches less, and a device left without an exit is blocked.
+	cfg3, err := config.Parse([]byte(fmt.Sprintf("endpoint: vpn.example.org:51820\nstate_dir: %s\nupstreams: [{name: de, conf: %s/de.conf, geo: DE, provider: acme}]\n", h.dir, h.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := h.st.AddProfile(config.Profile{Name: "fi", Prefer: []config.Match{{Geo: "FI"}}}); err != nil {
+	if _, err := h.st.SetRoute("alice", "eu", route("FI")); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.d.Reload(ctx, cfg3); err == nil || !strings.Contains(err.Error(), `profile "fi": prefer matches no upstream`) {
-		t.Fatalf("reload stranding a profile: %v", err)
+	if err := h.d.Reload(ctx, cfg3); err != nil {
+		t.Fatalf("reload leaving a route without upstreams: %v", err)
 	}
-	if st := h.d.Status(); len(st.Upstreams) != 2 || st.Upstreams[1].Name != "fi" {
-		t.Errorf("a refused reload changed the upstreams: %+v", st.Upstreams)
-	}
+	eventually(t, "blocked without an exit", func() bool { _, ok := h.dp.RouteOf(euPeer.IP); return !ok })
 }
 
 // Upstreams opened by a reload (added or replaced) must use the incoming health
@@ -703,7 +725,7 @@ func TestReloadAppliesIncomingThresholdsToNewUpstreams(t *testing.T) {
 			providerConf(t, h.dir, "de", "10.9.0.3/32", 0)  // replaced
 			providerConf(t, h.dir, "fi", "10.10.0.2/32", 0) // added
 			text := fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir)
-			text = strings.Replace(text, "  - {name: de,", "  - {name: fi, conf: "+h.dir+"/fi.conf, geo: FI}\n  - {name: de,", 1)
+			text = strings.Replace(text, "  - {name: de,", "  - {name: fi, conf: "+h.dir+"/fi.conf, geo: FI, provider: acme}\n  - {name: de,", 1)
 			text = strings.Replace(text, "down_after: 2", fmt.Sprintf("down_after: %d", downAfter), 1)
 			cfg, err := config.Parse([]byte(text))
 			if err != nil {

@@ -41,8 +41,8 @@ func (fakeRoutes) Ready() <-chan struct{} {
 func (fakeRoutes) Subnet() netip.Prefix { return netip.MustParsePrefix("10.77.0.0/24") }
 func (fakeRoutes) PeerRoutes() map[netip.Addr]daemon.PeerRoute {
 	return map[netip.Addr]daemon.PeerRoute{
-		aliceAddr: {ID: 7, User: "alice", Device: "phone", Profile: "eu", Upstream: "nl"},
-		bobAddr:   {ID: 12, User: "bob", Device: "default", Profile: "eu"},
+		aliceAddr: {ID: 7, User: "alice", Device: "phone", Upstream: "nl"},
+		bobAddr:   {ID: 12, User: "bob", Device: "default"},
 	}
 }
 

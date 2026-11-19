@@ -216,6 +216,19 @@ All notable changes to Lotsman are documented here. The format follows
   timer (three times that) overflows and wipes every session's keys at once (#76).
 
 ### Changed
+- **Breaking:** per-device routes and user rights replace profiles and upstream tags (#161). A
+  device is one tunnel with its own route: countries in order (the first with an available exit
+  wins) or the fastest of them, each country optionally narrowed to some providers, and
+  "only the selected countries" (on by default: when none is available the device is blocked
+  rather than sent elsewhere). Routes live on the gateway, so changing one never touches the client
+  config. The operator sets per-user rights: whether the user edits their own routes, whether they
+  see providers, and which upstreams their devices may use (default all). Upstreams need `geo`
+  (ISO 3166-1 alpha-2) and `provider`; `tags:` is rejected. The CLI becomes `user
+  add|list|rights|rm|link` and `device add|route|show|rm USER/DEVICE`; every `profile` command,
+  `ProfileService` and the console's Profiles page are gone, as is the `profile` metrics label. The
+  store migration drops every profile, every peer and its history; users and their links stay, so
+  devices must be added again and their configs reissued. The web panel edits routes on the user
+  page and in the console's new user page, which also sets the rights.
 - Breaking: profiles moved from `lotsman.yaml` into the database (#128). A config with a
   `profiles:` key fails `config check` and `serve` with the `lotsman profile import` command to
   run; existing peers stay blocked until their profiles are imported. `user add -profile` must name

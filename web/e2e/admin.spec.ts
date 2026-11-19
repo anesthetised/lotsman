@@ -4,7 +4,7 @@ test("the operator overview shows live data", async ({ page }) => {
   await page.goto("/admin");
   await expect(page.getByRole("heading", { name: "Upstreams" })).toBeVisible();
   const rows = page.getByRole("table").first().getByRole("row");
-  await expect(rows).toHaveCount(5); // header + 4 upstreams
+  await expect(rows).toHaveCount(6); // header + 5 upstreams
 
   // The rate in the chart caption changes as snapshots stream in.
   const caption = page.locator("figcaption");

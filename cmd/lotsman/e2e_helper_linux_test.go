@@ -143,13 +143,11 @@ listen: 127.0.0.1:51820
 endpoint: 127.0.0.1:51820
 state_dir: `+filepath.Join(dir, "state")+`
 upstreams:
-  - {name: nl, conf: `+filepath.Join(dir, "nl.conf")+`, provider: awg}
-  - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, provider: outline}
+  - {name: nl, conf: `+filepath.Join(dir, "nl.conf")+`, geo: NL, provider: awg}
+  - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, geo: FI, provider: outline}
 health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_after: 10, up_after: 1}
 metrics: {listen: 127.0.0.1:19100}
 `), 0o600)
-	mustRun(t, "-config", cfgPath, "profile", "add", "p", "provider=outline", "provider=awg")
-	mustRun(t, "-config", cfgPath, "profile", "add", "a", "provider=awg")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
@@ -169,14 +167,14 @@ metrics: {listen: 127.0.0.1:19100}
 		_, err := os.Stat(filepath.Join(dir, "state", "status.json"))
 		return err == nil
 	})
-	clientOf := func(name, profile string) *client {
-		out, err := capture(t, "-config", cfgPath, "user", "add", name, "-profile", profile)
+	clientOf := func(device string, route ...string) *client {
+		out, err := capture(t, append([]string{"-config", cfgPath, "device", "add", device}, route...)...)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return newClient(t, out)
 	}
-	alice, bob := clientOf("alice", "p"), clientOf("bob", "a")
+	alice, bob := clientOf("alice/phone", "FI", "NL"), clientOf("bob/phone", "NL")
 	exitsVia := func(c *client, want string) func() bool {
 		return func() bool { got, err := c.exitVia(2 * time.Second); return err == nil && got == want }
 	}

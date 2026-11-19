@@ -1,4 +1,4 @@
-// One peer's config: the QR code, the file and the text, handed over in the
+// One device's config: the QR code, the file and the text, handed over in the
 // way that suits the device the user is holding.
 
 import { createMemo, createSignal, Errored, Loading, Show } from "solid-js";
@@ -9,8 +9,8 @@ import { useUser } from "./context";
 import { failureOf, failureText } from "./errors";
 import { touchButton } from "./touch";
 
-/** The config of a peer: the one just issued, else fetched on demand (it holds the private key). */
-export function PeerConfig(props: { peerId: string; device: string; profile: string }) {
+/** The config of a device: the one just issued, else fetched on demand (it holds the private key). */
+export function PeerConfig(props: { peerId: string; device: string }) {
   const { t } = useI18n();
   const ctx = useUser();
   const config = createMemo(async () => {
@@ -32,13 +32,13 @@ export function PeerConfig(props: { peerId: string; device: string; profile: str
       )}
     >
       <Loading fallback={<p class="text-sm text-muted">{t.user.config.loading}</p>}>
-        <ConfigView device={props.device} profile={props.profile} config={config()} />
+        <ConfigView device={props.device} config={config()} />
       </Loading>
     </Errored>
   );
 }
 
-export function ConfigView(props: { device: string; profile: string; config: string }) {
+export function ConfigView(props: { device: string; config: string }) {
   const { t } = useI18n();
   const [copy, setCopy] = createSignal<"idle" | "copied" | "failed">("idle");
   const copyText = async () => {
@@ -53,13 +53,13 @@ export function ConfigView(props: { device: string; profile: string; config: str
     <div class="space-y-3">
       <QrCode
         text={props.config}
-        label={t.user.config.qrLabel(props.device, props.profile)}
+        label={t.user.config.qrLabel(props.device)}
         tooLong={t.user.config.qrTooLarge}
         class="mx-auto block max-w-[24rem]"
       />
       <p class="text-sm text-muted">{t.user.config.qrHint}</p>
       <div class="flex flex-wrap gap-2">
-        <button type="button" class={touchButton("primary")} onClick={() => saveAsFile(props.config, confFilename(props.device, props.profile))}>
+        <button type="button" class={touchButton("primary")} onClick={() => saveAsFile(props.config, confFilename(props.device))}>
           {t.user.config.download}
         </button>
         <button type="button" class={touchButton()} onClick={copyText}>

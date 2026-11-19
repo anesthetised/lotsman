@@ -29,6 +29,8 @@ export interface Formatters {
   time(date: Date): string;
   /** A count: "1,234". */
   count(n: number): string;
+  /** A country from its ISO 3166-1 alpha-2 code: "LV" is "Latvia"; an unknown code stays as it is. */
+  country(code: string): string;
 }
 
 export function formatters(locale: string): Formatters {
@@ -44,6 +46,7 @@ export function formatters(locale: string): Formatters {
   const dateTime = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" });
   const time = new Intl.DateTimeFormat(locale, { timeStyle: "medium" });
   const count = new Intl.NumberFormat(locale);
+  const regions = new Intl.DisplayNames(locale, { type: "region", fallback: "code" });
 
   return {
     rate(bytesPerSecond) {
@@ -76,6 +79,13 @@ export function formatters(locale: string): Formatters {
     },
     count(n) {
       return count.format(n);
+    },
+    country(code) {
+      try {
+        return regions.of(code) ?? code;
+      } catch {
+        return code; // not a well-formed region code
+      }
     },
   };
 }

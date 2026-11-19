@@ -64,14 +64,13 @@ listen: ` + listen + `
 endpoint: ` + listen + `
 state_dir: ` + stateDir + `
 upstreams:
-  - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, geo: NL}
+  - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, geo: NL, provider: acme}
 health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 `
 	}
 	stateDir := filepath.Join(dir, "state")
 	cfgPath := filepath.Join(dir, "lotsman.yaml")
 	os.WriteFile(cfgPath, []byte(config("127.0.0.1:51820", stateDir)), 0o600)
-	mustRun(t, "-config", cfgPath, "profile", "add", "nl", "geo=NL")
 	// Same network namespace, another state_dir and listen port.
 	otherState := filepath.Join(dir, "other-state")
 	otherCfg := filepath.Join(dir, "other.yaml")
@@ -90,7 +89,7 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 		_, err := os.Stat(filepath.Join(stateDir, "status.json"))
 		return err == nil
 	})
-	out, err := capture(t, "-config", cfgPath, "user", "add", "alice", "-profile", "nl")
+	out, err := capture(t, "-config", cfgPath, "device", "add", "alice/phone", "NL")
 	if err != nil {
 		t.Fatal(err)
 	}

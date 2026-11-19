@@ -313,15 +313,14 @@ func TestStepAcrossHourAndMinuteRows(t *testing.T) {
 
 func TestHasPeer(t *testing.T) {
 	s := open(t)
-	addProfiles(t, s, "nl")
-	p, err := s.AddUserPeer("alice", DefaultDevice, "nl", subnet)
+	p, err := s.AddUserPeer("alice", "phone", nl, subnet)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := s.HasPeer(p.ID); !ok || err != nil {
 		t.Errorf("HasPeer(%d) = %v, %v", p.ID, ok, err)
 	}
-	if err := s.DeletePeer("alice", DefaultDevice, "nl"); err != nil {
+	if err := s.DeletePeer("alice", "phone"); err != nil {
 		t.Fatal(err)
 	}
 	if ok, err := s.HasPeer(p.ID); ok || err != nil {
@@ -367,10 +366,7 @@ func TestMigrateFromVersion4(t *testing.T) {
 	if version != len(migrations) {
 		t.Errorf("user_version = %d, want %d", version, len(migrations))
 	}
-	// The peers survive and the history tables work.
-	if ok, err := s.HasPeer(1); !ok || err != nil {
-		t.Errorf("peer 1 after migration: %v, %v", ok, err)
-	}
+	// The history tables work.
 	mustAdd(t, s, at(1, 0), []UpstreamSample{{Name: "nl", UpRatio: 1, Down: 1}}, []PeerSample{{PeerID: 1, Down: 1}})
 	if err := s.Compact(at(2, 0), time.Hour, time.Hour); err != nil {
 		t.Fatal(err)

@@ -77,7 +77,6 @@ function Upstream(props: { upstream: UpstreamStatus; snapshot: StatusSnapshot })
         <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />
         <span class="text-muted">
           {[kindLabel(u().kind), u().geo, u().provider].filter(Boolean).join(" · ")}
-          <Show when={u().tags.length > 0}> · {u().tags.join(", ")}</Show>
         </span>
       </div>
 
@@ -237,7 +236,6 @@ function PeerTable(props: { peers: readonly PeerStatus[]; now: Date }) {
             <tr>
               <th scope="col" class="px-3 py-2 font-medium">{t.admin.user}</th>
               <th scope="col" class="px-3 py-2 font-medium">{t.admin.device}</th>
-              <th scope="col" class="px-3 py-2 font-medium">{t.admin.profile}</th>
               <th scope="col" class="px-3 py-2 font-medium">{t.admin.address}</th>
               <th scope="col" class="px-3 py-2 font-medium">{c.upstream.handshake}</th>
               <th scope="col" class="px-3 py-2 text-right font-medium">{t.traffic.down}</th>
@@ -255,7 +253,6 @@ function PeerTable(props: { peers: readonly PeerStatus[]; now: Date }) {
                     {p().user}
                   </th>
                   <td class="px-3 py-1.5">{p().device}</td>
-                  <td class="px-3 py-1.5">{p().profile}</td>
                   <td class="px-3 py-1.5 font-mono text-xs">{p().address}</td>
                   <td class="px-3 py-1.5">
                     <Show when={p().lastHandshake} fallback={t.admin.never}>

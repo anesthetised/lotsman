@@ -14,7 +14,6 @@ import (
 
 	lotsmanv1 "github.com/anesthetised/lotsman/api/lotsman/v1"
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
-	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/policy"
 	"github.com/anesthetised/lotsman/internal/ratelimit"
@@ -22,9 +21,8 @@ import (
 	"github.com/anesthetised/lotsman/internal/traffic"
 )
 
-// A user may add AddBurst devices or profiles at once, and then one every
-// AddEvery: enough to set up a household or try every profile, too few to
-// churn keys and addresses.
+// A user may add AddBurst devices at once, and then one every AddEvery:
+// enough to set up a household, too few to churn keys and addresses.
 const (
 	AddBurst = 10
 	AddEvery = 6 * time.Minute
@@ -66,11 +64,15 @@ func (s *userSelfService) Get(ctx context.Context, _ *lotsmanv1.GetSelfRequest) 
 	if err != nil {
 		return nil, internal(err)
 	}
-	return userMessage(u, peers), nil
+	m := userMessage(u, peers)
+	for _, d := range m.Devices {
+		hideProviders(u, d.Route)
+	}
+	return m, nil
 }
 
 // Watch is StatusService.Watch narrowed to the user; see userSnapshot. It
-// ends when the user is removed.
+// ends when the user is removed, and follows changes to their rights.
 func (s *userSelfService) Watch(ctx context.Context, req *lotsmanv1.WatchStatusRequest, stream lotsmanv1connect.UserSelfServiceWatchServerStream) error {
 	u, err := s.actingUser(ctx)
 	if err != nil {
@@ -78,14 +80,11 @@ func (s *userSelfService) Watch(ctx context.Context, req *lotsmanv1.WatchStatusR
 	}
 	next := func() (*lotsmanv1.StatusSnapshot, error) {
 		st, tr := s.src.Status(), s.src.Traffic()
-		if _, err := s.src.Store().User(u.Name); err != nil {
+		u, err := s.src.Store().User(u.Name)
+		if err != nil {
 			return nil, unauthenticated(err)
 		}
-		profiles, err := s.profiles()
-		if err != nil {
-			return nil, err
-		}
-		return userSnapshot(s.now(), s.src.ClientMTU(), st, tr, u.Name, profiles), nil
+		return userSnapshot(s.now(), s.src.ClientMTU(), st, tr, u), nil
 	}
 	return streamSnapshots(ctx, req, s.src.Ready(), next, stream.Send)
 }
@@ -107,14 +106,8 @@ func (s *userSelfService) UpstreamHistory(ctx context.Context, req *lotsmanv1.Hi
 		return nil, err
 	}
 	res, err := s.src.UpstreamHistory(req.GetName(), r)
-	if err == nil {
-		var profiles map[string]config.Profile
-		if profiles, err = s.profiles(); err != nil {
-			return nil, err
-		}
-		if !userUpstreams(s.src.Status(), u.Name, profiles)[req.GetName()] {
-			err = store.ErrNotFound
-		}
+	if err == nil && !userUpstreams(s.src.Status(), u)[req.GetName()] {
+		err = store.ErrNotFound
 	}
 	out, err := historyResponse(res, err)
 	for _, sample := range out.GetSamples() {
@@ -151,30 +144,27 @@ func (s *userSelfService) PeerHistory(ctx context.Context, req *lotsmanv1.Histor
 	return historyResponse(res, err)
 }
 
-// profiles are the stored profiles by name.
-func (s *userSelfService) profiles() (map[string]config.Profile, error) {
-	stored, err := s.src.Store().ListProfiles()
-	if err != nil {
-		return nil, internal(err)
-	}
-	profiles := map[string]config.Profile{}
-	for _, p := range stored {
-		profiles[p.Name] = p
-	}
-	return profiles, nil
-}
-
-// AddDevice adds a device, or another profile to one of the user's
-// devices, within max_devices and the rate limit; max_devices 0 refuses
-// every addition. The operator's AddDevice has neither limit.
+// AddDevice adds a device within max_devices and the rate limit;
+// max_devices 0 refuses every addition. Without edit_routes the device gets
+// the default route and naming one is refused. The operator's AddDevice
+// has neither limit.
 func (s *userSelfService) AddDevice(ctx context.Context, req *lotsmanv1.AddSelfDeviceRequest) (*lotsmanv1.DeviceConfig, error) {
 	u, err := s.actingUser(ctx)
 	if err != nil {
 		return nil, err
 	}
-	device, profile := req.GetDevice(), req.GetProfile()
-	if err := checkNames("device", device, "profile", profile); err != nil {
+	device := req.GetDevice()
+	if err := checkNames("device", device); err != nil {
 		return nil, err
+	}
+	route := policy.DefaultRoute()
+	if m := req.GetRoute(); m != nil {
+		if err := checkRoute(u, m); err != nil {
+			return nil, err
+		}
+		if route, err = validRoute(s.src, u.Rights, m); err != nil {
+			return nil, err
+		}
 	}
 	s.addMu.Lock()
 	defer s.addMu.Unlock()
@@ -182,20 +172,14 @@ func (s *userSelfService) AddDevice(ctx context.Context, req *lotsmanv1.AddSelfD
 	if err != nil {
 		return nil, internal(err)
 	}
-	var devices []string
-	for _, p := range peers {
-		if p.Device == device && p.Profile == profile {
-			return nil, addError(store.ErrExists, u.Name, device, profile)
-		}
-		if !slices.Contains(devices, p.Device) {
-			devices = append(devices, p.Device)
-		}
+	if slices.ContainsFunc(peers, func(p store.Peer) bool { return p.Device == device }) {
+		return nil, addError(store.ErrExists, u.Name, device)
 	}
 	limit := s.src.MaxDevices()
 	if limit == 0 {
 		return nil, connect.NewError(connect.CodePermissionDenied, "adding devices is turned off; ask the operator")
 	}
-	if !slices.Contains(devices, device) && len(devices) >= limit {
+	if len(peers) >= limit {
 		return nil, limitError("at most "+strconv.Itoa(limit)+" devices; remove one first or ask the operator",
 			&lotsmanv1.SelfServiceLimit{Reason: lotsmanv1.SelfServiceLimit_REASON_MAX_DEVICES, MaxDevices: uint32(limit)})
 	}
@@ -203,18 +187,45 @@ func (s *userSelfService) AddDevice(ctx context.Context, req *lotsmanv1.AddSelfD
 		return nil, limitError("too many devices added lately; try again in a few minutes",
 			&lotsmanv1.SelfServiceLimit{Reason: lotsmanv1.SelfServiceLimit_REASON_RATE_LIMITED, RetryAfter: durationpb.New(s.adds.Wait(u.Name, now))})
 	}
-	p, err := s.src.AddPeer(u.Name, device, profile, false)
+	p, err := s.src.AddPeer(u.Name, device, route, false)
 	if errors.Is(err, store.ErrNotFound) {
 		return nil, unauthenticated(err) // removed meanwhile
 	}
 	if err != nil {
-		return nil, addError(err, u.Name, device, profile)
+		return nil, addError(err, u.Name, device)
 	}
 	return deviceConfig(s.src, p), nil
 }
 
-// RemoveDevice removes one profile of a device, or the whole device when
-// the profile is empty.
+// SetRoute is the operator's SetRoute for one of the user's devices, within
+// their rights.
+func (s *userSelfService) SetRoute(ctx context.Context, req *lotsmanv1.SetSelfRouteRequest) (*lotsmanv1.Device, error) {
+	u, err := s.actingUser(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkRoute(u, req.GetRoute()); err != nil {
+		return nil, err
+	}
+	p, err := setRoute(s.src, u, req.GetDevice(), req.GetRoute())
+	if err != nil {
+		return nil, err
+	}
+	return deviceMessage(p), nil
+}
+
+// checkRoute applies the user's rights to a route they set: only with
+// edit_routes, and naming providers only with show_providers.
+func checkRoute(u store.User, m *lotsmanv1.Route) error {
+	if !u.Rights.EditRoutes {
+		return connect.NewError(connect.CodePermissionDenied, "your routes are set by the operator")
+	}
+	if !u.Rights.ShowProviders && slices.ContainsFunc(m.GetCountries(), func(c *lotsmanv1.Country) bool { return len(c.GetProviders()) > 0 }) {
+		return connect.NewError(connect.CodeInvalidArgument, "route: providers are not shown to you, so a route may name countries only")
+	}
+	return nil
+}
+
 func (s *userSelfService) RemoveDevice(ctx context.Context, req *lotsmanv1.RemoveSelfDeviceRequest) (*lotsmanv1.RemoveDeviceResponse, error) {
 	u, err := s.actingUser(ctx)
 	if err != nil {
@@ -223,8 +234,8 @@ func (s *userSelfService) RemoveDevice(ctx context.Context, req *lotsmanv1.Remov
 	if req.GetDevice() == "" {
 		return nil, connect.NewError(connect.CodeInvalidArgument, "device is required")
 	}
-	if err := s.src.RemovePeers(u.Name, req.GetDevice(), req.GetProfile()); err != nil {
-		return nil, notFound(err, "no such device or profile")
+	if err := s.src.RemovePeer(u.Name, req.GetDevice()); err != nil {
+		return nil, notFound(err, "no such device")
 	}
 	return &lotsmanv1.RemoveDeviceResponse{}, nil
 }
@@ -242,23 +253,6 @@ func (s *userSelfService) GetConfig(ctx context.Context, req *lotsmanv1.GetConfi
 		return nil, err
 	}
 	return deviceConfig(s.src, p), nil
-}
-
-// ListProfiles names the profiles a user may choose; their tiers and
-// warnings are the operator's business.
-func (s *userSelfService) ListProfiles(ctx context.Context, _ *lotsmanv1.ListProfilesRequest) (*lotsmanv1.ListProfilesResponse, error) {
-	if _, err := s.actingUser(ctx); err != nil {
-		return nil, err
-	}
-	profiles, err := s.src.Store().ListProfiles()
-	if err != nil {
-		return nil, internal(err)
-	}
-	res := &lotsmanv1.ListProfilesResponse{}
-	for _, p := range profiles {
-		res.Profiles = append(res.Profiles, &lotsmanv1.Profile{Name: p.Name})
-	}
-	return res, nil
 }
 
 // actingUser is the user the panel named in the Lotsman-User header. A
@@ -288,14 +282,14 @@ func unauthenticated(err error) error {
 }
 
 // userSnapshot is the status as one user may see it: their own peers, and
-// the upstreams their peers' profiles may use or a peer of theirs is routed
-// through. Other users' peers make up an upstream's routed, active and
-// traffic, so those stay unset; the total is the user's own peers' sum.
-func userSnapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Snapshot, user string, profiles map[string]config.Profile) *lotsmanv1.StatusSnapshot {
+// the upstreams of userUpstreams. Other users' peers make up an upstream's
+// routed, active and traffic, so those stay unset; the total is the user's
+// own peers' sum. Without show_providers no upstream has a provider.
+func userSnapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Snapshot, u store.User) *lotsmanv1.StatusSnapshot {
 	var own daemon.Status
 	var total traffic.Traffic
 	for _, p := range st.Peers {
-		if p.User != user {
+		if p.User != u.Name {
 			continue
 		}
 		own.Peers = append(own.Peers, p)
@@ -305,28 +299,40 @@ func userSnapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Sna
 		total.DownRate += t.DownRate
 		total.UpRate += t.UpRate
 	}
-	usable := userUpstreams(st, user, profiles)
-	for _, u := range st.Upstreams {
-		if usable[u.Name] {
-			u.Routed, u.Active = 0, 0
-			own.Upstreams = append(own.Upstreams, u)
+	visible := userUpstreams(st, u)
+	for _, up := range st.Upstreams {
+		if visible[up.Name] {
+			up.Routed, up.Active = 0, 0
+			if !u.Rights.ShowProviders {
+				up.Provider = ""
+			}
+			own.Upstreams = append(own.Upstreams, up)
 		}
 	}
 	return snapshot(now, clientMTU, own, traffic.Snapshot{Time: tr.Time, Peers: tr.Peers, Total: total})
 }
 
-// userUpstreams names the upstreams a user may see: those their peers'
-// profiles may use, and those a peer of theirs is routed through.
-func userUpstreams(st daemon.Status, user string, profiles map[string]config.Profile) map[string]bool {
-	usable := map[string]bool{}
-	for _, u := range st.Upstreams {
-		up := config.Upstream{Name: u.Name, Geo: u.Geo, Provider: u.Provider, Tags: u.Tags}
-		usable[u.Name] = slices.ContainsFunc(st.Peers, func(p daemon.PeerStatus) bool {
-			profile, ok := profiles[p.Profile]
-			return p.User == user && (p.Upstream == u.Name || (ok && policy.Allows(profile, up)))
-		})
+// userUpstreams names the upstreams a user may see: their allowed exits,
+// and any a device of theirs is still routed through, as briefly after their
+// exits change.
+func userUpstreams(st daemon.Status, u store.User) map[string]bool {
+	visible := map[string]bool{}
+	for _, up := range st.Upstreams {
+		visible[up.Name] = policy.Allows(u.Rights.Exits, up.Name) ||
+			slices.ContainsFunc(st.Peers, func(p daemon.PeerStatus) bool { return p.User == u.Name && p.Upstream == up.Name })
 	}
-	return usable
+	return visible
+}
+
+// hideProviders clears the providers of a route shown to u when u may not
+// see them; the operator may still have named some.
+func hideProviders(u store.User, r *lotsmanv1.Route) {
+	if u.Rights.ShowProviders {
+		return
+	}
+	for _, c := range r.GetCountries() {
+		c.Providers = nil
+	}
 }
 
 // limitError is a resource_exhausted AddDevice whose detail says which limit

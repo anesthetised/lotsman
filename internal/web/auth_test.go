@@ -124,7 +124,7 @@ func (p *authPanel) call(procedure string, cookie *http.Cookie) string {
 	return errorCode(p.t, serve(p.h, r))
 }
 
-const operatorRPC = lotsmanv1connect.ProfileServiceListProcedure
+const operatorRPC = lotsmanv1connect.UserServiceListProcedure
 
 // sessionOf is the session cookie w set.
 func sessionOf(t *testing.T, w *httptest.ResponseRecorder) *http.Cookie {

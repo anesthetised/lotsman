@@ -27,8 +27,8 @@ func outlineConfig(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(dir, "ol.key"), []byte(key), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	cfg := strings.Replace(mustReadFile(t, path), "upstreams: [{name: nl, conf: "+filepath.Join(dir, "nl.conf")+", geo: NL}]",
-		"upstreams: [{name: nl, conf: "+filepath.Join(dir, "nl.conf")+", geo: NL}, {name: ol, kind: outline, conf: "+filepath.Join(dir, "ol.key")+"}]", 1)
+	cfg := strings.Replace(mustReadFile(t, path), "upstreams: [{name: nl, conf: "+filepath.Join(dir, "nl.conf")+", geo: NL, provider: acme}]",
+		"upstreams: [{name: nl, conf: "+filepath.Join(dir, "nl.conf")+", geo: NL, provider: acme}, {name: ol, kind: outline, conf: "+filepath.Join(dir, "ol.key")+", geo: FI, provider: acme}]", 1)
 	if !strings.Contains(cfg, "kind: outline") {
 		t.Fatal("test setup: could not add the outline upstream")
 	}
@@ -52,8 +52,8 @@ func TestConfigCheckOutline(t *testing.T) {
 		t.Fatalf("config check: %v\n%s", err, out)
 	}
 	for _, want := range []string{
-		"lm-up-nl  kind awg  endpoint 192.0.2.1:51820  address 10.8.0.2/32  mtu 1400  s4 8",
-		"lm-up-ol  kind outline  endpoint 192.0.2.9:8388  address 192.0.0.8/32  mtu 1500  shadowsocks chacha20-ietf-poly1305, 3-byte prefix  max_flows 4096",
+		"lm-up-nl  kind awg  geo NL  provider acme  endpoint 192.0.2.1:51820  address 10.8.0.2/32  mtu 1400  s4 8",
+		"lm-up-ol  kind outline  geo FI  provider acme  endpoint 192.0.2.9:8388  address 192.0.0.8/32  mtu 1500  shadowsocks chacha20-ietf-poly1305, 3-byte prefix  max_flows 4096",
 		"health   probe 1.1.1.1:443  dns 1.1.1.1:53",
 		"config OK",
 	} {
@@ -66,7 +66,7 @@ func TestConfigCheckOutline(t *testing.T) {
 	}
 
 	// The proxy adds nothing to the client MTU: nl still sets it.
-	out, err = capture(t, "-config", path, "user", "add", "alice", "-profile", "nl")
+	out, err = capture(t, "-config", path, "device", "add", "alice/phone")
 	if err != nil {
 		t.Fatal(err)
 	}

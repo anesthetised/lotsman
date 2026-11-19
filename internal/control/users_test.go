@@ -20,11 +20,11 @@ import (
 
 	lotsmanv1 "github.com/anesthetised/lotsman/api/lotsman/v1"
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
-	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/control/controltest"
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/history"
+	"github.com/anesthetised/lotsman/internal/policy"
 	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/traffic"
 )
@@ -49,36 +49,67 @@ func wantCode(t *testing.T, what string, err error, want connect.Code) {
 	}
 }
 
+// route is a route message through the countries in order, each one geo
+// or geo:provider,provider.
+func route(fastest, strict bool, countries ...string) *lotsmanv1.Route {
+	r := &lotsmanv1.Route{Fastest: fastest, Strict: strict}
+	for _, c := range countries {
+		geo, providers, _ := strings.Cut(c, ":")
+		m := &lotsmanv1.Country{Geo: geo}
+		if providers != "" {
+			m.Providers = strings.Split(providers, ",")
+		}
+		r.Countries = append(r.Countries, m)
+	}
+	return r
+}
+
+// defaultRoute is policy.DefaultRoute as a message.
+var defaultRoute = route(true, true)
+
 func TestUserService(t *testing.T) {
-	users := controltest.NewUsers(t, "eu", "nl")
+	users := controltest.NewUsers(t)
 	ops, _ := userClients(newUserSource(users, daemon.Status{}))
 	ctx := t.Context()
 
-	// AddDevice creates the user; no device is the default one.
-	phone, err := ops.AddDevice(ctx, &lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone", Profile: "eu"})
+	if u, err := ops.AddUser(ctx, &lotsmanv1.AddUserRequest{User: "carol"}); err != nil || u.Name != "carol" ||
+		!cmp.Equal(u.Rights, &lotsmanv1.Rights{EditRoutes: true, ShowProviders: true}, protocmp.Transform()) {
+		t.Errorf("AddUser = %v, %v; want carol with the default rights", u, err)
+	}
+	_, err := ops.AddUser(ctx, &lotsmanv1.AddUserRequest{User: "carol"})
+	wantCode(t, "AddUser twice", err, connect.CodeAlreadyExists)
+	for _, name := range []string{"", "a/b", " carol", "\xff"} {
+		_, err := ops.AddUser(ctx, &lotsmanv1.AddUserRequest{User: name})
+		wantCode(t, "AddUser "+name, err, connect.CodeInvalidArgument)
+	}
+
+	// AddDevice creates the user; without a route the device gets the default.
+	phone, err := ops.AddDevice(ctx, &lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if phone.PeerId != "p_1" || phone.Config != "config of p_1" || users.Applied() != 1 {
 		t.Errorf("AddDevice = %v, applies %d", phone, users.Applied())
 	}
-	if _, err := ops.AddDevice(ctx, &lotsmanv1.AddDeviceRequest{User: "alice", Profile: "nl"}); err != nil {
+	if _, err := ops.AddDevice(ctx, &lotsmanv1.AddDeviceRequest{User: "alice", Device: "laptop", Route: route(false, true, "NL:beta", "DE")}); err != nil {
 		t.Fatal(err)
 	}
-	ops.AddDevice(ctx, &lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone", Profile: "nl"})
-	ops.AddDevice(ctx, &lotsmanv1.AddDeviceRequest{User: "bob", Device: "laptop", Profile: "eu"})
+	ops.AddDevice(ctx, &lotsmanv1.AddDeviceRequest{User: "bob", Device: "laptop", Route: route(true, false, "NL")})
 	for _, tc := range []struct {
 		req  *lotsmanv1.AddDeviceRequest
 		code connect.Code
 	}{
-		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone", Profile: "eu"}, connect.CodeAlreadyExists},
-		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone", Profile: "us"}, connect.CodeInvalidArgument},
-		{&lotsmanv1.AddDeviceRequest{Device: "phone", Profile: "eu"}, connect.CodeInvalidArgument},
-		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone"}, connect.CodeInvalidArgument},
-		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: "pho\nne", Profile: "eu"}, connect.CodeInvalidArgument},
-		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: " phone", Profile: "eu"}, connect.CodeInvalidArgument},
-		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: strings.Repeat("x", maxNameBytes+1), Profile: "eu"}, connect.CodeInvalidArgument},
-		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: "\xff", Profile: "eu"}, connect.CodeInvalidArgument},
+		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone"}, connect.CodeAlreadyExists},
+		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: "tablet", Route: route(false, true, "FR")}, connect.CodeInvalidArgument},
+		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: "tablet", Route: route(false, true, "DE:beta")}, connect.CodeInvalidArgument},
+		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: "tablet", Route: route(false, true, "NL", "NL")}, connect.CodeInvalidArgument},
+		{&lotsmanv1.AddDeviceRequest{Device: "phone"}, connect.CodeInvalidArgument},
+		{&lotsmanv1.AddDeviceRequest{User: "a/b", Device: "phone"}, connect.CodeInvalidArgument},
+		{&lotsmanv1.AddDeviceRequest{User: "alice"}, connect.CodeInvalidArgument},
+		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: "pho\nne"}, connect.CodeInvalidArgument},
+		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: " phone"}, connect.CodeInvalidArgument},
+		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: strings.Repeat("x", maxNameBytes+1)}, connect.CodeInvalidArgument},
+		{&lotsmanv1.AddDeviceRequest{User: "alice", Device: "\xff"}, connect.CodeInvalidArgument},
 	} {
 		_, err := ops.AddDevice(ctx, tc.req)
 		wantCode(t, "AddDevice "+tc.req.String(), err, tc.code)
@@ -92,50 +123,89 @@ func TestUserService(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	created := func(u *lotsmanv1.User) {
+	for _, u := range list.Users {
 		u.Created = nil
 		for _, d := range u.Devices {
-			for _, p := range d.Peers {
-				p.Created = nil
-			}
+			d.Created = nil
 		}
 	}
-	for _, u := range list.Users {
-		created(u)
-	}
+	rights := &lotsmanv1.Rights{EditRoutes: true, ShowProviders: true}
 	want := []*lotsmanv1.User{
-		{Name: "alice", Devices: []*lotsmanv1.Device{
-			{Name: "default", Peers: []*lotsmanv1.DevicePeer{{PeerId: "p_2", Profile: "nl", Address: "10.77.0.3"}}},
-			{Name: "phone", Peers: []*lotsmanv1.DevicePeer{
-				{PeerId: "p_1", Profile: "eu", Address: "10.77.0.2"}, {PeerId: "p_3", Profile: "nl", Address: "10.77.0.4"}}},
+		{Name: "alice", Rights: rights, Devices: []*lotsmanv1.Device{
+			{PeerId: "p_2", Name: "laptop", Address: "10.77.0.3", Route: route(false, true, "NL:beta", "DE")},
+			{PeerId: "p_1", Name: "phone", Address: "10.77.0.2", Route: defaultRoute},
 		}},
-		{Name: "bob", HasLink: true, Devices: []*lotsmanv1.Device{
-			{Name: "laptop", Peers: []*lotsmanv1.DevicePeer{{PeerId: "p_4", Profile: "eu", Address: "10.77.0.5"}}},
+		{Name: "bob", HasLink: true, Rights: rights, Devices: []*lotsmanv1.Device{
+			{PeerId: "p_3", Name: "laptop", Address: "10.77.0.4", Route: route(true, false, "NL")},
 		}},
+		{Name: "carol", Rights: rights},
 	}
 	if diff := cmp.Diff(want, list.Users, protocmp.Transform()); diff != "" {
 		t.Errorf("List (-want +got):\n%s", diff)
 	}
 
-	if c, err := ops.GetConfig(ctx, &lotsmanv1.GetConfigRequest{PeerId: "p_4"}); err != nil || c.Config != "config of p_4" {
-		t.Errorf("GetConfig(p_4) = %v, %v", c, err)
+	// SetRoute keeps the device, so its config; the route is checked as on AddDevice.
+	before := users.Applied()
+	d, err := ops.SetRoute(ctx, &lotsmanv1.SetRouteRequest{User: "alice", Device: "phone", Route: route(false, false, "DE")})
+	if err != nil || d.PeerId != "p_1" || d.Address != "10.77.0.2" || !cmp.Equal(d.Route, route(false, false, "DE"), protocmp.Transform()) || users.Applied() != before+1 {
+		t.Errorf("SetRoute = %v, %v", d, err)
 	}
-	for _, id := range []string{"p_99", "", "p_", "p_0", "p_-1", "p_01", "4", "x_4", "p_4 "} {
+	for _, tc := range []struct {
+		req  *lotsmanv1.SetRouteRequest
+		code connect.Code
+	}{
+		{&lotsmanv1.SetRouteRequest{User: "alice", Device: "phone", Route: route(false, true, "FR")}, connect.CodeInvalidArgument},
+		{&lotsmanv1.SetRouteRequest{User: "alice", Device: "phone"}, connect.CodeInvalidArgument},
+		{&lotsmanv1.SetRouteRequest{User: "alice", Device: "tablet", Route: defaultRoute}, connect.CodeNotFound},
+		{&lotsmanv1.SetRouteRequest{User: "dave", Device: "phone", Route: defaultRoute}, connect.CodeNotFound},
+	} {
+		_, err := ops.SetRoute(ctx, tc.req)
+		wantCode(t, "SetRoute "+tc.req.String(), err, tc.code)
+	}
+
+	// SetRights replaces them whole; new routes must then use the exits.
+	got, err := ops.SetRights(ctx, &lotsmanv1.SetRightsRequest{User: "alice", Rights: &lotsmanv1.Rights{ShowProviders: true, Exits: []string{"nl-be"}}})
+	if err != nil || got.Rights.EditRoutes || !got.Rights.ShowProviders || !cmp.Equal(got.Rights.Exits, []string{"nl-be"}) || len(got.Devices) != 2 {
+		t.Errorf("SetRights = %v, %v", got, err)
+	}
+	if u, _ := users.St.User("alice"); !cmp.Equal(u.Rights, store.Rights{ShowProviders: true, Exits: []string{"nl-be"}}) {
+		t.Errorf("stored rights = %+v", u.Rights)
+	}
+	for _, tc := range []struct {
+		req  *lotsmanv1.SetRightsRequest
+		code connect.Code
+	}{
+		{&lotsmanv1.SetRightsRequest{User: "alice", Rights: &lotsmanv1.Rights{Exits: []string{"fr-ac"}}}, connect.CodeInvalidArgument},
+		{&lotsmanv1.SetRightsRequest{User: "alice", Rights: &lotsmanv1.Rights{Exits: []string{"nl-be", "nl-be"}}}, connect.CodeInvalidArgument},
+		{&lotsmanv1.SetRightsRequest{User: "alice"}, connect.CodeInvalidArgument},
+		{&lotsmanv1.SetRightsRequest{User: "dave", Rights: &lotsmanv1.Rights{}}, connect.CodeNotFound},
+	} {
+		_, err := ops.SetRights(ctx, tc.req)
+		wantCode(t, "SetRights "+tc.req.String(), err, tc.code)
+	}
+	_, err = ops.SetRoute(ctx, &lotsmanv1.SetRouteRequest{User: "alice", Device: "phone", Route: route(false, true, "DE")})
+	wantCode(t, "SetRoute outside the exits", err, connect.CodeInvalidArgument)
+	_, err = ops.AddDevice(ctx, &lotsmanv1.AddDeviceRequest{User: "alice", Device: "tablet", Route: route(false, true, "NL:acme")})
+	wantCode(t, "AddDevice outside the exits", err, connect.CodeInvalidArgument)
+	if _, err := ops.AddDevice(ctx, &lotsmanv1.AddDeviceRequest{User: "alice", Device: "tablet", Route: route(false, true, "NL")}); err != nil {
+		t.Errorf("AddDevice within the exits: %v", err)
+	}
+
+	if c, err := ops.GetConfig(ctx, &lotsmanv1.GetConfigRequest{PeerId: "p_3"}); err != nil || c.Config != "config of p_3" {
+		t.Errorf("GetConfig(p_3) = %v, %v", c, err)
+	}
+	for _, id := range []string{"p_99", "", "p_", "p_0", "p_-1", "p_01", "3", "x_3", "p_3 "} {
 		_, err := ops.GetConfig(ctx, &lotsmanv1.GetConfigRequest{PeerId: id})
 		wantCode(t, "GetConfig "+id, err, connect.CodeNotFound)
 	}
 
-	// RemoveDevice: one profile, or every profile when none is named.
-	if _, err := ops.RemoveDevice(ctx, &lotsmanv1.RemoveDeviceRequest{User: "alice", Device: "phone", Profile: "nl"}); err != nil {
+	if _, err := ops.RemoveDevice(ctx, &lotsmanv1.RemoveDeviceRequest{User: "alice", Device: "phone"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ops.RemoveDevice(ctx, &lotsmanv1.RemoveDeviceRequest{User: "alice"}); err != nil {
-		t.Fatal(err)
+	if peers, _ := users.St.UserPeers("alice"); len(peers) != 2 || peers[0].Device != "laptop" || peers[1].Device != "tablet" {
+		t.Errorf("alice's peers after the removal: %+v", peers)
 	}
-	if peers, _ := users.St.UserPeers("alice"); len(peers) != 1 || peers[0].Device != "phone" || peers[0].Profile != "eu" {
-		t.Errorf("alice's peers after removals: %+v", peers)
-	}
-	_, err = ops.RemoveDevice(ctx, &lotsmanv1.RemoveDeviceRequest{User: "alice", Device: "tablet"})
+	_, err = ops.RemoveDevice(ctx, &lotsmanv1.RemoveDeviceRequest{User: "alice", Device: "phone"})
 	wantCode(t, "RemoveDevice of a missing device", err, connect.CodeNotFound)
 
 	if _, err := ops.RevokeLink(ctx, &lotsmanv1.RevokeLinkRequest{User: "bob"}); err != nil {
@@ -144,12 +214,12 @@ func TestUserService(t *testing.T) {
 	if _, err := users.St.ResolveLink(token.Token); err == nil {
 		t.Error("the revoked link still resolves")
 	}
-	_, err = ops.IssueLink(ctx, &lotsmanv1.IssueLinkRequest{User: "carol"})
+	_, err = ops.IssueLink(ctx, &lotsmanv1.IssueLinkRequest{User: "dave"})
 	wantCode(t, "IssueLink for a missing user", err, connect.CodeNotFound)
-	_, err = ops.RevokeLink(ctx, &lotsmanv1.RevokeLinkRequest{User: "carol"})
+	_, err = ops.RevokeLink(ctx, &lotsmanv1.RevokeLinkRequest{User: "dave"})
 	wantCode(t, "RevokeLink for a missing user", err, connect.CodeNotFound)
 
-	before := users.Applied()
+	before = users.Applied()
 	if _, err := ops.RemoveUser(ctx, &lotsmanv1.RemoveUserRequest{User: "bob"}); err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +233,7 @@ func TestUserService(t *testing.T) {
 // Every self-service RPC needs a user the store knows, in exactly one
 // Lotsman-User header.
 func TestUserSelfServiceNeedsUser(t *testing.T) {
-	users := controltest.NewUsers(t, "eu")
+	users := controltest.NewUsers(t)
 	users.St.CreateUser("alice")
 	_, self := userClients(newUserSource(users, daemon.Status{}))
 	twice := func(ctx context.Context) context.Context {
@@ -181,14 +251,14 @@ func TestUserSelfServiceNeedsUser(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			_, err := self.Get(ctx, &lotsmanv1.GetSelfRequest{})
 			wantCode(t, "Get", err, connect.CodeUnauthenticated)
-			_, err = self.AddDevice(ctx, &lotsmanv1.AddSelfDeviceRequest{Device: "phone", Profile: "eu"})
+			_, err = self.AddDevice(ctx, &lotsmanv1.AddSelfDeviceRequest{Device: "phone"})
 			wantCode(t, "AddDevice", err, connect.CodeUnauthenticated)
+			_, err = self.SetRoute(ctx, &lotsmanv1.SetSelfRouteRequest{Device: "phone", Route: defaultRoute})
+			wantCode(t, "SetRoute", err, connect.CodeUnauthenticated)
 			_, err = self.RemoveDevice(ctx, &lotsmanv1.RemoveSelfDeviceRequest{Device: "phone"})
 			wantCode(t, "RemoveDevice", err, connect.CodeUnauthenticated)
 			_, err = self.GetConfig(ctx, &lotsmanv1.GetConfigRequest{PeerId: "p_1"})
 			wantCode(t, "GetConfig", err, connect.CodeUnauthenticated)
-			_, err = self.ListProfiles(ctx, &lotsmanv1.ListProfilesRequest{})
-			wantCode(t, "ListProfiles", err, connect.CodeUnauthenticated)
 			stream, err := self.Watch(ctx, &lotsmanv1.WatchStatusRequest{})
 			if err == nil {
 				_, err = stream.Receive()
@@ -208,33 +278,46 @@ func newUserSource(users *controltest.Users, st daemon.Status) *fakeSource {
 }
 
 func TestUserSelfService(t *testing.T) {
-	users := controltest.NewUsers(t, "eu", "nl")
+	users := controltest.NewUsers(t)
 	ops, self := userClients(newUserSource(users, daemon.Status{}))
 	alice, bob := as(t.Context(), "alice"), as(t.Context(), "bob")
-	bobsPeer, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "bob", Device: "phone", Profile: "eu"})
+	bobsPeer, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "bob", Device: "phone"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	users.St.CreateUser("alice")
 
-	phone, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "phone", Profile: "eu"})
+	phone, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "phone"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if peer, _ := users.St.PeerByID(2); phone.PeerId != "p_2" || phone.Config != "config of p_2" || peer.User != "alice" {
+	if peer, _ := users.St.PeerByID(2); phone.PeerId != "p_2" || phone.Config != "config of p_2" || peer.User != "alice" ||
+		!cmp.Equal(peer.Route, policy.DefaultRoute()) {
 		t.Errorf("AddDevice = %v, peer %+v", phone, peer)
 	}
-	_, err = self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "phone", Profile: "eu"})
+	if _, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "laptop", Route: route(false, true, "NL:acme")}); err != nil {
+		t.Errorf("AddDevice with a route: %v", err)
+	}
+	_, err = self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "phone"})
 	wantCode(t, "AddDevice twice", err, connect.CodeAlreadyExists)
-	_, err = self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Profile: "eu"})
+	_, err = self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{})
 	wantCode(t, "AddDevice without a device", err, connect.CodeInvalidArgument)
-	_, err = self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "tablet", Profile: "us"})
-	wantCode(t, "AddDevice with a missing profile", err, connect.CodeInvalidArgument)
+	_, err = self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "tablet", Route: route(false, true, "FR")})
+	wantCode(t, "AddDevice with a country without upstreams", err, connect.CodeInvalidArgument)
 
 	got, err := self.Get(alice, &lotsmanv1.GetSelfRequest{})
-	if err != nil || got.Name != "alice" || len(got.Devices) != 1 || got.Devices[0].Peers[0].PeerId != "p_2" {
+	if err != nil || got.Name != "alice" || len(got.Devices) != 2 || got.Devices[1].PeerId != "p_2" || !got.Rights.EditRoutes {
 		t.Errorf("Get = %v, %v", got, err)
 	}
+
+	d, err := self.SetRoute(alice, &lotsmanv1.SetSelfRouteRequest{Device: "phone", Route: route(false, false, "DE", "NL:beta")})
+	if err != nil || d.PeerId != "p_2" || !cmp.Equal(d.Route, route(false, false, "DE", "NL:beta"), protocmp.Transform()) {
+		t.Errorf("SetRoute = %v, %v", d, err)
+	}
+	_, err = self.SetRoute(bob, &lotsmanv1.SetSelfRouteRequest{Device: "laptop", Route: defaultRoute})
+	wantCode(t, "SetRoute of alice's device as bob", err, connect.CodeNotFound)
+	_, err = self.SetRoute(alice, &lotsmanv1.SetSelfRouteRequest{Device: "phone"})
+	wantCode(t, "SetRoute without a route", err, connect.CodeInvalidArgument)
 
 	if c, err := self.GetConfig(alice, &lotsmanv1.GetConfigRequest{PeerId: "p_2"}); err != nil || c.Config != "config of p_2" {
 		t.Errorf("own GetConfig = %v, %v", c, err)
@@ -247,8 +330,8 @@ func TestUserSelfService(t *testing.T) {
 		t.Errorf("bob's peer: %v; no peer: %v; want the same error", other, missing)
 	}
 	// Removing names the device within the acting user only.
-	_, err = self.RemoveDevice(bob, &lotsmanv1.RemoveSelfDeviceRequest{Device: "phone", Profile: "nl"})
-	wantCode(t, "RemoveDevice of a profile bob's phone lacks", err, connect.CodeNotFound)
+	_, err = self.RemoveDevice(bob, &lotsmanv1.RemoveSelfDeviceRequest{Device: "laptop"})
+	wantCode(t, "RemoveDevice of a device bob lacks", err, connect.CodeNotFound)
 	_, err = self.RemoveDevice(alice, &lotsmanv1.RemoveSelfDeviceRequest{})
 	wantCode(t, "RemoveDevice without a device", err, connect.CodeInvalidArgument)
 	if _, err := self.RemoveDevice(alice, &lotsmanv1.RemoveSelfDeviceRequest{Device: "phone"}); err != nil {
@@ -259,37 +342,105 @@ func TestUserSelfService(t *testing.T) {
 	}
 	_, err = self.RemoveDevice(alice, &lotsmanv1.RemoveSelfDeviceRequest{Device: "phone"})
 	wantCode(t, "RemoveDevice of a removed device", err, connect.CodeNotFound)
+}
 
-	profiles, err := self.ListProfiles(alice, &lotsmanv1.ListProfilesRequest{})
-	wantProfiles := &lotsmanv1.ListProfilesResponse{Profiles: []*lotsmanv1.Profile{{Name: "eu"}, {Name: "nl"}}}
-	if err != nil || !cmp.Equal(profiles, wantProfiles, protocmp.Transform()) {
-		t.Errorf("ListProfiles = %v, %v", profiles, err)
+// The operator's rights decide which routes a user may set on their page.
+func TestUserSelfRights(t *testing.T) {
+	const allowed connect.Code = 0
+	for _, tc := range []struct {
+		name   string
+		rights store.Rights
+		route  *lotsmanv1.Route // for AddDevice and SetRoute; nil: AddDevice without one
+		code   connect.Code     // of both; allowed for none
+	}{
+		{"default rights, no route", store.DefaultRights(), nil, allowed},
+		{"default rights, providers", store.DefaultRights(), route(true, true, "NL:acme,beta"), allowed},
+		{"no edit_routes, no route", store.Rights{ShowProviders: true}, nil, allowed},
+		{"no edit_routes, a route", store.Rights{ShowProviders: true}, route(false, true, "NL"), connect.CodePermissionDenied},
+		{"no edit_routes, the default route", store.Rights{ShowProviders: true}, defaultRoute, connect.CodePermissionDenied},
+		{"no show_providers, countries", store.Rights{EditRoutes: true}, route(false, true, "NL", "DE"), allowed},
+		{"no show_providers, a provider", store.Rights{EditRoutes: true}, route(false, true, "NL", "DE:acme"), connect.CodeInvalidArgument},
+		{"exits, a country among them", store.Rights{EditRoutes: true, ShowProviders: true, Exits: []string{"de-ac"}}, route(false, false, "DE"), allowed},
+		{"exits, a country outside them", store.Rights{EditRoutes: true, ShowProviders: true, Exits: []string{"de-ac"}}, route(false, false, "NL"), connect.CodeInvalidArgument},
+		{"exits, a provider outside them", store.Rights{EditRoutes: true, ShowProviders: true, Exits: []string{"nl-ac"}}, route(false, false, "NL:beta"), connect.CodeInvalidArgument},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			users := controltest.NewUsers(t)
+			users.St.CreateUser("alice")
+			if _, err := users.St.SetRights("alice", tc.rights); err != nil {
+				t.Fatal(err)
+			}
+			users.St.AddPeer("alice", "phone", policy.DefaultRoute(), controltest.Subnet)
+			_, self := userClients(newUserSource(users, daemon.Status{}))
+			alice := as(t.Context(), "alice")
+
+			check := func(what string, err error) {
+				t.Helper()
+				if tc.code == allowed && err != nil {
+					t.Errorf("%s: %v, want it allowed", what, err)
+				} else if tc.code != allowed {
+					wantCode(t, what, err, tc.code)
+				}
+			}
+			_, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "laptop", Route: tc.route})
+			check("AddDevice", err)
+			if err == nil && tc.route == nil {
+				if p, _ := users.St.Peer("alice", "laptop"); !cmp.Equal(p.Route, policy.DefaultRoute()) {
+					t.Errorf("a device added without a route has %v", p.Route)
+				}
+			}
+			if tc.route != nil {
+				_, err = self.SetRoute(alice, &lotsmanv1.SetSelfRouteRequest{Device: "phone", Route: tc.route})
+				check("SetRoute", err)
+			}
+			if p, _ := users.St.Peer("alice", "phone"); tc.code != allowed && !cmp.Equal(p.Route, policy.DefaultRoute()) {
+				t.Errorf("a refused SetRoute stored %v", p.Route)
+			}
+		})
+	}
+}
+
+// Without show_providers a user's page shows countries only, even of a route
+// the operator gave providers.
+func TestUserSelfHidesProviders(t *testing.T) {
+	users := controltest.NewUsers(t)
+	users.St.CreateUser("alice")
+	users.St.SetRights("alice", store.Rights{EditRoutes: true})
+	providers := policy.Route{Strict: true, Countries: []policy.Country{{Geo: "NL", Providers: []string{"beta"}}, {Geo: "DE"}}}
+	users.St.AddPeer("alice", "phone", providers, controltest.Subnet)
+	_, self := userClients(newUserSource(users, daemon.Status{}))
+	got, err := self.Get(as(t.Context(), "alice"), &lotsmanv1.GetSelfRequest{})
+	if err != nil || len(got.Devices) != 1 || !cmp.Equal(got.Devices[0].Route, route(false, true, "NL", "DE"), protocmp.Transform()) {
+		t.Errorf("Get = %v, %v; want the route without providers", got, err)
+	}
+	if p, _ := users.St.Peer("alice", "phone"); !cmp.Equal(p.Route, providers) {
+		t.Errorf("Get changed the stored route: %v", p.Route)
 	}
 }
 
 func TestUserSelfMaxDevices(t *testing.T) {
-	users := controltest.NewUsers(t, "eu", "nl")
+	users := controltest.NewUsers(t)
 	users.Limit = 2
 	users.St.CreateUser("alice")
 	_, self := userClients(newUserSource(users, daemon.Status{}))
 	alice := as(t.Context(), "alice")
 	for _, d := range []string{"phone", "laptop"} {
-		if _, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: d, Profile: "eu"}); err != nil {
+		if _, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: d}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	_, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "tablet", Profile: "eu"})
+	_, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "tablet"})
 	wantCode(t, "a third device", err, connect.CodeResourceExhausted)
 	if l := limitOf(t, err); l.GetReason() != lotsmanv1.SelfServiceLimit_REASON_MAX_DEVICES || l.GetMaxDevices() != 2 {
 		t.Errorf("a third device: detail %v, want max_devices 2", l)
 	}
-	// Another profile is no new device: switching profiles stays possible.
-	if _, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "phone", Profile: "nl"}); err != nil {
-		t.Errorf("another profile on a device at the limit: %v", err)
+	// A new route is no new device.
+	if _, err := self.SetRoute(alice, &lotsmanv1.SetSelfRouteRequest{Device: "phone", Route: route(false, true, "NL")}); err != nil {
+		t.Errorf("a new route on a device at the limit: %v", err)
 	}
 	// The operator is not limited.
 	ops, _ := userClients(newUserSource(users, daemon.Status{}))
-	if _, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "alice", Device: "tablet", Profile: "eu"}); err != nil {
+	if _, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "alice", Device: "tablet"}); err != nil {
 		t.Errorf("operator past the limit: %v", err)
 	}
 
@@ -298,7 +449,7 @@ func TestUserSelfMaxDevices(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range 6 {
 		wg.Go(func() {
-			self.AddDevice(as(t.Context(), "bob"), &lotsmanv1.AddSelfDeviceRequest{Device: "d" + strconv.Itoa(i), Profile: "eu"})
+			self.AddDevice(as(t.Context(), "bob"), &lotsmanv1.AddSelfDeviceRequest{Device: "d" + strconv.Itoa(i)})
 		})
 	}
 	wg.Wait()
@@ -307,22 +458,23 @@ func TestUserSelfMaxDevices(t *testing.T) {
 	}
 }
 
-// max_devices 0 turns adding off, another profile on a device included;
-// removing and the operator still work.
+// max_devices 0 turns adding off; removing, routes and the operator still
+// work.
 func TestUserSelfMaxDevicesZero(t *testing.T) {
-	users := controltest.NewUsers(t, "eu", "nl")
+	users := controltest.NewUsers(t)
 	users.Limit = 0
 	ops, self := userClients(newUserSource(users, daemon.Status{}))
-	if _, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone", Profile: "eu"}); err != nil {
+	if _, err := ops.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone"}); err != nil {
 		t.Fatalf("the operator with max_devices 0: %v", err)
 	}
 	alice := as(t.Context(), "alice")
-	_, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "laptop", Profile: "eu"})
+	_, err := self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "laptop"})
 	wantCode(t, "a new device", err, connect.CodePermissionDenied)
-	_, err = self.AddDevice(alice, &lotsmanv1.AddSelfDeviceRequest{Device: "phone", Profile: "nl"})
-	wantCode(t, "another profile on a device", err, connect.CodePermissionDenied)
 	if peers, _ := users.St.UserPeers("alice"); len(peers) != 1 {
 		t.Errorf("alice's peers: %+v", peers)
+	}
+	if _, err := self.SetRoute(alice, &lotsmanv1.SetSelfRouteRequest{Device: "phone", Route: route(false, true, "DE")}); err != nil {
+		t.Errorf("a new route with max_devices 0: %v", err)
 	}
 	if _, err := self.RemoveDevice(alice, &lotsmanv1.RemoveSelfDeviceRequest{Device: "phone"}); err != nil {
 		t.Errorf("removing with max_devices 0: %v", err)
@@ -330,7 +482,7 @@ func TestUserSelfMaxDevicesZero(t *testing.T) {
 }
 
 func TestUserSelfAddRateLimit(t *testing.T) {
-	users := controltest.NewUsers(t, "eu")
+	users := controltest.NewUsers(t)
 	users.Limit = 100
 	users.St.CreateUser("alice")
 	users.St.CreateUser("bob")
@@ -342,7 +494,7 @@ func TestUserSelfAddRateLimit(t *testing.T) {
 	lotsmanv1connect.RegisterUserSelfServiceHandler(s, svc)
 	self := lotsmanv1connect.NewUserSelfServiceClient(connect.NewClient(connectinprocess.New(s)))
 	add := func(user, device string) error {
-		_, err := self.AddDevice(as(t.Context(), user), &lotsmanv1.AddSelfDeviceRequest{Device: device, Profile: "eu"})
+		_, err := self.AddDevice(as(t.Context(), user), &lotsmanv1.AddSelfDeviceRequest{Device: device})
 		return err
 	}
 	for i := range AddBurst {
@@ -388,58 +540,60 @@ func TestUserSnapshot(t *testing.T) {
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
 	st := daemon.Status{
 		Upstreams: []daemon.UpstreamStatus{
-			{Name: "nl", Kind: "awg", Geo: "NL", Tags: []string{"eu"}, State: health.Up, Routed: 2, Active: 2, Latency: time.Millisecond},
-			{Name: "de", Kind: "awg", Geo: "DE", Tags: []string{"eu"}, State: health.Up, Routed: 1, Active: 1},
-			{Name: "us", Kind: "awg", Geo: "US", State: health.Up, Routed: 1},
-			{Name: "fi", Kind: "awg", Geo: "FI", State: health.Up},
+			{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme", State: health.Up, Routed: 2, Active: 2, Latency: time.Millisecond},
+			{Name: "de", Kind: "awg", Geo: "DE", Provider: "acme", State: health.Up, Routed: 1, Active: 1},
+			{Name: "us", Kind: "awg", Geo: "US", Provider: "beta", State: health.Up, Routed: 1},
+			{Name: "fi", Kind: "awg", Geo: "FI", Provider: "beta", State: health.Up},
 		},
 		Peers: []daemon.PeerStatus{
-			{ID: 1, User: "alice", Device: "phone", Profile: "nl", Upstream: "nl"},
-			{ID: 2, User: "alice", Device: "laptop", Profile: "gone", Upstream: "fi"}, // a profile since removed
-			{ID: 3, User: "bob", Device: "phone", Profile: "eu", Upstream: "de"},
-			{ID: 4, User: "bob", Device: "laptop", Profile: "any", Upstream: "us"},
+			{ID: 1, User: "alice", Device: "phone", Upstream: "nl"},
+			{ID: 2, User: "alice", Device: "laptop", Upstream: "fi"}, // routed before her exits changed
+			{ID: 3, User: "bob", Device: "phone", Upstream: "de"},
+			{ID: 4, User: "bob", Device: "laptop", Upstream: "us"},
 		},
 	}
-	profiles := map[string]config.Profile{
-		"nl":  {Name: "nl", Prefer: []config.Match{{Geo: "NL"}}},
-		"eu":  {Name: "eu", Prefer: []config.Match{{Tag: "eu"}}},
-		"any": {Name: "any"},
-	}
+	alice := store.User{Name: "alice", Rights: store.Rights{EditRoutes: true, ShowProviders: true, Exits: []string{"nl", "gone"}}}
 	tr := trafficSnapshot(now, map[int64]uint64{1: 10, 2: 20, 3: 300, 4: 4000}, map[string]uint64{"nl": 5000, "fi": 6000})
-	got := userSnapshot(now, 1280, st, tr, "alice", profiles)
+	got := userSnapshot(now, 1280, st, tr, alice)
 	want := &lotsmanv1.StatusSnapshot{
 		Time: got.Time, ClientMtu: 1280,
 		Total: &lotsmanv1.Traffic{DownBytes: 30, UpBytes: 30, DownRate: 30, UpRate: 30},
 		Upstreams: []*lotsmanv1.UpstreamStatus{
-			{Name: "nl", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "NL", Tags: []string{"eu"},
+			{Name: "nl", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "NL", Provider: "acme",
 				State: lotsmanv1.UpstreamState_UPSTREAM_STATE_UP, Latency: got.Upstreams[0].Latency},
-			// Routed through, though no profile of alice's names it.
-			{Name: "fi", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "FI", State: lotsmanv1.UpstreamState_UPSTREAM_STATE_UP},
+			// Routed through, though not among her exits.
+			{Name: "fi", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "FI", Provider: "beta", State: lotsmanv1.UpstreamState_UPSTREAM_STATE_UP},
 		},
 		Peers: []*lotsmanv1.PeerStatus{
-			{PeerId: "p_1", User: "alice", Device: "phone", Profile: "nl", Upstream: "nl", Traffic: &lotsmanv1.Traffic{DownBytes: 10, UpBytes: 10, DownRate: 10, UpRate: 10}},
-			{PeerId: "p_2", User: "alice", Device: "laptop", Profile: "gone", Upstream: "fi", Traffic: &lotsmanv1.Traffic{DownBytes: 20, UpBytes: 20, DownRate: 20, UpRate: 20}},
+			{PeerId: "p_1", User: "alice", Device: "phone", Upstream: "nl", Traffic: &lotsmanv1.Traffic{DownBytes: 10, UpBytes: 10, DownRate: 10, UpRate: 10}},
+			{PeerId: "p_2", User: "alice", Device: "laptop", Upstream: "fi", Traffic: &lotsmanv1.Traffic{DownBytes: 20, UpBytes: 20, DownRate: 20, UpRate: 20}},
 		},
 	}
 	if diff := cmp.Diff(want, got, protocmp.Transform()); diff != "" {
 		t.Errorf("alice's snapshot (-want +got):\n%s", diff)
 	}
 
-	// bob's "any" profile may use every upstream; nothing of alice's shows.
-	got = userSnapshot(now, 1280, st, tr, "bob", profiles)
+	// bob may use every upstream but sees no provider; nothing of alice's shows.
+	bob := store.User{Name: "bob", Rights: store.Rights{EditRoutes: true}}
+	got = userSnapshot(now, 1280, st, tr, bob)
 	var names []string
 	for _, u := range got.Upstreams {
 		names = append(names, u.Name)
 		if u.Routed != 0 || u.Active != 0 || u.Traffic != nil {
 			t.Errorf("bob sees %s's routed %d, active %d, traffic %v", u.Name, u.Routed, u.Active, u.Traffic)
 		}
+		if u.Provider != "" {
+			t.Errorf("bob sees %s's provider %q", u.Name, u.Provider)
+		}
 	}
 	if !cmp.Equal(names, []string{"nl", "de", "us", "fi"}) || len(got.Peers) != 2 || got.Total.DownBytes != 4300 {
 		t.Errorf("bob's snapshot: upstreams %v, peers %v, total %v", names, got.Peers, got.Total)
 	}
 
-	// A user without peers sees no upstream; before the first sample, no total.
-	got = userSnapshot(now, 1280, st, traffic.Snapshot{}, "carol", profiles)
+	// A user with only stale exits and no peers sees no upstream; before
+	// the first sample, no total.
+	carol := store.User{Name: "carol", Rights: store.Rights{Exits: []string{"gone"}}}
+	got = userSnapshot(now, 1280, st, traffic.Snapshot{}, carol)
 	if len(got.Upstreams) != 0 || len(got.Peers) != 0 || got.Total != nil {
 		t.Errorf("carol's snapshot: %v", got)
 	}
@@ -461,13 +615,13 @@ func trafficSnapshot(now time.Time, peers map[int64]uint64, upstreams map[string
 
 // The user's Watch streams their view, and ends once they are removed.
 func TestUserSelfWatch(t *testing.T) {
-	users := controltest.NewUsers(t, "nl")
+	users := controltest.NewUsers(t)
 	users.St.CreateUser("alice")
 	src := newUserSource(users, daemon.Status{
-		Upstreams: []daemon.UpstreamStatus{{Name: "nl", Kind: "awg", Geo: "NL"}},
+		Upstreams: []daemon.UpstreamStatus{{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme"}},
 		Peers: []daemon.PeerStatus{
-			{ID: 1, User: "alice", Device: "phone", Profile: "nl", Upstream: "nl"},
-			{ID: 2, User: "bob", Device: "phone", Profile: "nl", Upstream: "nl"},
+			{ID: 1, User: "alice", Device: "phone", Upstream: "nl"},
+			{ID: 2, User: "bob", Device: "phone", Upstream: "nl"},
 		},
 	})
 	_, self := userClients(src)
@@ -479,26 +633,32 @@ func TestUserSelfWatch(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(first.Peers) != 1 || first.Peers[0].User != "alice" || len(first.Upstreams) != 1 {
+	if len(first.Peers) != 1 || first.Peers[0].User != "alice" || len(first.Upstreams) != 1 || first.Upstreams[0].Provider != "acme" {
 		t.Errorf("alice's first snapshot: %v", first)
+	}
+	// Rights apply to the next snapshot.
+	users.St.SetRights("alice", store.Rights{EditRoutes: true})
+	if next, err := stream.Receive(); err != nil || len(next.Upstreams) != 1 || next.Upstreams[0].Provider != "" {
+		t.Errorf("the snapshot after hiding providers: %v, %v", next, err)
 	}
 	users.St.DeleteUser("alice")
 	_, err = stream.Receive()
 	wantCode(t, "Watch after the user's removal", err, connect.CodeUnauthenticated)
 }
 
-// A user's history covers the upstreams their Watch shows, without bytes,
-// and their own peers; anything else fails as a missing name does.
+// A user's history covers the upstreams their Watch shows (their exits, and
+// any a device of theirs is routed through), without bytes, and their own
+// peers; anything else fails as a missing name does.
 func TestUserSelfHistory(t *testing.T) {
 	users := controltest.NewUsers(t)
-	users.St.AddProfile(config.Profile{Name: "nl", Prefer: []config.Match{{Geo: "NL"}}})
-	alices, _ := users.St.AddUserPeer("alice", "phone", "nl", controltest.Subnet)
-	bobs, _ := users.St.AddUserPeer("bob", "phone", "nl", controltest.Subnet)
+	alices, _ := users.St.AddUserPeer("alice", "phone", policy.DefaultRoute(), controltest.Subnet)
+	bobs, _ := users.St.AddUserPeer("bob", "phone", policy.DefaultRoute(), controltest.Subnet)
+	users.St.SetRights("alice", store.Rights{Exits: []string{"nl"}})
 	src := newUserSource(users, daemon.Status{
 		Upstreams: []daemon.UpstreamStatus{{Name: "nl", Geo: "NL"}, {Name: "de", Geo: "DE"}, {Name: "us", Geo: "US"}},
 		Peers: []daemon.PeerStatus{
-			{ID: alices.ID, User: "alice", Profile: "nl", Upstream: "de"}, // routed off its profile
-			{ID: bobs.ID, User: "bob", Profile: "nl", Upstream: "us"},
+			{ID: alices.ID, User: "alice", Upstream: "de"}, // routed outside her exits, as briefly after they change
+			{ID: bobs.ID, User: "bob", Upstream: "us"},
 		},
 	})
 	f := &fakeHistory{res: history.Result{Step: time.Minute, Samples: []store.Sample{

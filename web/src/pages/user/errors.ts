@@ -5,14 +5,13 @@
 import { Code, ConnectError } from "@connectrpc/connect";
 import { SelfServiceLimit_Reason, SelfServiceLimitSchema } from "../../gen/lotsman/v1/user_self_pb";
 import type { Dict } from "../../i18n/en";
-import { ProfileChangeError } from "./profileChange";
 
 export type Failure =
   /** The link no longer resolves to a user: it was rotated or revoked. */
   | { kind: "revoked" }
   /** The panel cannot reach the daemon, or the call timed out. */
   | { kind: "unavailable" }
-  /** `users.max_devices` is 0: users may not add devices (nor switch a device's profile). */
+  /** Not allowed: `users.max_devices` is 0, or the operator sets the user's routes. */
   | { kind: "denied" }
   /** The user has `limit` devices already. */
   | { kind: "maxDevices"; limit: number }
@@ -20,16 +19,14 @@ export type Failure =
   | { kind: "rateLimited"; retryAfterSeconds?: number }
   /** A limit without the daemon's detail, such as the panel's own. */
   | { kind: "exhausted" }
-  /** The device already has this profile. */
+  /** The user has a device of this name already. */
   | { kind: "exists" }
   | { kind: "notFound" }
-  /** The daemon refused a name or profile; its message says why, in English. */
+  /** The daemon refused a name or a route; its message says why, in English. */
   | { kind: "invalid"; message: string }
   | { kind: "other"; message: string };
 
-/** A profile change fails in one of its two calls; what matters is why that one failed. */
 export function failureOf(error: unknown): Failure {
-  if (error instanceof ProfileChangeError) return failureOf(error.cause);
   const e = ConnectError.from(error);
   switch (e.code) {
     case Code.Unauthenticated:

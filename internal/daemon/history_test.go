@@ -48,7 +48,7 @@ func TestUpstreamHealthDegradedIsNotUp(t *testing.T) {
 func TestHistoryEndToEnd(t *testing.T) {
 	h := newHarness(t)
 	h.st.CreateUser("alice")
-	peer, err := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
+	peer, err := h.st.AddPeer("alice", "nl", nlRoute, h.cfg.Subnet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,11 +85,11 @@ func TestHistoryEndToEnd(t *testing.T) {
 func TestHistoryQueries(t *testing.T) {
 	h := newHarness(t)
 	h.st.CreateUser("alice")
-	peer, err := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
+	peer, err := h.st.AddPeer("alice", "nl", nlRoute, h.cfg.Subnet)
 	if err != nil {
 		t.Fatal(err)
 	}
-	gone, err := h.st.AddPeer("alice", "old", "nl", h.cfg.Subnet)
+	gone, err := h.st.AddPeer("alice", "old", nlRoute, h.cfg.Subnet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func TestHistoryQueries(t *testing.T) {
 	if _, err := h.d.UpstreamHistory("removed", r); !errors.Is(err, store.ErrNotFound) {
 		t.Errorf("removed upstream: %v", err)
 	}
-	if err := h.st.DeletePeer("alice", "old", "nl"); err != nil {
+	if err := h.st.DeletePeer("alice", "old"); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []int64{gone.ID, 999} {

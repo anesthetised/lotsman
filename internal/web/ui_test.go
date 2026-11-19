@@ -59,7 +59,7 @@ func TestSinglePageApp(t *testing.T) {
 	}{
 		{"/", "app", "no-cache", http.StatusOK},
 		{"/u", "app", "no-cache", http.StatusOK}, // the user page; its token is in the fragment
-		{"/operator/profiles/eu", "app", "no-cache", http.StatusOK},
+		{"/operator/users/alice", "app", "no-cache", http.StatusOK},
 		{"/assets", "app", "no-cache", http.StatusOK}, // a directory is no file
 		{"/index.html", "app", "no-cache", http.StatusOK},
 		{"/assets/index-abc.js", "console.log(1)", "public, max-age=31536000, immutable", http.StatusOK},

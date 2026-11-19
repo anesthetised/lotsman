@@ -116,13 +116,12 @@ listen: 127.0.0.1:51820
 endpoint: 127.0.0.1:51820
 state_dir: ` + filepath.Join(dir, "state") + `
 upstreams:
-  - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, provider: awg}
-  - {name: ol, kind: outline, conf: ` + filepath.Join(dir, "ol.key") + `, provider: outline}
+  - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, geo: NL, provider: awg}
+  - {name: ol, kind: outline, conf: ` + filepath.Join(dir, "ol.key") + `, geo: FI, provider: outline}
 health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_after: 2, up_after: 1}
 metrics: {listen: 127.0.0.1:19100}
 `
 	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
-	mustRun(t, "-config", cfgPath, "profile", "add", "p", "provider=outline", "provider=awg")
 
 	out, err := capture(t, "-config", cfgPath, "config", "check")
 	if err != nil || !strings.Contains(out, "lm-up-ol  kind outline") || strings.Contains(out, "outline-secret") {
@@ -142,7 +141,7 @@ metrics: {listen: 127.0.0.1:19100}
 		_, err := os.Stat(filepath.Join(dir, "state", "status.json"))
 		return err == nil
 	})
-	out, err = capture(t, "-config", cfgPath, "user", "add", "alice", "-profile", "p")
+	out, err = capture(t, "-config", cfgPath, "device", "add", "alice/phone", "FI", "NL")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,13 +167,13 @@ metrics: {listen: 127.0.0.1:19100}
 			strings.Contains(body, `lotsman_upstream_flows{upstream="ol"}`)
 	})
 
-	// Flow pinning: a connection through ol survives the profile preferring
+	// Flow pinning: a connection through ol survives the route preferring
 	// AWG while ol is alive; new connections use nl.
 	long := c.openStream(t)
 	if via, err := long.ping("a"); err != nil || via != "ol" {
 		t.Fatalf("stream before move: %q, %v", via, err)
 	}
-	mustRun(t, "-config", cfgPath, "profile", "set", "p", "provider=awg", "provider=outline")
+	mustRun(t, "-config", cfgPath, "device", "route", "alice/phone", "NL", "FI")
 	eventually(t, "new connections via nl", 15*time.Second, exitsVia("nl"))
 	if via, err := long.ping("b"); err != nil || via != "ol" {
 		t.Errorf("pinned stream after move: %q, %v (want ol)", via, err)
@@ -190,7 +189,7 @@ metrics: {listen: 127.0.0.1:19100}
 	eventually(t, "back via nl", 15*time.Second, exitsVia("nl"))
 
 	// Outline blocked: fail over to AWG, and back.
-	mustRun(t, "-config", cfgPath, "profile", "set", "p", "provider=outline", "provider=awg")
+	mustRun(t, "-config", cfgPath, "device", "route", "alice/phone", "FI", "NL")
 	eventually(t, "outline preferred again", 15*time.Second, exitsVia("ol"))
 	restore = blockOutline(t, ss)
 	eventually(t, "ol down", 15*time.Second, func() bool {
@@ -269,10 +268,9 @@ listen: 127.0.0.1:51820
 endpoint: 127.0.0.1:51820
 state_dir: `+filepath.Join(dir, "state")+`
 upstreams:
-  - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, provider: outline}
+  - {name: ol, kind: outline, conf: `+filepath.Join(dir, "ol.key")+`, geo: FI, provider: outline}
 health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_after: 2, up_after: 1}
 `), 0o600)
-	mustRun(t, "-config", cfgPath, "profile", "add", "p", "provider=outline")
 
 	out, err := capture(t, "-config", cfgPath, "config", "check")
 	if err != nil || !strings.Contains(out, "lm-up-ol  kind outline") || !strings.Contains(out, "dynamic  shadowsocks") ||
@@ -305,7 +303,7 @@ health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_af
 	}
 
 	stop := start()
-	out, err = capture(t, "-config", cfgPath, "user", "add", "alice", "-profile", "p")
+	out, err = capture(t, "-config", cfgPath, "device", "add", "alice/phone", "FI")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -339,7 +337,7 @@ health: {interval: 500ms, probe: 198.51.100.1:443, dns: 198.51.100.1:53, down_af
 	offer("", http.StatusServiceUnavailable)
 	stop()
 	start()
-	out, err = capture(t, "-config", cfgPath, "user", "show", "alice", "-profile", "p")
+	out, err = capture(t, "-config", cfgPath, "device", "show", "alice/phone")
 	if err != nil {
 		t.Fatal(err)
 	}

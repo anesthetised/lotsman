@@ -17,20 +17,20 @@ state_dir: /var/lib/lotsman
 
 # Your own provider subscriptions. `conf` is the AmneziaWG config the provider
 # generated for you; it must route 0.0.0.0/0. The name becomes the interface
-# lm-up-<name>, so keep it to 9 characters. `geo` and `provider` are free-form
-# labels; `tags` is a list of free-form groups (lowercase letters, digits, `-`).
-# Profiles match on all three.
+# lm-up-<name>, so keep it to 9 characters. Devices are routed by the two
+# required labels: `geo` is the exit's country (ISO 3166-1 alpha-2, capitals),
+# `provider` who runs it (lowercase letters, digits, `-`). Users may see upstream
+# names even when the operator hides providers from them (lotsman user rights
+# -show-providers=false), so name upstreams neutrally if that matters.
 upstreams:
   - name: ac-nl
     conf: /etc/lotsman/upstreams/ac-nl.conf
     geo: NL
     provider: acme
-    tags: [near, eu]
   - name: ac-de
     conf: /etc/lotsman/upstreams/ac-de.conf
     geo: DE
     provider: acme
-    tags: [eu]
   # An Outline (Shadowsocks) server: `conf` is a file (mode 0600) holding the
   # ss:// access key. TCP and UDP pass, ICMP does not. `max_flows` caps the
   # connections it carries at once (default 4096).
@@ -38,25 +38,26 @@ upstreams:
   #   kind: outline
   #   conf: /etc/lotsman/upstreams/ol-fi.key
   #   geo: FI
-  #   tags: [eu]
+  #   provider: acme
   # A VLESS + REALITY + XTLS Vision server (Xray): `conf` is a file (mode 0600)
   # holding its vless:// share link. Otherwise like an Outline upstream.
   # - name: vl-nl
   #   kind: vless
   #   conf: /etc/lotsman/upstreams/vl-nl.key
   #   geo: NL
-  #   tags: [eu]
+  #   provider: beta
 
-# Profiles are not part of this file: they live in the database and are managed
-# with `lotsman profile add|set|rm|list`, which apply without a restart. A user
-# gets one client config per profile. Each argument after the name is one
-# preference tier; the first tier with a healthy upstream wins, lowest latency
-# within a tier. A tier matches on geo, provider and/or tag (`geo=NL,tag=eu`: an
-# upstream must match all of them); `any` matches every upstream, and no tiers
-# at all means any upstream. For the upstreams above:
-#   lotsman profile add nl geo=NL
-#   lotsman profile add eu tag=near tag=eu
-#   lotsman profile add auto
+# Users, devices and routes are not part of this file: they live in the
+# database and apply without a restart. Each device is one client config with
+# its own route, which changes on the gateway only. A route lists countries,
+# optionally narrowed to providers: in order (the first with a healthy upstream
+# wins) or, with -fastest, by latency; without countries, any upstream. With
+# -fallback a device whose countries are all down uses any upstream instead of
+# being blocked. For the upstreams above:
+#   lotsman device add alice/phone                 # the fastest of any upstream
+#   lotsman device add alice/laptop NL DE:acme     # NL first, then acme in DE
+#   lotsman device route alice/laptop -fastest -fallback NL DE
+#   lotsman user rights alice -exits ac-nl         # alice may use ac-nl only
 
 health:
   interval: 15s
@@ -73,7 +74,7 @@ health:
   # Off unless set: catches upstreams that answer probes but freeze or crawl
   # under real traffic. Every interval (±20%) each upstream downloads from url
   # and must get min_bytes within timeout; down_after failures mark it
-  # degraded (used only when a profile has nothing better), up_after passes
+  # degraded (used only when a route has nothing better), up_after passes
   # clear it; while failing it probes every interval/5. About 18 MiB a day per
   # upstream at these values. The host's resolver looks up the URL's host.
   # transfer:
@@ -96,8 +97,7 @@ health:
 #   listen: 10.77.0.1:9100
 
 # What users may do on their own page in the web panel (lotsman user link).
-# max_devices caps the devices a user can have when adding one there (another
-# profile on a device they have does not count); 0 turns adding off, another
-# profile included. The operator's commands are not limited.
+# max_devices caps the devices a user can have when adding one there; 0 turns
+# adding off. The operator's commands are not limited.
 # users:
 #   max_devices: 5

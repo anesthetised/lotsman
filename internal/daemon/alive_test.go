@@ -42,7 +42,7 @@ func aliveSetup(t *testing.T, failures int) (*harness, *failingAlive, *bytes.Buf
 	if _, err := h.st.CreateUser("alice"); err != nil {
 		t.Fatal(err)
 	}
-	peer, err := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
+	peer, err := h.st.AddPeer("alice", "nl", nlRoute, h.cfg.Subnet)
 	if err != nil {
 		t.Fatal(err)
 	}

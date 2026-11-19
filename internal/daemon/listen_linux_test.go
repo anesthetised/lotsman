@@ -46,11 +46,11 @@ func TestDaemonListenAddress(t *testing.T) {
 			if _, err := h.st.CreateUser("listen"); err != nil {
 				t.Fatal(err)
 			}
-			allowed, err := h.st.AddPeer("listen", store.DefaultDevice, "nl", h.cfg.Subnet)
+			allowed, err := h.st.AddPeer("listen", "nl", nlRoute, h.cfg.Subnet)
 			if err != nil {
 				t.Fatal(err)
 			}
-			excluded, err := h.st.AddPeer("listen", "excluded", "nl", h.cfg.Subnet)
+			excluded, err := h.st.AddPeer("listen", "excluded", nlRoute, h.cfg.Subnet)
 			if err != nil {
 				t.Fatal(err)
 			}

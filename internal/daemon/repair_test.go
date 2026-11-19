@@ -63,8 +63,8 @@ func newRepairHarness(t *testing.T) *repairHarness {
 		t.Fatal(err)
 	}
 	var peers []store.Peer
-	for _, profile := range []string{"nl", "eu"} {
-		p, err := h.st.AddPeer("alice", store.DefaultDevice, profile, h.cfg.Subnet)
+	for _, device := range []string{"phone", "laptop"} {
+		p, err := h.st.AddPeer("alice", device, euRoute, h.cfg.Subnet)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -184,7 +184,7 @@ func TestFirewallRepairRetried(t *testing.T) {
 func TestFirewallRepairKeepsRevokedPeersOut(t *testing.T) {
 	h := newRepairHarness(t)
 	gone := h.peers[0]
-	if err := h.st.DeletePeer(gone.User, gone.Device, gone.Profile); err != nil {
+	if err := h.st.DeletePeer(gone.User, gone.Device); err != nil {
 		t.Fatal(err)
 	}
 	h.flaky.unrouteFailures = 3

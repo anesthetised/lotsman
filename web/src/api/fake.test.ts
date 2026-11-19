@@ -3,7 +3,6 @@ import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ConnectionService } from "../gen/lotsman/v1/connection_pb";
 import { HistoryService } from "../gen/lotsman/v1/history_pb";
-import { ProfileService } from "../gen/lotsman/v1/profile_pb";
 import { StatusService } from "../gen/lotsman/v1/status_pb";
 import { UserService } from "../gen/lotsman/v1/user_pb";
 import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
@@ -46,7 +45,7 @@ test("StatusService.Watch sends a snapshot now and every second, until cancelled
   const stream = status.watch({})[Symbol.asyncIterator]();
 
   const first = await next(stream);
-  expect(first.upstreams.map((u) => u.name)).toEqual(["lv-1", "al-1", "nl-1", "de-1"]);
+  expect(first.upstreams.map((u) => u.name)).toEqual(["lv-1", "lv-2", "al-1", "nl-1", "de-1"]);
   expect(first.peers).toHaveLength(6);
 
   const pending = next(stream);
@@ -69,7 +68,8 @@ test("UserSelfService.Watch carries only the user's peers and no other users' tr
   const self = createClient(UserSelfService, createFakeTransport());
   for await (const s of self.watch({})) {
     expect(new Set(s.peers.map((p) => p.user))).toEqual(new Set([FAKE_USER]));
-    expect(s.upstreams.map((u) => u.name).sort()).toEqual(["lv-1", "nl-1"]);
+    // Every exit alice may use, whether her devices use it or not.
+    expect(s.upstreams.map((u) => u.name)).toEqual(["lv-1", "lv-2", "al-1", "nl-1", "de-1"]);
     expect(s.upstreams.every((u) => u.traffic === undefined && u.routed === 0 && u.active === 0)).toBe(true);
     break;
   }
@@ -115,13 +115,13 @@ test("HistoryService answers NotFound for an unknown upstream or peer", async ()
   expect(peer.samples[0]?.downBytes).toBeGreaterThan(0n);
 });
 
-test("UserSelfService history covers only the user's upstreams and peers, without upstream bytes", async () => {
+test("UserSelfService history covers only the user's exits and peers, without upstream bytes", async () => {
   const self = createClient(UserSelfService, createFakeTransport());
   const upstream = await self.upstreamHistory(range("lv-1", 7, HOUR));
   expect(upstream.samples).toHaveLength(7 * 24 + 1);
   expect(upstream.samples.every((s) => s.downBytes === 0n && s.upBytes === 0n)).toBe(true);
   expect(upstream.samples.some((s) => s.latency !== undefined && s.upRatio > 0)).toBe(true);
-  await expect(self.upstreamHistory(range("al-1", 7, HOUR))).rejects.toSatisfy(notFound); // only bob uses it
+  await expect(self.upstreamHistory(range("xx-1", 7, HOUR))).rejects.toSatisfy(notFound);
 
   const peer = await self.peerHistory(range("peer-1", 1, HOUR));
   expect(peer.samples[0]?.downBytes).toBeGreaterThan(0n);
@@ -135,114 +135,117 @@ test("services without a fake answer Unimplemented", async () => {
 
 test("operator services answer Unauthenticated while signed out", async () => {
   const transport = createFakeTransport({ signedIn: () => false });
-  await expect(createClient(ProfileService, transport).list({})).rejects.toSatisfy(code(Code.Unauthenticated));
+  await expect(createClient(UserService, transport).addUser({ user: "eve" })).rejects.toSatisfy(code(Code.Unauthenticated));
   await expect(createClient(UserService, transport).list({})).rejects.toSatisfy(code(Code.Unauthenticated));
   const stream = createClient(ConnectionService, transport).watch({})[Symbol.asyncIterator]();
   await expect(stream.next()).rejects.toSatisfy(code(Code.Unauthenticated));
 });
 
-test("ProfileService lists the profiles with the daemon's warnings", async () => {
-  const profiles = createClient(ProfileService, createFakeTransport());
-  const list = await profiles.list({});
-  expect(list.profiles.map((p) => p.name)).toEqual(["default", "streaming", "backup", "fi"]);
-  expect(list.profiles[0]?.prefer.map((m) => [m.geo, m.provider, m.tag])).toEqual([
-    ["", "", "near"],
-    ["LV", "", ""],
-    ["", "", ""],
-  ]);
-  expect(list.warnings).toEqual([
-    'profile "default": tier 2 geo=LV never applies: every upstream it matches is taken by tier 1 tag=near',
-    'profile "fi": tier 1 geo=FI matches no upstream and is ignored',
-  ]);
-  expect(list.upstreams.map((u) => [u.name, u.geo, u.provider, u.tags])).toContainEqual(["lv-1", "LV", "provider-a", ["near", "eu"]]);
-});
+/** Where each of the user's devices goes out now. */
+async function exits(transport: ReturnType<typeof createFakeTransport>, user: string): Promise<Record<string, string>> {
+  for await (const s of createClient(StatusService, transport).watch({})) {
+    return Object.fromEntries(s.peers.filter((p) => p.user === user).map((p) => [p.device, p.upstream]));
+  }
+  throw new Error("no snapshot");
+}
 
-test("ProfileService.Put creates and replaces, and refuses what the daemon refuses", async () => {
-  const profiles = createClient(ProfileService, createFakeTransport());
-  const put = (name: string, ...prefer: { geo?: string; provider?: string; tag?: string }[]) => profiles.put({ profile: { name, prefer } });
-
-  const created = await put("eu", { tag: "eu" }, { geo: "LV" }, {});
-  expect(created.warnings).toContain('profile "eu": tier 2 geo=LV never applies: every upstream it matches is taken by tier 1 tag=eu');
-  await put("eu", { tag: "eu" });
-  const list = await profiles.list({});
-  expect(list.profiles.find((p) => p.name === "eu")?.prefer).toHaveLength(1);
-  expect(list.warnings.some((w) => w.startsWith('profile "eu"'))).toBe(false);
-
-  await put("auto"); // no tiers: any upstream
-  await expect(put("", { geo: "LV" })).rejects.toSatisfy(code(Code.InvalidArgument));
-  await expect(put("Bad Name", { geo: "LV" })).rejects.toSatisfy(code(Code.InvalidArgument));
-  // Every tier of a write must match an upstream, in values the CLI can write.
-  await expect(put("nowhere", { geo: "FI" })).rejects.toThrow(/tier 1 geo=FI matches no upstream/);
-  await expect(put("typo", { geo: "LV" }, { geo: "FI" })).rejects.toThrow(/tier 2 geo=FI matches no upstream/);
-  await expect(put("odd", { geo: "L V" })).rejects.toThrow(/tier 1: geo "L V" must be at most 64 characters/);
-  await expect(put("odd", { tag: "EU" })).rejects.toThrow(/tier 1: tag "EU" must match/);
-});
-
-test("ProfileService.Delete refuses a profile in use and an unknown one", async () => {
-  const profiles = createClient(ProfileService, createFakeTransport());
-  await expect(profiles.delete({ name: "default" })).rejects.toSatisfy(code(Code.FailedPrecondition));
-  await expect(profiles.delete({ name: "default" })).rejects.toThrow(/in use/);
-  await expect(profiles.delete({ name: "nope" })).rejects.toSatisfy(notFound);
-  await profiles.put({ profile: { name: "spare", prefer: [{ geo: "AL" }] } });
-  await profiles.delete({ name: "spare" });
-  expect((await profiles.list({})).profiles.map((p) => p.name)).not.toContain("spare");
-});
-
-test("UserService lists users with their devices, profiles and links", async () => {
-  const users = createClient(UserService, createFakeTransport());
-  const { users: list } = await users.list({});
-  expect(list.map((u) => [u.name, u.hasLink, u.devices.map((d) => d.name)])).toEqual([
+test("UserService lists users with their rights, devices and routes", async () => {
+  const transport = createFakeTransport();
+  const { users } = await createClient(UserService, transport).list({});
+  expect(users.map((u) => [u.name, u.hasLink, u.devices.map((d) => d.name)])).toEqual([
     ["alice", true, ["phone", "laptop", "tv"]],
     ["bob", false, ["phone", "laptop"]],
     ["carol", false, ["phone"]],
   ]);
-  expect(list[0]?.devices[0]?.peers.map((p) => [p.peerId, p.profile, p.address])).toEqual([["peer-1", "default", "10.8.0.2"]]);
-  expect(list.every((u) => u.created !== undefined)).toBe(true);
+  expect(users.map((u) => [u.rights?.editRoutes, u.rights?.showProviders, u.rights?.exits])).toEqual([
+    [true, true, []],
+    [false, true, ["lv-2", "al-1"]],
+    [true, false, []],
+  ]);
+  const phone = users[0]!.devices[0]!;
+  expect([phone.peerId, phone.address]).toEqual(["peer-1", "10.8.0.2"]);
+  expect(phone.route).toMatchObject({ fastest: false, strict: false, countries: [{ geo: "LV" }, { geo: "NL" }] });
+  expect(users[0]!.devices[1]!.route).toMatchObject({ fastest: true, strict: true, countries: [] });
+  expect(users.every((u) => u.created !== undefined)).toBe(true);
+
+  // Each route picks among the user's allowed exits: the first country up, or the fastest.
+  expect(await exits(transport, "alice")).toEqual({ phone: "lv-1", laptop: "lv-1", tv: "lv-2" });
+  expect(await exits(transport, "bob")).toEqual({ phone: "al-1", laptop: "lv-2" });
+  expect(await exits(transport, "carol")).toEqual({ phone: "" }); // strict, and Germany is down
 });
 
-test("UserService.AddDevice creates the user, routes the peer and returns its config", async () => {
+test("UserService.AddUser adds a user with the default rights, once", async () => {
+  const users = createClient(UserService, createFakeTransport());
+  const eve = await users.addUser({ user: "eve" });
+  expect(eve).toMatchObject({ name: "eve", devices: [], hasLink: false, rights: { editRoutes: true, showProviders: true, exits: [] } });
+  await expect(users.addUser({ user: "eve" })).rejects.toSatisfy(code(Code.AlreadyExists));
+  await expect(users.addUser({ user: "" })).rejects.toSatisfy(code(Code.InvalidArgument));
+  expect((await users.list({})).users.map((u) => u.name)).toEqual(["alice", "bob", "carol", "eve"]);
+});
+
+test("UserService.SetRights narrows the exits and routes the user's devices again", async () => {
   const transport = createFakeTransport();
   const users = createClient(UserService, transport);
-  const added = await users.addDevice({ user: "dave", device: "phone", profile: "default" });
+  const alice = await users.setRights({ user: "alice", rights: { editRoutes: false, showProviders: true, exits: ["nl-1", "al-1"] } });
+  expect(alice.rights).toMatchObject({ editRoutes: false, exits: ["nl-1", "al-1"] });
+  // phone: Latvia is not allowed now, the Netherlands is degraded, and it may fall back: al-1 is up.
+  // tv: strict to Latvia's provider-b and the Netherlands: only the degraded nl-1 is left.
+  expect(await exits(transport, "alice")).toEqual({ phone: "al-1", laptop: "al-1", tv: "nl-1" });
+
+  await expect(users.setRights({ user: "alice", rights: { exits: ["xx-1"] } })).rejects.toSatisfy(code(Code.InvalidArgument));
+  await expect(users.setRights({ user: "nobody", rights: {} })).rejects.toSatisfy(notFound);
+});
+
+test("UserService.AddDevice creates the user, routes the device and returns its config", async () => {
+  const transport = createFakeTransport();
+  const users = createClient(UserService, transport);
+  const added = await users.addDevice({ user: "dave", device: "phone" });
   expect(added.peerId).toBe("peer-7");
   expect(added.config).toMatch(/^\[Interface\]\nPrivateKey = [A-Za-z0-9+/]{43}=\nAddress = 10\.8\.0\.8\/32\n/);
   expect(added.config).toContain("Endpoint = vpn.example.com:51820");
   expect((await users.getConfig({ peerId: "peer-7" })).config).toBe(added.config);
 
   const dave = (await users.list({})).users.find((u) => u.name === "dave");
-  expect(dave?.devices.map((d) => [d.name, d.peers.map((p) => p.profile)])).toEqual([["phone", ["default"]]]);
-  // Routed by its profile's first tier with an upstream up.
-  const status = createClient(StatusService, transport);
-  for await (const s of status.watch({})) {
-    expect(s.peers.find((p) => p.peerId === "peer-7")?.upstream).toBe("lv-1");
-    break;
-  }
-
-  await users.addDevice({ user: "dave", device: "", profile: "streaming" }); // the default device
-  expect((await users.list({})).users.find((u) => u.name === "dave")?.devices.map((d) => d.name)).toEqual(["phone", "default"]);
+  expect(dave?.devices.map((d) => [d.name, d.route?.fastest, d.route?.strict, d.route?.countries])).toEqual([["phone", true, true, []]]);
+  await users.addDevice({ user: "dave", device: "tv", route: { strict: true, countries: [{ geo: "NL" }] } });
+  expect(await exits(transport, "dave")).toEqual({ phone: "lv-1", tv: "nl-1" }); // the fastest, and the Netherlands
 });
 
-test("UserService.AddDevice refuses bad names, unknown profiles and duplicates", async () => {
+test("UserService refuses bad names, duplicates and routes that name what does not exist", async () => {
   const users = createClient(UserService, createFakeTransport());
-  await expect(users.addDevice({ user: "", device: "phone", profile: "default" })).rejects.toSatisfy(code(Code.InvalidArgument));
-  await expect(users.addDevice({ user: " dave", device: "phone", profile: "default" })).rejects.toSatisfy(code(Code.InvalidArgument));
-  await expect(users.addDevice({ user: "dave", device: "phone", profile: "nope" })).rejects.toThrow(/no such profile/);
-  await expect(users.addDevice({ user: "alice", device: "phone", profile: "default" })).rejects.toSatisfy(code(Code.AlreadyExists));
+  await expect(users.addDevice({ user: "", device: "phone" })).rejects.toSatisfy(code(Code.InvalidArgument));
+  await expect(users.addDevice({ user: " dave", device: "phone" })).rejects.toSatisfy(code(Code.InvalidArgument));
+  await expect(users.addDevice({ user: "dave", device: "" })).rejects.toSatisfy(code(Code.InvalidArgument));
+  await expect(users.addDevice({ user: "alice", device: "phone" })).rejects.toSatisfy(code(Code.AlreadyExists));
+  const route = (...countries: { geo: string; providers?: string[] }[]) => ({ user: "alice", device: "phone", route: { countries } });
+  await expect(users.setRoute(route({ geo: "FI" }))).rejects.toThrow(/no exit in country FI/);
+  await expect(users.setRoute(route({ geo: "LV", providers: ["provider-c"] }))).rejects.toThrow(/no exit of provider provider-c in LV/);
+  await expect(users.setRoute(route({ geo: "LV" }, { geo: "LV" }))).rejects.toThrow(/country LV is listed twice/);
+  await expect(users.setRoute(route({ geo: "LV", providers: ["provider-a", "provider-a"] }))).rejects.toThrow(/listed twice in LV/);
+  // bob may use lv-2 and al-1 only: provider-a in Latvia is not his to name.
+  await expect(users.setRoute({ user: "bob", device: "phone", route: { countries: [{ geo: "LV", providers: ["provider-a"] }] } })).rejects.toSatisfy(
+    code(Code.InvalidArgument),
+  );
+  await expect(users.setRoute({ user: "bob", device: "nope", route: {} })).rejects.toSatisfy(notFound);
   expect((await users.list({})).users.map((u) => u.name)).toEqual(["alice", "bob", "carol"]);
+});
+
+test("UserService.SetRoute moves the device and keeps its config", async () => {
+  const transport = createFakeTransport();
+  const users = createClient(UserService, transport);
+  const before = (await users.getConfig({ peerId: "peer-1" })).config;
+  const device = await users.setRoute({ user: "alice", device: "phone", route: { fastest: false, strict: true, countries: [{ geo: "AL" }] } });
+  expect(device).toMatchObject({ peerId: "peer-1", name: "phone", route: { strict: true, countries: [{ geo: "AL", providers: [] }] } });
+  expect((await exits(transport, "alice")).phone).toBe("al-1");
+  expect((await users.getConfig({ peerId: "peer-1" })).config).toBe(before);
 });
 
 test("UserService removes devices and users", async () => {
   const users = createClient(UserService, createFakeTransport());
-  await users.addDevice({ user: "bob", device: "phone", profile: "streaming" });
-  await users.removeDevice({ user: "bob", device: "phone", profile: "default" });
   const bob = async () => (await users.list({})).users.find((u) => u.name === "bob");
-  expect((await bob())?.devices.map((d) => [d.name, d.peers.map((p) => p.profile)])).toEqual([
-    ["laptop", ["streaming"]],
-    ["phone", ["streaming"]],
-  ]);
-  await users.removeDevice({ user: "bob", device: "laptop", profile: "" }); // every profile
+  await users.removeDevice({ user: "bob", device: "laptop" });
   expect((await bob())?.devices.map((d) => d.name)).toEqual(["phone"]);
-  await expect(users.removeDevice({ user: "bob", device: "laptop", profile: "" })).rejects.toSatisfy(notFound);
+  await expect(users.removeDevice({ user: "bob", device: "laptop" })).rejects.toSatisfy(notFound);
 
   await users.removeUser({ user: "bob" });
   expect(await bob()).toBeUndefined();

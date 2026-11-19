@@ -4,10 +4,12 @@
 // it to the panel, and only there, as `Authorization: Bearer` (see selfApi);
 // the panel resolves it and scopes UserSelfService to that user.
 
+import { create } from "@bufbuild/protobuf";
 import { createMemo, createSignal, Errored, Loading, refresh, Show } from "solid-js";
 import { selfApi } from "../../api/client";
 import { linkToken } from "../../api/link";
 import { createLive, num } from "../../api/live";
+import { RightsSchema } from "../../gen/lotsman/v1/user_pb";
 import { useI18n } from "../../i18n";
 import { buttonClass } from "../../ui/button";
 import { SkipLink } from "../SkipLink";
@@ -68,7 +70,8 @@ function LiveUser(props: { token: string }) {
   const { t } = useI18n();
   const self = selfApi(props.token);
   const user = createMemo(() => self.get({}));
-  const profiles = createMemo(async () => (await self.listProfiles({})).profiles.map((p) => p.name));
+  // The daemon always sends the rights; without them, the defaults.
+  const rights = createMemo(() => user().rights ?? create(RightsSchema, { editRoutes: true, showProviders: true }));
   const snapshot = createLive(() => self.watch({}));
   const trend = createMemo<number[]>((prev = []) => [...prev, num(snapshot().total?.downRate)].slice(-60));
   const peers = createMemo(() => new Map(snapshot().peers.map((p) => [p.peerId, p])));
@@ -99,9 +102,10 @@ function LiveUser(props: { token: string }) {
         value={{
           self,
           user,
+          rights,
           peer: (id) => peers().get(id),
           upstream: (name) => upstreams().get(name),
-          profiles,
+          exits: () => snapshot().upstreams,
           configs: new Map(),
           issued,
           issue,

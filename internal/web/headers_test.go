@@ -12,12 +12,12 @@ import (
 
 func TestSecurityHeaders(t *testing.T) {
 	h := testPanel(t, fakeAuth{}, &fakeDaemon{})
-	refused := rpc(lotsmanv1connect.ProfileServiceListProcedure, "")
+	refused := rpc(lotsmanv1connect.UserServiceListProcedure, "")
 	refused.Header.Del("Origin")
 	for name, r := range map[string]*http.Request{
 		"page":           httptest.NewRequest(http.MethodGet, "/", nil),
 		"missing asset":  httptest.NewRequest(http.MethodGet, "/assets/gone.js", nil),
-		"api error":      rpc(lotsmanv1connect.ProfileServiceListProcedure, ""),
+		"api error":      rpc(lotsmanv1connect.UserServiceListProcedure, ""),
 		"refused origin": refused,
 	} {
 		w := serve(h, r)
@@ -32,7 +32,7 @@ func TestSecurityHeaders(t *testing.T) {
 			}
 		}
 	}
-	if got := serve(h, rpc(lotsmanv1connect.ProfileServiceListProcedure, "")).Header().Get("Cache-Control"); got != "no-store" {
+	if got := serve(h, rpc(lotsmanv1connect.UserServiceListProcedure, "")).Header().Get("Cache-Control"); got != "no-store" {
 		t.Errorf("api Cache-Control = %q, want no-store", got)
 	}
 }
@@ -44,13 +44,13 @@ func TestOriginCheck(t *testing.T) {
 		name, method, path, origin string
 		want                       int
 	}{
-		{"api from the panel", http.MethodPost, "/api" + lotsmanv1connect.ProfileServiceListProcedure, testOrigin, http.StatusOK},
-		{"api without origin", http.MethodPost, "/api" + lotsmanv1connect.ProfileServiceListProcedure, "", http.StatusForbidden},
-		{"api from another site", http.MethodPost, "/api" + lotsmanv1connect.ProfileServiceListProcedure, "https://evil.example", http.StatusForbidden},
-		{"api by scheme", http.MethodPost, "/api" + lotsmanv1connect.ProfileServiceListProcedure, "http://vpn.example.com", http.StatusForbidden},
-		{"api by port", http.MethodPost, "/api" + lotsmanv1connect.ProfileServiceListProcedure, testOrigin + ":8443", http.StatusForbidden},
-		{"api null origin", http.MethodPost, "/api" + lotsmanv1connect.ProfileServiceListProcedure, "null", http.StatusForbidden},
-		{"api GET", http.MethodGet, "/api" + lotsmanv1connect.ProfileServiceListProcedure, "", http.StatusForbidden},
+		{"api from the panel", http.MethodPost, "/api" + lotsmanv1connect.UserServiceListProcedure, testOrigin, http.StatusOK},
+		{"api without origin", http.MethodPost, "/api" + lotsmanv1connect.UserServiceListProcedure, "", http.StatusForbidden},
+		{"api from another site", http.MethodPost, "/api" + lotsmanv1connect.UserServiceListProcedure, "https://evil.example", http.StatusForbidden},
+		{"api by scheme", http.MethodPost, "/api" + lotsmanv1connect.UserServiceListProcedure, "http://vpn.example.com", http.StatusForbidden},
+		{"api by port", http.MethodPost, "/api" + lotsmanv1connect.UserServiceListProcedure, testOrigin + ":8443", http.StatusForbidden},
+		{"api null origin", http.MethodPost, "/api" + lotsmanv1connect.UserServiceListProcedure, "null", http.StatusForbidden},
+		{"api GET", http.MethodGet, "/api" + lotsmanv1connect.UserServiceListProcedure, "", http.StatusForbidden},
 		{"page load", http.MethodGet, "/", "", http.StatusOK},
 		{"form post elsewhere", http.MethodPost, "/login", "https://evil.example", http.StatusForbidden},
 		{"post without origin", http.MethodPost, "/login", "", http.StatusForbidden},
@@ -110,7 +110,7 @@ func TestClientAddrReachesAuthenticator(t *testing.T) {
 	var seen netip.Addr
 	auth := authFunc(func(r *http.Request) error { seen = ClientAddr(r); return nil })
 	h := New(Deps{Config: testConfig(t, "trusted_proxies: [127.0.0.1]\n"), Auth: auth, Daemon: &fakeDaemon{}, UI: fstest.MapFS{}, Log: discardLog()})
-	r := rpc(lotsmanv1connect.ProfileServiceListProcedure, "")
+	r := rpc(lotsmanv1connect.UserServiceListProcedure, "")
 	r.RemoteAddr = "127.0.0.1:5000"
 	r.Header.Set("X-Forwarded-For", "203.0.113.7")
 	serve(h, r)

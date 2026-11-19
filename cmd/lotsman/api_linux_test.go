@@ -35,11 +35,11 @@ func apiClient(path string) *connect.Client {
 	return connect.NewClient(connecthttp.NewTransport(hc, "http://lotsman"))
 }
 
-// TestControlProfilesAndConnections drives the profile and connection
-// services through the daemon's socket: a profile made over the API serves
-// a client, cannot be deleted while it does, and the client's download shows
-// up as a live connection.
-func TestControlProfilesAndConnections(t *testing.T) {
+// TestControlUsersAndConnections drives the user and connection services
+// through the daemon's socket: a device added over the API with a route
+// serves a client, a route no upstream serves is refused, and the client's
+// download shows up as a live connection.
+func TestControlUsersAndConnections(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root: creates TUNs and programs the kernel")
 	}
@@ -74,63 +74,29 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 		return err == nil
 	})
 	api := apiClient(control.SocketPath)
-	profiles := lotsmanv1connect.NewProfileServiceClient(api)
+	users := lotsmanv1connect.NewUserServiceClient(api)
 
-	// The first tier takes the only upstream: the second never applies, with a warning.
-	eu := &lotsmanv1.Profile{Name: "eu", Prefer: []*lotsmanv1.Matcher{{Geo: "NL"}, {Provider: "acme"}}}
-	put, err := profiles.Put(t.Context(), &lotsmanv1.PutProfileRequest{Profile: eu})
+	nlAcme := &lotsmanv1.Route{Strict: true, Countries: []*lotsmanv1.Country{{Geo: "NL", Providers: []string{"acme"}}}}
+	added, err := users.AddDevice(t.Context(), &lotsmanv1.AddDeviceRequest{User: "alice", Device: "phone", Route: nlAcme})
 	if err != nil {
 		t.Fatal(err)
 	}
-	warned := func(warnings []string) bool {
-		return slices.ContainsFunc(warnings, func(w string) bool { return strings.Contains(w, `profile "eu": tier 2`) })
-	}
-	if !warned(put.Warnings) {
-		t.Errorf("put warnings = %q, want one for tier 2", put.Warnings)
-	}
-	if _, err := profiles.Put(t.Context(), &lotsmanv1.PutProfileRequest{Profile: &lotsmanv1.Profile{Name: "spare"}}); err != nil {
-		t.Fatal(err)
-	}
-	// A tier no upstream matches is refused, even beside one that matches.
-	if _, err := profiles.Put(t.Context(), &lotsmanv1.PutProfileRequest{Profile: &lotsmanv1.Profile{
-		Name: "de", Prefer: []*lotsmanv1.Matcher{{Geo: "NL"}, {Geo: "DE"}},
-	}}); connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Errorf("put de: %v, want invalid_argument", err)
-	}
-	// A profile no upstream can serve is refused.
-	if _, err := profiles.Put(t.Context(), &lotsmanv1.PutProfileRequest{Profile: &lotsmanv1.Profile{
-		Name: "us", Prefer: []*lotsmanv1.Matcher{{Geo: "US"}},
-	}}); connect.CodeOf(err) != connect.CodeInvalidArgument {
-		t.Errorf("put us: %v, want invalid_argument", err)
-	}
-	list, err := profiles.List(t.Context(), &lotsmanv1.ListProfilesRequest{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(list.Profiles) != 2 || !proto.Equal(list.Profiles[0], eu) || list.Profiles[1].Name != "spare" || !warned(list.Warnings) {
-		t.Errorf("list = %v", list)
-	}
-	if want := []*lotsmanv1.UpstreamLabels{{Name: "nl", Geo: "NL", Provider: "acme"}}; !slices.EqualFunc(list.Upstreams, want, func(a, b *lotsmanv1.UpstreamLabels) bool { return proto.Equal(a, b) }) {
-		t.Errorf("list upstreams = %v, want %v", list.Upstreams, want)
-	}
-	if _, err := profiles.Delete(t.Context(), &lotsmanv1.DeleteProfileRequest{Name: "spare"}); err != nil {
-		t.Errorf("delete spare: %v", err)
-	}
-	if _, err := profiles.Delete(t.Context(), &lotsmanv1.DeleteProfileRequest{Name: "spare"}); connect.CodeOf(err) != connect.CodeNotFound {
-		t.Errorf("delete spare again: %v, want not_found", err)
-	}
-
-	out, err := capture(t, "-config", cfgPath, "user", "add", "alice", "-profile", "eu")
-	if err != nil {
-		t.Fatal(err)
-	}
-	alice := newClient(t, out)
+	alice := newClient(t, added.Config)
 	eventually(t, "alice exits via nl", 15*time.Second, func() bool {
 		got, err := alice.exitVia(2 * time.Second)
 		return err == nil && got == "nl"
 	})
-	if _, err := profiles.Delete(t.Context(), &lotsmanv1.DeleteProfileRequest{Name: "eu"}); connect.CodeOf(err) != connect.CodeFailedPrecondition {
-		t.Errorf("delete eu while alice uses it: %v, want failed_precondition", err)
+	// A route through a country no upstream serves is refused, the stored one stays.
+	us := &lotsmanv1.Route{Strict: true, Countries: []*lotsmanv1.Country{{Geo: "US"}}}
+	if _, err := users.SetRoute(t.Context(), &lotsmanv1.SetRouteRequest{User: "alice", Device: "phone", Route: us}); connect.CodeOf(err) != connect.CodeInvalidArgument {
+		t.Errorf("set route us: %v, want invalid_argument", err)
+	}
+	list, err := users.List(t.Context(), &lotsmanv1.ListUsersRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Users) != 1 || len(list.Users[0].Devices) != 1 || !proto.Equal(list.Users[0].Devices[0].Route, nlAcme) {
+		t.Errorf("list = %v", list)
 	}
 
 	connections := lotsmanv1connect.NewConnectionServiceClient(api)

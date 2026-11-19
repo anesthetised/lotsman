@@ -69,7 +69,7 @@ function LiveConnections() {
 }
 
 function peerLabel(p: PeerStatus): string {
-  return `${p.user}/${p.device} · ${p.profile}`;
+  return `${p.user}/${p.device}`;
 }
 
 const protocols: Record<Protocol, string> = {

@@ -108,7 +108,7 @@ func errorCode(t *testing.T, w *httptest.ResponseRecorder) string {
 
 func TestAPIScopes(t *testing.T) {
 	const (
-		operatorRPC = lotsmanv1connect.ProfileServiceListProcedure
+		operatorRPC = lotsmanv1connect.UserServiceListProcedure
 		userRPC     = lotsmanv1connect.UserSelfServiceGetProcedure
 	)
 	for _, tc := range []struct {
@@ -178,7 +178,7 @@ func TestAPIForwardsOnlyProtocolHeaders(t *testing.T) {
 		name, procedure, user string
 		auth                  Authenticator
 	}{
-		{"operator", lotsmanv1connect.ProfileServiceListProcedure, "", fakeAuth{operator: true}},
+		{"operator", lotsmanv1connect.UserServiceListProcedure, "", fakeAuth{operator: true}},
 		{"user", lotsmanv1connect.UserSelfServiceGetProcedure, "alice", fakeAuth{user: "alice"}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -220,11 +220,11 @@ func TestAPIForwardsOnlyProtocolHeaders(t *testing.T) {
 func TestAPIRequestLimits(t *testing.T) {
 	daemon := &fakeDaemon{}
 	h := testPanel(t, fakeAuth{operator: true}, daemon)
-	big := rpc(lotsmanv1connect.ProfileServicePutProcedure, strings.Repeat("x", maxRequestBytes+1))
+	big := rpc(lotsmanv1connect.UserServiceSetRouteProcedure, strings.Repeat("x", maxRequestBytes+1))
 	if got := errorCode(t, serve(h, big)); got != "resource_exhausted" {
 		t.Errorf("oversized body: code %q", got)
 	}
-	get := rpc(lotsmanv1connect.ProfileServiceListProcedure, "")
+	get := rpc(lotsmanv1connect.UserServiceListProcedure, "")
 	get.Method = http.MethodGet
 	if w := serve(h, get); w.Code == http.StatusOK || w.Header().Get("Allow") != http.MethodPost {
 		t.Errorf("GET: status %d, Allow %q", w.Code, w.Header().Get("Allow"))
@@ -232,7 +232,7 @@ func TestAPIRequestLimits(t *testing.T) {
 	if n := len(daemon.calls()); n != 0 {
 		t.Errorf("daemon calls = %d", n)
 	}
-	exact := rpc(lotsmanv1connect.ProfileServicePutProcedure, strings.Repeat("x", maxRequestBytes))
+	exact := rpc(lotsmanv1connect.UserServiceSetRouteProcedure, strings.Repeat("x", maxRequestBytes))
 	if got := errorCode(t, serve(h, exact)); got != "" {
 		t.Errorf("body at the limit: code %q", got)
 	}
@@ -245,7 +245,7 @@ func (downDaemon) RoundTrip(*http.Request) (*http.Response, error) {
 }
 
 func TestAPIDaemonUnreachable(t *testing.T) {
-	w := serve(testPanel(t, fakeAuth{operator: true}, downDaemon{}), rpc(lotsmanv1connect.ProfileServiceListProcedure, ""))
+	w := serve(testPanel(t, fakeAuth{operator: true}, downDaemon{}), rpc(lotsmanv1connect.UserServiceListProcedure, ""))
 	if got := errorCode(t, w); got != "unavailable" {
 		t.Errorf("code %q", got)
 	}

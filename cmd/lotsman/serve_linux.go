@@ -130,7 +130,7 @@ func limitMemory(log *slog.Logger) {
 
 // handleSignals serves the two control signals. SIGHUP re-reads the config
 // and applies it live; a broken config is logged and ignored, but the user
-// database is still reconciled. SIGUSR1, sent by the user and profile
+// database is still reconciled. SIGUSR1, sent by the user and device
 // commands, only reconciles, so a half-edited config file is never applied by
 // accident.
 func handleSignals(ctx context.Context, d *daemon.Daemon, configPath string, hup, usr1 <-chan os.Signal, log *slog.Logger) {

@@ -39,7 +39,7 @@ function Shell(props: { name: string; children?: JSX.Element }) {
     navigate("/login", { replace: true });
   };
   // A section's link is current on its own page and on the pages under it
-  // (an upstream's page belongs to the overview).
+  // (an upstream's page belongs to the overview, a user's to the users).
   const link = (href: string, label: string, under?: string) => {
     const current = () => location.pathname === href || (under !== undefined && location.pathname.startsWith(under));
     return (
@@ -60,8 +60,7 @@ function Shell(props: { name: string; children?: JSX.Element }) {
           <span class="font-semibold">{t.app.name}</span>
           <nav aria-label={t.admin.nav} class="flex flex-wrap gap-1">
             {link("/admin", t.admin.upstreams, "/admin/upstreams/")}
-            {link("/admin/profiles", t.admin.profiles)}
-            {link("/admin/users", t.admin.users)}
+            {link("/admin/users", t.admin.users, "/admin/users/")}
             {link("/admin/connections", t.admin.connections)}
             {link("/admin/passkeys", t.admin.passkeys)}
           </nav>

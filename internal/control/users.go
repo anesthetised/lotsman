@@ -1,7 +1,6 @@
 package control
 
 import (
-	"cmp"
 	"context"
 	"errors"
 	"strconv"
@@ -13,15 +12,22 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	lotsmanv1 "github.com/anesthetised/lotsman/api/lotsman/v1"
+	"github.com/anesthetised/lotsman/internal/config"
+	"github.com/anesthetised/lotsman/internal/policy"
 	"github.com/anesthetised/lotsman/internal/store"
 )
 
 // Users is what the user services need from the daemon besides its status:
-// the database and the changes the daemon applies at once.
+// the database, the running upstreams routes are checked against, and the
+// changes the daemon applies at once. The services validate; the daemon
+// stores and applies.
 type Users interface {
 	Store() *store.Store
-	AddPeer(user, device, profile string, createUser bool) (store.Peer, error)
-	RemovePeers(user, device, profile string) error // profile "" = every profile
+	Upstreams() []config.Upstream
+	AddPeer(user, device string, route policy.Route, createUser bool) (store.Peer, error)
+	SetRoute(user, device string, route policy.Route) (store.Peer, error)
+	SetRights(user string, r store.Rights) (store.User, error)
+	RemovePeer(user, device string) error
 	RemoveUser(name string) error
 	PeerConfig(p store.Peer) string
 	MaxDevices() int
@@ -51,24 +57,97 @@ func (s userService) List(context.Context, *lotsmanv1.ListUsersRequest) (*lotsma
 	return res, nil
 }
 
-// AddDevice creates the user if needed, as `user add` does. An empty
-// device is the default one, as in the CLI.
-func (s userService) AddDevice(_ context.Context, req *lotsmanv1.AddDeviceRequest) (*lotsmanv1.DeviceConfig, error) {
-	device := cmp.Or(req.GetDevice(), store.DefaultDevice)
-	if err := checkNames("user", req.GetUser(), "device", device, "profile", req.GetProfile()); err != nil {
+func (s userService) AddUser(_ context.Context, req *lotsmanv1.AddUserRequest) (*lotsmanv1.User, error) {
+	if err := checkUser(req.GetUser()); err != nil {
 		return nil, err
 	}
-	p, err := s.users.AddPeer(req.GetUser(), device, req.GetProfile(), true)
+	u, err := s.users.Store().CreateUser(req.GetUser())
+	if errors.Is(err, store.ErrExists) {
+		return nil, connect.NewError(connect.CodeAlreadyExists, "user "+req.GetUser()+" already exists")
+	}
 	if err != nil {
-		return nil, addError(err, req.GetUser(), device, req.GetProfile())
+		return nil, internal(err)
+	}
+	return userMessage(u, nil), nil
+}
+
+// SetRights replaces every right of the user; the devices move off exits
+// no longer allowed before it answers. Their routes stay as they are and
+// simply match less.
+func (s userService) SetRights(_ context.Context, req *lotsmanv1.SetRightsRequest) (*lotsmanv1.User, error) {
+	if req.GetRights() == nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, "rights are required")
+	}
+	r := rightsOf(req.GetRights())
+	if err := policy.ValidateExits(r.Exits, s.users.Upstreams()); err != nil {
+		return nil, connect.NewError(connect.CodeInvalidArgument, err.Error())
+	}
+	u, err := s.users.SetRights(req.GetUser(), r)
+	if err != nil {
+		return nil, notFound(err, "no such user")
+	}
+	peers, err := s.users.Store().UserPeers(u.Name)
+	if err != nil {
+		return nil, internal(err)
+	}
+	return userMessage(u, peers), nil
+}
+
+// AddDevice creates the user if needed, as `device add` does. Without a
+// route the device gets the default one.
+func (s userService) AddDevice(_ context.Context, req *lotsmanv1.AddDeviceRequest) (*lotsmanv1.DeviceConfig, error) {
+	if err := checkUser(req.GetUser()); err != nil {
+		return nil, err
+	}
+	if err := checkNames("device", req.GetDevice()); err != nil {
+		return nil, err
+	}
+	route := policy.DefaultRoute()
+	if m := req.GetRoute(); m != nil {
+		rights, err := s.rights(req.GetUser())
+		if err != nil {
+			return nil, err
+		}
+		if route, err = validRoute(s.users, rights, m); err != nil {
+			return nil, err
+		}
+	}
+	p, err := s.users.AddPeer(req.GetUser(), req.GetDevice(), route, true)
+	if err != nil {
+		return nil, addError(err, req.GetUser(), req.GetDevice())
 	}
 	return deviceConfig(s.users, p), nil
 }
 
+// rights are the user's, or the defaults of one AddDevice is about to
+// create.
+func (s userService) rights(user string) (store.Rights, error) {
+	u, err := s.users.Store().User(user)
+	switch {
+	case err == nil:
+		return u.Rights, nil
+	case errors.Is(err, store.ErrNotFound):
+		return store.DefaultRights(), nil
+	}
+	return store.Rights{}, internal(err)
+}
+
+// SetRoute moves the device before it answers; its config stays valid.
+func (s userService) SetRoute(_ context.Context, req *lotsmanv1.SetRouteRequest) (*lotsmanv1.Device, error) {
+	u, err := s.users.Store().User(req.GetUser())
+	if err != nil {
+		return nil, notFound(err, "no such device")
+	}
+	p, err := setRoute(s.users, u, req.GetDevice(), req.GetRoute())
+	if err != nil {
+		return nil, err
+	}
+	return deviceMessage(p), nil
+}
+
 func (s userService) RemoveDevice(_ context.Context, req *lotsmanv1.RemoveDeviceRequest) (*lotsmanv1.RemoveDeviceResponse, error) {
-	device := cmp.Or(req.GetDevice(), store.DefaultDevice)
-	if err := s.users.RemovePeers(req.GetUser(), device, req.GetProfile()); err != nil {
-		return nil, notFound(err, "no such device or profile")
+	if err := s.users.RemovePeer(req.GetUser(), req.GetDevice()); err != nil {
+		return nil, notFound(err, "no such device")
 	}
 	return &lotsmanv1.RemoveDeviceResponse{}, nil
 }
@@ -104,20 +183,69 @@ func (s userService) RevokeLink(_ context.Context, req *lotsmanv1.RevokeLinkRequ
 	return &lotsmanv1.RevokeLinkResponse{}, nil
 }
 
-// userMessage is a user with their peers, which come sorted by device and
-// profile as the store returns them.
+// setRoute gives u's device a valid route, for both services: the
+// self-service checks the user's rights first.
+func setRoute(users Users, u store.User, device string, m *lotsmanv1.Route) (store.Peer, error) {
+	if m == nil {
+		return store.Peer{}, connect.NewError(connect.CodeInvalidArgument, "route is required")
+	}
+	route, err := validRoute(users, u.Rights, m)
+	if err != nil {
+		return store.Peer{}, err
+	}
+	p, err := users.SetRoute(u.Name, device, route)
+	if err != nil {
+		return store.Peer{}, notFound(err, "no such device")
+	}
+	return p, nil
+}
+
+// validRoute is m once it passes policy.Route.Validate against the running
+// upstreams that rights allow.
+func validRoute(users Users, rights store.Rights, m *lotsmanv1.Route) (policy.Route, error) {
+	route := routeOf(m)
+	if err := route.Validate(users.Upstreams(), rights.Exits); err != nil {
+		return policy.Route{}, connect.NewError(connect.CodeInvalidArgument, err.Error())
+	}
+	return route, nil
+}
+
+// userMessage is a user with their peers, which come sorted by device as
+// the store returns them.
 func userMessage(u store.User, peers []store.Peer) *lotsmanv1.User {
-	m := &lotsmanv1.User{Name: u.Name, HasLink: u.HasLink, Created: timestamp(u.CreatedAt)}
+	m := &lotsmanv1.User{Name: u.Name, HasLink: u.HasLink, Created: timestamp(u.CreatedAt), Rights: &lotsmanv1.Rights{
+		EditRoutes: u.Rights.EditRoutes, ShowProviders: u.Rights.ShowProviders, Exits: u.Rights.Exits,
+	}}
 	for _, p := range peers {
-		if n := len(m.Devices); n == 0 || m.Devices[n-1].Name != p.Device {
-			m.Devices = append(m.Devices, &lotsmanv1.Device{Name: p.Device})
-		}
-		d := m.Devices[len(m.Devices)-1]
-		d.Peers = append(d.Peers, &lotsmanv1.DevicePeer{
-			PeerId: PeerID(p.ID), Profile: p.Profile, Address: p.IP.String(), Created: timestamppb.New(p.CreatedAt),
-		})
+		m.Devices = append(m.Devices, deviceMessage(p))
 	}
 	return m
+}
+
+func deviceMessage(p store.Peer) *lotsmanv1.Device {
+	return &lotsmanv1.Device{
+		PeerId: PeerID(p.ID), Name: p.Device, Address: p.IP.String(), Created: timestamppb.New(p.CreatedAt), Route: routeMessage(p.Route),
+	}
+}
+
+func routeMessage(r policy.Route) *lotsmanv1.Route {
+	m := &lotsmanv1.Route{Fastest: r.Fastest, Strict: r.Strict}
+	for _, c := range r.Countries {
+		m.Countries = append(m.Countries, &lotsmanv1.Country{Geo: c.Geo, Providers: c.Providers})
+	}
+	return m
+}
+
+func routeOf(m *lotsmanv1.Route) policy.Route {
+	r := policy.Route{Fastest: m.GetFastest(), Strict: m.GetStrict()}
+	for _, c := range m.GetCountries() {
+		r.Countries = append(r.Countries, policy.Country{Geo: c.GetGeo(), Providers: c.GetProviders()})
+	}
+	return r
+}
+
+func rightsOf(m *lotsmanv1.Rights) store.Rights {
+	return store.Rights{EditRoutes: m.GetEditRoutes(), ShowProviders: m.GetShowProviders(), Exits: m.GetExits()}
 }
 
 func deviceConfig(users Users, p store.Peer) *lotsmanv1.DeviceConfig {
@@ -146,8 +274,8 @@ func parsePeerID(s string) (int64, error) {
 	return id, nil
 }
 
-// maxNameBytes bounds user, device and profile names that come through the
-// API. The CLI does not check names: its operator can fix what they typed.
+// maxNameBytes bounds user and device names that come through the API. The
+// CLI does not check names: its operator can fix what they typed.
 const maxNameBytes = 64
 
 // checkNames refuses names a browser could use to garble listings and
@@ -167,12 +295,22 @@ func checkNames(pairs ...string) error {
 	return nil
 }
 
-func addError(err error, user, device, profile string) error {
+// checkUser is checkNames for a new user, whose name must not hold a slash
+// either: the CLI names a device USER/DEVICE.
+func checkUser(name string) error {
+	if err := checkNames("user", name); err != nil {
+		return err
+	}
+	if strings.Contains(name, "/") {
+		return connect.NewError(connect.CodeInvalidArgument, "user must not contain /")
+	}
+	return nil
+}
+
+func addError(err error, user, device string) error {
 	switch {
 	case errors.Is(err, store.ErrExists):
-		return connect.NewError(connect.CodeAlreadyExists, user+"/"+device+" already has profile "+profile)
-	case errors.Is(err, store.ErrNoProfile):
-		return connect.NewError(connect.CodeInvalidArgument, "no such profile: "+profile)
+		return connect.NewError(connect.CodeAlreadyExists, user+" already has a device "+device)
 	case errors.Is(err, store.ErrSubnetFull):
 		return connect.NewError(connect.CodeResourceExhausted, "the gateway's subnet has no free address")
 	}

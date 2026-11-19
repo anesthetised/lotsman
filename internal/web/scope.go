@@ -45,12 +45,11 @@ var Scopes = map[string]Scope{
 
 	lotsmanv1connect.ConnectionServiceWatchProcedure: Operator,
 
-	lotsmanv1connect.ProfileServiceListProcedure:   Operator,
-	lotsmanv1connect.ProfileServicePutProcedure:    Operator,
-	lotsmanv1connect.ProfileServiceDeleteProcedure: Operator,
-
 	lotsmanv1connect.UserServiceListProcedure:         Operator,
+	lotsmanv1connect.UserServiceAddUserProcedure:      Operator,
+	lotsmanv1connect.UserServiceSetRightsProcedure:    Operator,
 	lotsmanv1connect.UserServiceAddDeviceProcedure:    Operator,
+	lotsmanv1connect.UserServiceSetRouteProcedure:     Operator,
 	lotsmanv1connect.UserServiceRemoveDeviceProcedure: Operator,
 	lotsmanv1connect.UserServiceRemoveUserProcedure:   Operator,
 	lotsmanv1connect.UserServiceGetConfigProcedure:    Operator,
@@ -62,9 +61,9 @@ var Scopes = map[string]Scope{
 	lotsmanv1connect.UserSelfServiceGetProcedure:             User,
 	lotsmanv1connect.UserSelfServiceWatchProcedure:           User,
 	lotsmanv1connect.UserSelfServiceAddDeviceProcedure:       User,
+	lotsmanv1connect.UserSelfServiceSetRouteProcedure:        User,
 	lotsmanv1connect.UserSelfServiceRemoveDeviceProcedure:    User,
 	lotsmanv1connect.UserSelfServiceGetConfigProcedure:       User,
-	lotsmanv1connect.UserSelfServiceListProfilesProcedure:    User,
 	lotsmanv1connect.UserSelfServiceUpstreamHistoryProcedure: User,
 	lotsmanv1connect.UserSelfServicePeerHistoryProcedure:     User,
 }

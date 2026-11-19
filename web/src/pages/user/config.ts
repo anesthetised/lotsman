@@ -4,8 +4,8 @@
  * The file name for a device's config: the apps take the tunnel's name from
  * it, and WireGuard tunnel names are at most 15 characters of `[A-Za-z0-9_=+.-]`.
  */
-export function confFilename(device: string, profile: string): string {
-  const name = `${device}-${profile}`
+export function confFilename(device: string): string {
+  const name = device
     .normalize("NFKD")
     .replace(/\p{M}+/gu, "") // accents: é is e and a combining mark
     .replace(/[^A-Za-z0-9_=+.-]+/g, "-")

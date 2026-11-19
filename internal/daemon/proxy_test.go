@@ -16,17 +16,19 @@ import (
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/metrics"
 	"github.com/anesthetised/lotsman/internal/proxy"
-	"github.com/anesthetised/lotsman/internal/store"
 )
 
 const proxyConfig = `
 endpoint: vpn.example.org:51820
 state_dir: %[1]s
 upstreams:
-  - {name: nl, conf: %[1]s/nl.conf, geo: NL}
-  - {name: ol, kind: outline, conf: %[1]s/ol.key, geo: OL%[2]s}
+  - {name: nl, conf: %[1]s/nl.conf, geo: NL, provider: acme}
+  - {name: ol, kind: outline, conf: %[1]s/ol.key, geo: OL, provider: acme%[2]s}
 health: {interval: 30ms, probe: 1.1.1.1:443, dns: 9.9.9.9:53, down_after: 2, up_after: 1}
 `
+
+// pxRoute prefers the Outline upstream, then the AWG one.
+var pxRoute = route("OL", "NL")
 
 const ssSecret = "do-not-print-me"
 
@@ -45,9 +47,6 @@ func newProxyHarness(t *testing.T) (*harness, *fakeResolver) {
 	}
 	h.cfg = proxyHarnessConfig(t, h.dir, "")
 	h.d.cfg = h.cfg
-	if err := h.st.AddProfile(config.Profile{Name: "px", Prefer: []config.Match{{Geo: "OL"}, {Geo: "NL"}}}); err != nil {
-		t.Fatal(err)
-	}
 	h.setHealthy("lm-up-ol", true)
 	return h, dns
 }
@@ -130,7 +129,7 @@ func TestLoadProxyUpstreamWebSocket(t *testing.T) {
 func TestProxyUpstream(t *testing.T) {
 	h, dns := newProxyHarness(t)
 	h.st.CreateUser("alice")
-	peer, _ := h.st.AddPeer("alice", store.DefaultDevice, "px", h.cfg.Subnet)
+	peer, _ := h.st.AddPeer("alice", "px", pxRoute, h.cfg.Subnet)
 	h.run(t)
 	routedVia := func(want string) func() bool {
 		return func() bool { got, _ := h.dp.RouteOf(peer.IP); return got == want }
@@ -177,7 +176,7 @@ func TestProxyUpstream(t *testing.T) {
 		t.Error("a proxy upstream reports a handshake")
 	}
 
-	// Either protocol failing takes ol down, and the profile fails over.
+	// Either protocol failing takes ol down, and the device fails over.
 	for _, network := range []string{"udp", "tcp"} {
 		h.setDNSDown("lm-up-ol", network, true)
 		eventually(t, "failover to nl without dns over "+network, routedVia("lm-up-nl"))

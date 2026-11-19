@@ -40,7 +40,7 @@ export function History() {
   const ctx = useUser();
   const [range, setRange] = createSignal<Range>("day");
   // The peers, not the whole user: a reload of the devices must not refetch the history.
-  const peerIds = createMemo(() => ctx.user().devices.flatMap((d) => d.peers.map((p) => p.peerId)), {
+  const peerIds = createMemo(() => ctx.user().devices.map((d) => d.peerId), {
     equals: (a, b) => a.join() === b.join(),
   });
   const history = createMemo(async (): Promise<TrafficHistory> => {
@@ -104,8 +104,8 @@ function HistoryChart(props: { history: TrafficHistory; period: string }) {
   const devices = createMemo(() =>
     ctx.user().devices.map((d) => ({
       name: d.name,
-      down: d.peers.reduce((sum, p) => sum + (props.history.byPeer.get(p.peerId)?.down ?? 0), 0),
-      up: d.peers.reduce((sum, p) => sum + (props.history.byPeer.get(p.peerId)?.up ?? 0), 0),
+      down: props.history.byPeer.get(d.peerId)?.down ?? 0,
+      up: props.history.byPeer.get(d.peerId)?.up ?? 0,
     })),
   );
   const span = () => {

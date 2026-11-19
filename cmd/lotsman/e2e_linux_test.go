@@ -274,13 +274,12 @@ listen: 127.0.0.1:51820
 endpoint: 127.0.0.1:51820
 state_dir: ` + filepath.Join(dir, "state") + `
 upstreams:
-  - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, geo: NL}
-  - {name: de, conf: ` + filepath.Join(dir, "de.conf") + `, geo: DE}
+  - {name: nl, conf: ` + filepath.Join(dir, "nl.conf") + `, geo: NL, provider: acme}
+  - {name: de, conf: ` + filepath.Join(dir, "de.conf") + `, geo: DE, provider: acme}
 health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 metrics: {listen: 127.0.0.1:19100}
 `
 	os.WriteFile(cfgPath, []byte(baseConfig), 0o600)
-	mustRun(t, "-config", cfgPath, "profile", "add", "eu", "geo=NL", "geo=DE")
 
 	ctx, cancel := context.WithCancel(context.Background())
 	served := make(chan error, 1)
@@ -297,7 +296,7 @@ metrics: {listen: 127.0.0.1:19100}
 		_, err := os.Stat(filepath.Join(dir, "state", "status.json"))
 		return err == nil
 	})
-	out, err := capture(t, "-config", cfgPath, "user", "add", "alice", "-profile", "eu")
+	out, err := capture(t, "-config", cfgPath, "device", "add", "alice/phone", "NL", "DE")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,9 +319,9 @@ metrics: {listen: 127.0.0.1:19100}
 	})
 	eventually(t, "live upstream nl and handshake in user list", 5*time.Second, func() bool {
 		list, _ := capture(t, "-config", cfgPath, "user", "list")
-		// alice default eu 10.77.0.2 nl 0s ago 2026-11-16
+		// alice phone 10.77.0.2 nl 0s ago 2026-11-16 NL > DE
 		f := tableRow(list, "alice")
-		return len(f) > 6 && f[4] == "nl" && f[6] == "ago"
+		return len(f) > 5 && f[3] == "nl" && f[5] == "ago"
 	})
 
 	// The metrics endpoint reflects the routing above.
@@ -331,7 +330,7 @@ metrics: {listen: 127.0.0.1:19100}
 		return err == nil && strings.HasPrefix(ct, "text/plain; version=0.0.4") &&
 			strings.Contains(body, `lotsman_upstream_up{upstream="nl"} 1`) && strings.Contains(body, `lotsman_upstream_up{upstream="de"} 1`)
 	})
-	if body, _, _ := scrape(); !strings.Contains(body, `lotsman_peer_upstream{user="alice",device="default",profile="eu",upstream="nl"} 1`) {
+	if body, _, _ := scrape(); !strings.Contains(body, `lotsman_peer_upstream{user="alice",device="phone",upstream="nl"} 1`) {
 		t.Errorf("peer metric missing:\n%s", body)
 	}
 
@@ -408,14 +407,14 @@ metrics: {listen: 127.0.0.1:19100}
 		}
 	}
 
-	// Flow pinning: a connection opened through NL survives the profile
+	// Flow pinning: a connection opened through NL survives the route
 	// being repointed at DE while NL is still alive; new connections use DE.
-	// `profile set` applies through the store and SIGUSR1, without a reload.
+	// `device route` applies through the store and SIGUSR1, without a reload.
 	long := c.openStream(t)
 	if via, err := long.ping("a"); err != nil || via != "nl" {
 		t.Fatalf("stream before move: %q, %v", via, err)
 	}
-	mustRun(t, "-config", cfgPath, "profile", "set", "eu", "geo=DE", "geo=NL")
+	mustRun(t, "-config", cfgPath, "device", "route", "alice/phone", "DE", "NL")
 	eventually(t, "new connections via de", 15*time.Second, func() bool {
 		got, err := c.exitVia(2 * time.Second)
 		return err == nil && got == "de"
@@ -423,7 +422,7 @@ metrics: {listen: 127.0.0.1:19100}
 	if via, err := long.ping("b"); err != nil || via != "nl" {
 		t.Errorf("pinned stream after move: %q, %v (want nl)", via, err)
 	}
-	mustRun(t, "-config", cfgPath, "profile", "set", "eu", "geo=NL", "geo=DE")
+	mustRun(t, "-config", cfgPath, "device", "route", "alice/phone", "NL", "DE")
 	eventually(t, "back via nl", 15*time.Second, func() bool {
 		got, err := c.exitVia(2 * time.Second)
 		return err == nil && got == "nl"
@@ -435,8 +434,8 @@ metrics: {listen: 127.0.0.1:19100}
 
 	// NL is removed from the config and the daemon reloaded on SIGHUP:
 	// traffic moves to DE without the client reconnecting, and the NL TUN is
-	// gone. The profile's NL tier is left empty, which is only a warning.
-	withoutNL := strings.Replace(baseConfig, "  - {name: nl, conf: "+filepath.Join(dir, "nl.conf")+", geo: NL}\n", "", 1)
+	// gone. The route still names NL, which simply matches nothing now.
+	withoutNL := strings.Replace(baseConfig, "  - {name: nl, conf: "+filepath.Join(dir, "nl.conf")+", geo: NL, provider: acme}\n", "", 1)
 	if withoutNL == baseConfig {
 		t.Fatal("test setup: could not derive the config without nl")
 	}

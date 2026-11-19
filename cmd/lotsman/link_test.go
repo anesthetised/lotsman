@@ -13,7 +13,7 @@ import (
 func TestUserLink(t *testing.T) {
 	cfg := testConfig(t)
 	t.Setenv("LOTSMAN_WEB_CONFIG", filepath.Join(t.TempDir(), "missing.yaml"))
-	mustRun(t, "-config", cfg, "user", "add", "alice", "-profile", "nl")
+	mustRun(t, "-config", cfg, "device", "add", "alice/phone")
 	resolve := func(token string) (string, error) {
 		e, err := openEnv(cfg)
 		if err != nil {

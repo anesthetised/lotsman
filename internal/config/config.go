@@ -4,14 +4,12 @@ package config
 import (
 	"bytes"
 	"cmp"
-	"errors"
 	"fmt"
 	"net"
 	"net/netip"
 	"net/url"
 	"os"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -45,8 +43,7 @@ type History struct {
 // operator is not limited.
 type Users struct {
 	// MaxDevices is how many devices a user may have when adding one on
-	// their page. Another profile on a device they have is no new device;
-	// 0 turns adding off, another profile included.
+	// their page; 0 turns adding off.
 	MaxDevices int `yaml:"max_devices"`
 }
 
@@ -77,12 +74,11 @@ const (
 var ProxyAddress = netip.MustParsePrefix("192.0.0.8/32")
 
 type Upstream struct {
-	Name     string   `yaml:"name"`
-	Kind     string   `yaml:"kind"` // KindAWG (the default), KindOutline or KindVLESS
-	Conf     string   `yaml:"conf"` // the provider's AmneziaWG config, or a file with the access key
-	Geo      string   `yaml:"geo"`
-	Provider string   `yaml:"provider"`
-	Tags     []string `yaml:"tags"` // free-form groups a profile can prefer as one tier
+	Name     string `yaml:"name"`
+	Kind     string `yaml:"kind"`     // KindAWG (the default), KindOutline or KindVLESS
+	Conf     string `yaml:"conf"`     // the provider's AmneziaWG config, or a file with the access key
+	Geo      string `yaml:"geo"`      // the exit's country, ISO 3166-1 alpha-2
+	Provider string `yaml:"provider"` // who runs the exit; a route may name it
 	// MaxFlows caps the TCP and UDP flows a proxy upstream carries at once;
 	// 0 is the default.
 	MaxFlows int `yaml:"max_flows"`
@@ -90,10 +86,6 @@ type Upstream struct {
 
 // Proxy reports whether the upstream runs on the userspace proxy stack.
 func (u Upstream) Proxy() bool { return u.Kind == KindOutline || u.Kind == KindVLESS }
-
-func (u Upstream) HasTag(tag string) bool {
-	return slices.Contains(u.Tags, tag)
-}
 
 type Health struct {
 	Interval  time.Duration `yaml:"interval"`
@@ -214,51 +206,21 @@ func Default() Config {
 	}
 }
 
-// ErrProfilesMoved reports a config that still has the profiles: key of
-// earlier versions. Profiles live in the store now.
-var ErrProfilesMoved = errors.New("profiles: no longer read from the config, they live in the database")
-
 func Load(path string) (*Config, error) {
-	cfg, profiles, err := LoadLegacy(path)
-	return checkNoProfiles(cfg, profiles, err, path)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	return Parse(data)
 }
 
 func Parse(data []byte) (*Config, error) {
-	cfg, profiles, err := ParseLegacy(data)
-	return checkNoProfiles(cfg, profiles, err, "FILE")
-}
-
-func checkNoProfiles(cfg *Config, profiles []Profile, err error, path string) (*Config, error) {
-	if err == nil && profiles != nil {
-		return nil, fmt.Errorf("%w: copy them there once with `lotsman -config %s profile import %s`, then delete the profiles: key", ErrProfilesMoved, path, path)
-	}
-	return cfg, err
-}
-
-// LoadLegacy is Load for a config that may still carry the profiles: key. It
-// returns those profiles unvalidated, nil when the key is absent, for
-// `lotsman profile import`.
-func LoadLegacy(path string) (*Config, []Profile, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, nil, err
-	}
-	return ParseLegacy(data)
-}
-
-// ParseLegacy is Parse for a config that may still carry the profiles: key;
-// see LoadLegacy.
-func ParseLegacy(data []byte) (*Config, []Profile, error) {
-	f := struct {
-		Config   `yaml:",inline"`
-		Profiles []Profile `yaml:"profiles"`
-	}{Config: Default()}
+	cfg := Default()
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)
-	if err := dec.Decode(&f); err != nil {
-		return nil, nil, fmt.Errorf("parse config: %w", err)
+	if err := dec.Decode(&cfg); err != nil {
+		return nil, fmt.Errorf("parse config: %w", err)
 	}
-	cfg := f.Config
 	for i := range cfg.Upstreams {
 		if cfg.Upstreams[i].Kind == "" {
 			cfg.Upstreams[i].Kind = KindAWG
@@ -270,18 +232,17 @@ func ParseLegacy(data []byte) (*Config, []Profile, error) {
 		t.Interval = cmp.Or(t.Interval, DefaultTransferInterval)
 	}
 	if err := cfg.Validate(); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return &cfg, f.Profiles, nil
+	return &cfg, nil
 }
 
 var (
-	// Profile names are shown to users, so they may be capitalized, e.g. a
-	// country; the store keeps them unique ignoring case.
-	profileNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9-]{0,31}$`)
-	tagRe         = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 	// An upstream name becomes the TUN interface "lm-up-<name>", which must fit IFNAMSIZ (15).
 	upstreamNameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,8}$`)
+	// A geo is an ISO 3166-1 alpha-2 country code, which the panel names.
+	geoRe      = regexp.MustCompile(`^[A-Z]{2}$`)
+	providerRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 )
 
 // InterfaceName is the TUN interface an upstream is bound to.
@@ -345,17 +306,12 @@ func (c *Config) Validate() error {
 		if u.Conf == "" {
 			return fmt.Errorf("upstream %q: conf path is required", u.Name)
 		}
-		// geo and provider are not validated: a typo there surfaces as a
-		// prefer entry matching nothing. Tags are checked the same way, but
-		// an empty one would read as "any" in a matcher, and a duplicate is
-		// a typo that cannot change what matches.
-		for j, tag := range u.Tags {
-			if !tagRe.MatchString(tag) {
-				return fmt.Errorf("upstream %q: tag %q must match %s", u.Name, tag, tagRe)
-			}
-			if slices.Contains(u.Tags[:j], tag) {
-				return fmt.Errorf("upstream %q: duplicate tag %q", u.Name, tag)
-			}
+		// Routes select upstreams by these two labels, so both are required.
+		if !geoRe.MatchString(u.Geo) {
+			return fmt.Errorf("upstream %q: geo %q must be an ISO 3166-1 alpha-2 country code in capitals, such as NL", u.Name, u.Geo)
+		}
+		if !providerRe.MatchString(u.Provider) {
+			return fmt.Errorf("upstream %q: provider %q must match %s", u.Name, u.Provider, providerRe)
 		}
 	}
 	if c.History.MinuteRetention < time.Hour {

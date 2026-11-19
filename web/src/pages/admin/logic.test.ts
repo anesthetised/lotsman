@@ -4,40 +4,10 @@ import { expect, test } from "vitest";
 import { type Connection, ConnectionSchema, Protocol } from "../../gen/lotsman/v1/connection_pb";
 import { SampleSchema } from "../../gen/lotsman/v1/history_pb";
 import { connectionKey, sortConnections } from "./connectionSort";
-import { configFileName, userLink } from "./devices";
+import { RightsSchema } from "../../gen/lotsman/v1/user_pb";
+import { consoleEn } from "../../i18n/console.en";
+import { configFileName, rightsSummary, userLink, userPath } from "./devices";
 import { historyRanges, rateSeries } from "./history";
-import { moveTier, nameProblem, removeTier, tierRow, toTiers, updateTier } from "./tiers";
-
-test("tier rows move, change and go, keeping their keys", () => {
-  const rows = [tierRow({ geo: "NL" }), tierRow({ tag: "eu" }), tierRow()];
-  const [a, b, c] = rows.map((r) => r.key);
-  expect(moveTier(rows, c!, -1).map((r) => r.key)).toEqual([a, c, b]);
-  expect(moveTier(rows, a!, 1).map((r) => r.key)).toEqual([b, a, c]);
-  expect(moveTier(rows, a!, -1)).toEqual(rows); // already first
-  expect(moveTier(rows, c!, 1)).toEqual(rows); // already last
-  expect(removeTier(rows, b!).map((r) => r.key)).toEqual([a, c]);
-  const changed = updateTier(rows, b!, "provider", " acme ");
-  expect(changed[1]).toEqual({ key: b, geo: "", provider: " acme ", tag: "eu" });
-  expect(rows[1]?.provider).toBe(""); // the input is untouched
-  expect(toTiers(changed)).toEqual([
-    { geo: "NL", provider: "", tag: "" },
-    { geo: "", provider: "acme", tag: "eu" },
-    { geo: "", provider: "", tag: "" },
-  ]);
-  expect(new Set([tierRow().key, tierRow().key]).size).toBe(2);
-});
-
-test("profile names are checked before the daemon sees them", () => {
-  expect(nameProblem("", [], false)).toBe("required");
-  expect(nameProblem("Albania", [], false)).toBeUndefined();
-  expect(nameProblem("Bad Name", [], false)).toBe("pattern");
-  expect(nameProblem("-eu", [], false)).toBe("pattern");
-  expect(nameProblem("a".repeat(33), [], false)).toBe("pattern");
-  expect(nameProblem("eu-2", ["default"], false)).toBeUndefined();
-  expect(nameProblem("default", ["default"], false)).toBe("taken"); // Put would replace it
-  expect(nameProblem("default", ["default"], true)).toBeUndefined();
-  expect(nameProblem("ALBANIA", ["Albania"], false)).toBe("taken"); // the store ignores case
-});
 
 function conn(source: string, downRate: number, upRate = 0, downBytes = 0): Connection {
   return create(ConnectionSchema, {
@@ -61,16 +31,23 @@ test("connections sort by a traffic column, ties in a fixed order", () => {
 });
 
 test("config file names fit an interface name", () => {
-  expect(configFileName("alice", "phone", "eu")).toBe("alice-phone-eu.conf");
-  expect(configFileName("alice", "laptop", "default")).toBe("alice-laptop.conf");
-  expect(configFileName("alexandra", "work-laptop", "default")).toBe("work-laptop.conf");
-  expect(configFileName("alexandra", "my work laptop", "eu")).toBe("my_work_laptop.conf");
-  expect(configFileName("alexandra", "the-very-long-device", "eu")).toBe("alexandra-the-v.conf");
-  expect(configFileName("Иван", "phone", "eu")).toBe("____-phone-eu.conf");
+  expect(configFileName("alice", "phone")).toBe("alice-phone.conf");
+  expect(configFileName("alexandra", "work-laptop")).toBe("work-laptop.conf");
+  expect(configFileName("alexandra", "my work laptop")).toBe("my_work_laptop.conf");
+  expect(configFileName("alexandra", "the-very-long-device")).toBe("alexandra-the-v.conf");
+  expect(configFileName("Иван", "phone")).toBe("____-phone.conf");
 });
 
-test("a user's link carries the token after #", () => {
+test("a user's link carries the token after #; their console page escapes the name", () => {
   expect(userLink("https://vpn.example.com", "abc_-1")).toBe("https://vpn.example.com/u#abc_-1");
+  expect(userPath("Иван 2")).toBe("/admin/users/%D0%98%D0%B2%D0%B0%D0%BD%202");
+});
+
+test("rights read as a few words", () => {
+  const rights = (r: Parameters<typeof create<typeof RightsSchema>>[1]) => rightsSummary(consoleEn, create(RightsSchema, r));
+  expect(rights({ editRoutes: true, showProviders: true })).toBe("changes routes · all exits");
+  expect(rights({ editRoutes: false, showProviders: false, exits: ["lv-2", "al-1"] })).toBe("operator sets routes · 2 exits · countries only");
+  expect(rightsSummary(consoleEn, undefined)).toBe("");
 });
 
 test("history samples become average rates per step", () => {

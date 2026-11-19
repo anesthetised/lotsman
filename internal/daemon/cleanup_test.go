@@ -6,13 +6,11 @@ import (
 	"fmt"
 	"net/netip"
 	"slices"
-	"strings"
 	"testing"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/dataplane/fake"
-	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/store"
 )
 
@@ -32,18 +30,14 @@ func (f *failingUnroute) Unroute(ip netip.Addr) error {
 }
 
 func TestRouteCleanupRetry(t *testing.T) {
-	for _, reason := range []string{"no healthy upstream", "upstream recovers", "peer removed", "upstream removed", "upstream replaced", "profile removed"} {
-		failureCounts := []int{1, 3}
-		if reason == "profile removed" {
-			failureCounts = []int{0, 1, 3}
-		}
-		for _, failures := range failureCounts {
+	for _, reason := range []string{"no healthy upstream", "upstream recovers", "peer removed", "upstream removed", "upstream replaced", "exits revoked"} {
+		for _, failures := range []int{1, 3} {
 			t.Run(fmt.Sprintf("%s/%d failures", reason, failures), func(t *testing.T) {
 				h := newHarness(t)
 				if _, err := h.st.CreateUser("alice"); err != nil {
 					t.Fatal(err)
 				}
-				peer, err := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
+				peer, err := h.st.AddPeer("alice", "nl", nlRoute, h.cfg.Subnet)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -73,19 +67,21 @@ func TestRouteCleanupRetry(t *testing.T) {
 					h.d.probeAll(ctx)
 					h.d.probeAll(ctx)
 				case "peer removed":
-					if err := h.st.DeletePeer("alice", store.DefaultDevice, "nl"); err != nil {
+					if err := h.st.DeletePeer("alice", "nl"); err != nil {
 						t.Fatal(err)
 					}
-				case "upstream removed", "upstream replaced", "profile removed":
+				case "exits revoked":
+					if _, err := h.st.SetRights("alice", store.Rights{Exits: []string{"de"}}); err != nil {
+						t.Fatal(err)
+					}
+				case "upstream removed", "upstream replaced":
 					cfg, err := config.Parse([]byte(fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir)))
 					if err != nil {
 						t.Fatal(err)
 					}
 					if reason == "upstream removed" {
-						// nl2 keeps the nl profile valid but never comes up.
-						cfg.Upstreams[0] = config.Upstream{Name: "nl2", Kind: config.KindAWG, Conf: providerConf(t, h.dir, "nl2", "10.8.0.3/32", 0), Geo: "NL"}
-					} else if reason == "profile removed" {
-						h.forgetProfile(t, "nl")
+						// nl2 is in NL too but never comes up.
+						cfg.Upstreams[0] = config.Upstream{Name: "nl2", Kind: config.KindAWG, Conf: providerConf(t, h.dir, "nl2", "10.8.0.3/32", 0), Geo: "NL", Provider: "acme"}
 					} else {
 						providerConf(t, h.dir, "nl", "10.8.0.2/32", 1300)
 					}
@@ -94,12 +90,6 @@ func TestRouteCleanupRetry(t *testing.T) {
 					}
 					// The replacement can recover before cleanup is retried.
 					h.d.probeAll(ctx)
-					if reason == "profile removed" {
-						st := h.d.Status()
-						if len(st.Upstreams) != 2 || st.Upstreams[0].State != health.Up || st.Upstreams[1].State != health.Up {
-							t.Fatalf("profile removal must retain both healthy upstreams: %+v", st.Upstreams)
-						}
-					}
 				}
 				// Reload already attempted the first cleanup in these two cases.
 				first := 0
@@ -134,11 +124,7 @@ func TestRouteCleanupRetry(t *testing.T) {
 						}
 					}
 				}
-				if err := h.d.Reconcile(); reason == "profile removed" {
-					if err == nil || !strings.Contains(err.Error(), `profile "nl" is not in the store`) || errors.Is(err, errUnroute) {
-						t.Fatalf("expected only a missing-profile error after cleanup, got %v", err)
-					}
-				} else if err != nil {
+				if err := h.d.Reconcile(); err != nil {
 					t.Fatal(err)
 				}
 				want := ""
@@ -176,7 +162,7 @@ func replacePeer(t *testing.T) (h *harness, oldPeer, newPeer store.Peer) {
 			t.Fatal(err)
 		}
 	}
-	oldPeer, err := h.st.AddPeer("alice", store.DefaultDevice, "nl", h.cfg.Subnet)
+	oldPeer, err := h.st.AddPeer("alice", "nl", nlRoute, h.cfg.Subnet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,10 +175,10 @@ func replacePeer(t *testing.T) (h *harness, oldPeer, newPeer store.Peer) {
 	if err := h.d.Reconcile(); err != nil {
 		t.Fatal(err)
 	}
-	if err := h.st.DeletePeer("alice", store.DefaultDevice, "nl"); err != nil {
+	if err := h.st.DeletePeer("alice", "nl"); err != nil {
 		t.Fatal(err)
 	}
-	newPeer, err = h.st.AddPeer("bob", store.DefaultDevice, "nl", h.cfg.Subnet)
+	newPeer, err = h.st.AddPeer("bob", "nl", nlRoute, h.cfg.Subnet)
 	if err != nil {
 		t.Fatal(err)
 	}

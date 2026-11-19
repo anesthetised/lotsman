@@ -6,11 +6,12 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"reflect"
 	"syscall"
 	"testing"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
-	"github.com/anesthetised/lotsman/internal/config"
+	"github.com/anesthetised/lotsman/internal/policy"
 )
 
 func open(t *testing.T) *Store {
@@ -25,15 +26,8 @@ func open(t *testing.T) *Store {
 
 var subnet = netip.MustParsePrefix("10.77.0.0/16")
 
-// addProfiles stores profiles without tiers: peers need one to exist.
-func addProfiles(t *testing.T, s *Store, names ...string) {
-	t.Helper()
-	for _, name := range names {
-		if err := s.AddProfile(config.Profile{Name: name}); err != nil {
-			t.Fatal(err)
-		}
-	}
-}
+// nl is a route of one country, as a device might have.
+var nl = policy.Route{Strict: true, Countries: []policy.Country{{Geo: "NL"}}}
 
 func TestUsers(t *testing.T) {
 	s := open(t)
@@ -43,8 +37,9 @@ func TestUsers(t *testing.T) {
 	if _, err := s.CreateUser("alice"); !errors.Is(err, ErrExists) {
 		t.Errorf("duplicate user: %v", err)
 	}
-	if _, err := s.CreateUser("bob"); err != nil {
-		t.Fatal(err)
+	bob, err := s.CreateUser("bob")
+	if err != nil || !reflect.DeepEqual(bob.Rights, DefaultRights()) {
+		t.Fatalf("CreateUser = %+v, %v; want the default rights", bob, err)
 	}
 	users, err := s.ListUsers()
 	if err != nil || len(users) != 2 || users[0].Name != "alice" || users[1].Name != "bob" {
@@ -58,15 +53,38 @@ func TestUsers(t *testing.T) {
 	}
 }
 
+func TestRights(t *testing.T) {
+	s := open(t)
+	if _, err := s.SetRights("alice", DefaultRights()); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetRights of a missing user: %v", err)
+	}
+	s.CreateUser("alice")
+	if u, err := s.User("alice"); err != nil || !reflect.DeepEqual(u.Rights, DefaultRights()) {
+		t.Errorf("a new user's rights = %+v, %v; want %+v", u.Rights, err, DefaultRights())
+	}
+	for _, r := range []Rights{
+		{EditRoutes: false, ShowProviders: true, Exits: []string{"nl", "de"}},
+		{EditRoutes: true, ShowProviders: false},
+		DefaultRights(),
+	} {
+		u, err := s.SetRights("alice", r)
+		if err != nil || !reflect.DeepEqual(u.Rights, r) {
+			t.Errorf("SetRights(%+v) = %+v, %v", r, u.Rights, err)
+		}
+		if u, err := s.User("alice"); err != nil || !reflect.DeepEqual(u.Rights, r) {
+			t.Errorf("rights read back = %+v, %v; want %+v", u.Rights, err, r)
+		}
+	}
+}
+
 func TestPeers(t *testing.T) {
 	s := open(t)
-	addProfiles(t, s, "nl", "de")
-	if _, err := s.AddPeer("alice", DefaultDevice, "nl", subnet); !errors.Is(err, ErrNotFound) {
+	if _, err := s.AddPeer("alice", "phone", nl, subnet); !errors.Is(err, ErrNotFound) {
 		t.Errorf("peer for missing user: %v", err)
 	}
 	s.CreateUser("alice")
 
-	p1, err := s.AddPeer("alice", DefaultDevice, "nl", subnet)
+	p1, err := s.AddPeer("alice", "phone", nl, subnet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,33 +94,39 @@ func TestPeers(t *testing.T) {
 	if p1.PublicKey != p1.PrivateKey.Public() || p1.PrivateKey.IsZero() {
 		t.Error("key pair inconsistent")
 	}
-	if _, err := s.AddPeer("alice", DefaultDevice, "nl", subnet); !errors.Is(err, ErrExists) {
-		t.Errorf("duplicate profile: %v", err)
+	if _, err := s.AddPeer("alice", "phone", policy.DefaultRoute(), subnet); !errors.Is(err, ErrExists) {
+		t.Errorf("duplicate device: %v", err)
 	}
-	p2, err := s.AddPeer("alice", DefaultDevice, "de", subnet)
+	p2, err := s.AddPeer("alice", "laptop", policy.DefaultRoute(), subnet)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if p2.IP != netip.MustParseAddr("10.77.0.3") {
 		t.Errorf("second address = %s", p2.IP)
 	}
+	if _, err := s.AddUserPeer("bob", "phone", nl, subnet); err != nil {
+		t.Errorf("another user's device of the same name must be allowed: %v", err)
+	}
 
-	got, err := s.Peer("alice", DefaultDevice, "nl")
-	if err != nil || got.PrivateKey != p1.PrivateKey || got.IP != p1.IP || got.User != "alice" {
+	got, err := s.Peer("alice", "phone")
+	if err != nil || got.PrivateKey != p1.PrivateKey || got.IP != p1.IP || got.User != "alice" || !reflect.DeepEqual(got.Route, nl) {
 		t.Errorf("Peer = %+v, %v", got, err)
 	}
 	all, err := s.ListPeers()
-	if err != nil || len(all) != 2 || all[0].Profile != "de" || all[1].Profile != "nl" {
+	if err != nil || len(all) != 3 || all[0].Device != "laptop" || all[1].Device != "phone" || all[2].User != "bob" {
 		t.Fatalf("ListPeers = %+v, %v", all, err)
 	}
 
-	if err := s.DeletePeer("alice", DefaultDevice, "nl"); err != nil {
+	if err := s.DeletePeer("alice", "phone"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Peer("alice", DefaultDevice, "nl"); !errors.Is(err, ErrNotFound) {
+	if _, err := s.Peer("alice", "phone"); !errors.Is(err, ErrNotFound) {
 		t.Errorf("deleted peer still found: %v", err)
 	}
-	p3, _ := s.AddPeer("alice", DefaultDevice, "nl", subnet)
+	if err := s.DeletePeer("alice", "phone"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("deleting a missing device: %v", err)
+	}
+	p3, _ := s.AddPeer("alice", "phone", nl, subnet)
 	if p3.IP != p1.IP {
 		t.Errorf("freed address %s not reused, got %s", p1.IP, p3.IP)
 	}
@@ -110,40 +134,32 @@ func TestPeers(t *testing.T) {
 	if err := s.DeleteUser("alice"); err != nil {
 		t.Fatal(err)
 	}
-	if all, _ := s.ListPeers(); len(all) != 0 {
+	if all, _ := s.ListPeers(); len(all) != 1 || all[0].User != "bob" {
 		t.Errorf("peers survived user deletion: %+v", all)
 	}
 }
 
-func TestDevices(t *testing.T) {
+// A new route keeps the device's key and address, so its config stays valid.
+func TestSetRoute(t *testing.T) {
 	s := open(t)
-	addProfiles(t, s, "nl", "eu")
-	s.CreateUser("alice")
-	if _, err := s.AddPeer("alice", "phone", "nl", subnet); err != nil {
+	if _, err := s.SetRoute("alice", "phone", nl); !errors.Is(err, ErrNotFound) {
+		t.Errorf("SetRoute of a missing device: %v", err)
+	}
+	p, err := s.AddUserPeer("alice", "phone", policy.DefaultRoute(), subnet)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AddPeer("alice", "laptop", "nl", subnet); err != nil {
-		t.Fatalf("same profile on another device must be allowed: %v", err)
+	other, _ := s.AddUserPeer("bob", "phone", policy.DefaultRoute(), subnet)
+	route := policy.Route{Fastest: true, Countries: []policy.Country{{Geo: "DE", Providers: []string{"acme", "beta"}}, {Geo: "NL"}}}
+	got, err := s.SetRoute("alice", "phone", route)
+	if err != nil || !reflect.DeepEqual(got.Route, route) || got.ID != p.ID || got.PrivateKey != p.PrivateKey || got.IP != p.IP {
+		t.Errorf("SetRoute = %+v, %v", got, err)
 	}
-	if _, err := s.AddPeer("alice", "laptop", "eu", subnet); err != nil {
-		t.Fatal(err)
+	if got, _ := s.Peer("alice", "phone"); !reflect.DeepEqual(got.Route, route) {
+		t.Errorf("route read back = %+v", got.Route)
 	}
-	if _, err := s.AddPeer("alice", "laptop", "eu", subnet); !errors.Is(err, ErrExists) {
-		t.Errorf("duplicate device+profile: %v", err)
-	}
-	p, err := s.Peer("alice", "laptop", "eu")
-	if err != nil || p.Device != "laptop" {
-		t.Errorf("Peer = %+v, %v", p, err)
-	}
-	if err := s.DeleteDevice("alice", "laptop"); err != nil {
-		t.Fatal(err)
-	}
-	all, _ := s.ListPeers()
-	if len(all) != 1 || all[0].Device != "phone" {
-		t.Errorf("after DeleteDevice: %+v", all)
-	}
-	if err := s.DeleteDevice("alice", "laptop"); !errors.Is(err, ErrNotFound) {
-		t.Errorf("deleting a missing device: %v", err)
+	if got, _ := s.Peer("bob", "phone"); !reflect.DeepEqual(got.Route, other.Route) {
+		t.Errorf("another user's device of the same name changed: %+v", got.Route)
 	}
 }
 
@@ -169,22 +185,24 @@ func seedVersion1(t *testing.T, path string) awgconf.Key {
 }
 
 // The first release had no device column and never set user_version; its
-// databases must migrate in place.
+// databases must migrate in place. Its users stay; its peers go with the
+// profiles (#161).
 func TestMigrateFromVersion1(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "old.db")
-	key := seedVersion1(t, path)
+	seedVersion1(t, path)
 
 	s, err := Open(path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	p, err := s.Peer("alice", DefaultDevice, "nl")
-	if err != nil || p.PrivateKey != key || p.IP.String() != "10.77.0.2" {
-		t.Fatalf("migrated peer = %+v, %v", p, err)
+	if u, err := s.User("alice"); err != nil || !reflect.DeepEqual(u.Rights, DefaultRights()) {
+		t.Fatalf("migrated user = %+v, %v", u, err)
 	}
-	addProfiles(t, s, "nl")
-	if _, err := s.AddPeer("alice", "phone", "nl", subnet); err != nil {
+	if peers, err := s.ListPeers(); err != nil || len(peers) != 0 {
+		t.Fatalf("migrated peers = %+v, %v; want none", peers, err)
+	}
+	if _, err := s.AddPeer("alice", "phone", nl, subnet); err != nil {
 		t.Errorf("new schema not in effect after migration: %v", err)
 	}
 	var version int
@@ -212,6 +230,76 @@ func TestMigrateFromVersion1(t *testing.T) {
 	}
 }
 
+// A database as the profiles release left it (schema 6) keeps its users and
+// their links and loses its peers, their history and the profiles (#161).
+// New peers keep counting from the old ids.
+func TestMigrateFromVersion6(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lotsman.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migrations[:6] {
+		if _, err := db.Exec(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := db.Exec(`PRAGMA user_version = 6;
+		INSERT INTO users (id, name, created_at) VALUES (1, 'alice', '2026-11-01T00:00:00Z'), (2, 'bob', '2026-11-01T00:00:00Z');
+		INSERT INTO user_links (user_id, token_hash, created_at) VALUES (1, x'00', '2026-11-01T00:00:00Z');
+		INSERT INTO profiles VALUES ('nl');
+		INSERT INTO profile_tiers VALUES ('nl', 0, 'NL', '', '');
+		INSERT INTO peers (id, user_id, device, profile, private_key, public_key, ip, created_at) VALUES
+			(7, 1, 'phone', 'nl', 'priv1', 'pub1', '10.77.0.2', '2026-11-01T00:00:00Z'),
+			(8, 1, 'phone', 'eu', 'priv2', 'pub2', '10.77.0.3', '2026-11-01T00:00:00Z');
+		INSERT INTO peer_samples VALUES (7, 1763985600, 10, 1);
+		INSERT INTO peer_hour_samples VALUES (7, 1763982000, 10, 1);
+		INSERT INTO upstream_samples VALUES ('nl', 1763985600, 1, 20, 1000, 100);`); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var version int
+	s.db.QueryRow(`PRAGMA user_version`).Scan(&version)
+	if version != len(migrations) {
+		t.Errorf("user_version = %d, want %d", version, len(migrations))
+	}
+	users, err := s.ListUsers()
+	if err != nil || len(users) != 2 || !users[0].HasLink || users[1].HasLink {
+		t.Fatalf("users after migration = %+v, %v; want alice with her link, then bob", users, err)
+	}
+	for _, u := range users {
+		if !reflect.DeepEqual(u.Rights, DefaultRights()) {
+			t.Errorf("%s's rights = %+v, want the defaults", u.Name, u.Rights)
+		}
+	}
+	if peers, err := s.ListPeers(); err != nil || len(peers) != 0 {
+		t.Errorf("peers after migration = %+v, %v; want none", peers, err)
+	}
+	for table, want := range map[string]int{"peer_samples": 0, "peer_hour_samples": 0, "upstream_samples": 1} {
+		if n := countRows(t, s, table); n != want {
+			t.Errorf("%s after migration: %d rows, want %d", table, n, want)
+		}
+	}
+	var profileTables int
+	s.db.QueryRow(`SELECT count(*) FROM sqlite_master WHERE name LIKE 'profile%'`).Scan(&profileTables)
+	if profileTables != 0 {
+		t.Errorf("%d profile tables left", profileTables)
+	}
+	p, err := s.AddPeer("alice", "phone", nl, subnet)
+	if err != nil || p.ID <= 8 || p.IP.String() != "10.77.0.2" {
+		t.Errorf("first new peer = %+v, %v; want an id after 8 and the first address", p, err)
+	}
+	if _, err := s.AddPeer("alice", "phone", nl, subnet); !errors.Is(err, ErrExists) {
+		t.Errorf("a second phone for alice: %v", err)
+	}
+}
+
 func TestFreshDatabaseMakesNoBackup(t *testing.T) {
 	dir := t.TempDir()
 	s, err := Open(filepath.Join(dir, "new.db"))
@@ -232,11 +320,10 @@ func TestFreshDatabaseMakesNoBackup(t *testing.T) {
 
 func TestSubnetFull(t *testing.T) {
 	s := open(t)
-	addProfiles(t, s, "a", "b", "c", "d", "e", "f")
 	s.CreateUser("u")
 	tiny := netip.MustParsePrefix("10.0.0.0/29") // .0 net, .1 gw, .2-.6 usable, .7 broadcast
-	for i, profile := range []string{"a", "b", "c", "d", "e"} {
-		p, err := s.AddPeer("u", DefaultDevice, profile, tiny)
+	for i, device := range []string{"a", "b", "c", "d", "e"} {
+		p, err := s.AddPeer("u", device, nl, tiny)
 		if err != nil {
 			t.Fatalf("peer %d: %v", i, err)
 		}
@@ -244,7 +331,7 @@ func TestSubnetFull(t *testing.T) {
 			t.Errorf("peer %d got %s", i, p.IP)
 		}
 	}
-	if _, err := s.AddPeer("u", DefaultDevice, "f", tiny); !errors.Is(err, ErrSubnetFull) {
+	if _, err := s.AddPeer("u", "f", nl, tiny); !errors.Is(err, ErrSubnetFull) {
 		t.Errorf("expected ErrSubnetFull, got %v", err)
 	}
 }
@@ -277,9 +364,8 @@ func TestReopenKeepsData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	addProfiles(t, s, "nl")
 	s.CreateUser("alice")
-	p, _ := s.AddPeer("alice", DefaultDevice, "nl", subnet)
+	p, _ := s.AddPeer("alice", "phone", nl, subnet)
 	s.Close()
 
 	s, err = Open(path)
@@ -287,8 +373,8 @@ func TestReopenKeepsData(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	got, err := s.Peer("alice", DefaultDevice, "nl")
-	if err != nil || got.PrivateKey != p.PrivateKey || got.PublicKey != p.PublicKey || got.IP != p.IP {
+	got, err := s.Peer("alice", "phone")
+	if err != nil || got.PrivateKey != p.PrivateKey || got.PublicKey != p.PublicKey || got.IP != p.IP || !reflect.DeepEqual(got.Route, nl) {
 		t.Errorf("after reopen: %+v, %v", got, err)
 	}
 }
@@ -325,9 +411,8 @@ func TestOpenCreatesPrivateFiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	addProfiles(t, s, "nl")
 	s.CreateUser("alice")
-	if _, err := s.AddPeer("alice", DefaultDevice, "nl", subnet); err != nil {
+	if _, err := s.AddPeer("alice", "phone", nl, subnet); err != nil {
 		t.Fatal(err)
 	}
 	for _, p := range []string{path, path + "-wal", path + "-shm"} {
@@ -388,7 +473,18 @@ func TestMigrationBackupIsPrivateAndRestorable(t *testing.T) {
 	assertMode(t, backups[0], 0o600)
 	assertMode(t, path, 0o600)
 
-	// Rollback: put the backup back and migrate again; keys must survive.
+	// Rollback: the backup is the old database, keys included; put back
+	// with an older binary, it is that binary's again.
+	old, err := sql.Open("sqlite", backups[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	var priv string
+	err = old.QueryRow(`SELECT private_key FROM peers`).Scan(&priv)
+	old.Close()
+	if err != nil || priv != key.String() {
+		t.Errorf("peer key in the backup: %v", err)
+	}
 	if err := os.Rename(backups[0], path); err != nil {
 		t.Fatal(err)
 	}
@@ -397,20 +493,18 @@ func TestMigrationBackupIsPrivateAndRestorable(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	p, err := s.Peer("alice", DefaultDevice, "nl")
-	if err != nil || p.PrivateKey != key {
-		t.Errorf("peer after rollback: %+v, %v", p, err)
+	if _, err := s.User("alice"); err != nil {
+		t.Errorf("user after rollback: %v", err)
 	}
 	assertMode(t, path, 0o600)
 }
 
 func TestCorruptTimestampIsReported(t *testing.T) {
 	s := open(t)
-	addProfiles(t, s, "nl")
 	if _, err := s.CreateUser("alice"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AddPeer("alice", DefaultDevice, "nl", subnet); err != nil {
+	if _, err := s.AddPeer("alice", "phone", nl, subnet); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.db.Exec(`UPDATE users SET created_at = 'garbage'`); err != nil {
@@ -429,15 +523,14 @@ func TestCorruptTimestampIsReported(t *testing.T) {
 
 func TestAddUserPeerIsAtomic(t *testing.T) {
 	s := open(t)
-	addProfiles(t, s, "nl")
 	tiny := netip.MustParsePrefix("10.0.0.0/30") // .0 net, .1 gw, .2 usable, .3 broadcast
-	if _, err := s.AddUserPeer("alice", DefaultDevice, "nl", tiny); err != nil {
+	if _, err := s.AddUserPeer("alice", "laptop", nl, tiny); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.AddUserPeer("alice", "phone", "nl", tiny); !errors.Is(err, ErrSubnetFull) {
+	if _, err := s.AddUserPeer("alice", "phone", nl, tiny); !errors.Is(err, ErrSubnetFull) {
 		t.Fatalf("full subnet: %v", err)
 	}
-	if _, err := s.AddUserPeer("bob", DefaultDevice, "nl", tiny); !errors.Is(err, ErrSubnetFull) {
+	if _, err := s.AddUserPeer("bob", "phone", nl, tiny); !errors.Is(err, ErrSubnetFull) {
 		t.Fatalf("full subnet: %v", err)
 	}
 	users, err := s.ListUsers()
@@ -450,22 +543,19 @@ func TestAddUserPeerIsAtomic(t *testing.T) {
 // hand its id to the next one.
 func TestPeerIDsAreNeverReused(t *testing.T) {
 	s := open(t)
-	if err := s.AddProfile(config.Profile{Name: "eu"}); err != nil {
-		t.Fatal(err)
-	}
 	subnet := netip.MustParsePrefix("10.77.0.0/24")
-	a, err := s.AddUserPeer("alice", "phone", "eu", subnet)
+	a, err := s.AddUserPeer("alice", "phone", nl, subnet)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := s.AddUserPeer("alice", "laptop", "eu", subnet)
+	b, err := s.AddUserPeer("alice", "laptop", nl, subnet)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := s.DeletePeer("alice", "laptop", "eu"); err != nil {
+	if err := s.DeletePeer("alice", "laptop"); err != nil {
 		t.Fatal(err)
 	}
-	c, err := s.AddUserPeer("alice", "tablet", "eu", subnet)
+	c, err := s.AddUserPeer("alice", "tablet", nl, subnet)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,10 +566,9 @@ func TestPeerIDsAreNeverReused(t *testing.T) {
 
 func TestPeerLookups(t *testing.T) {
 	s := open(t)
-	addProfiles(t, s, "nl", "de")
-	a, _ := s.AddUserPeer("alice", "phone", "nl", subnet)
-	b, _ := s.AddUserPeer("alice", "laptop", "de", subnet)
-	c, _ := s.AddUserPeer("bob", "phone", "nl", subnet)
+	a, _ := s.AddUserPeer("alice", "phone", nl, subnet)
+	b, _ := s.AddUserPeer("alice", "laptop", nl, subnet)
+	c, _ := s.AddUserPeer("bob", "phone", nl, subnet)
 	if p, err := s.PeerByID(c.ID); err != nil || p.User != "bob" || p.PrivateKey != c.PrivateKey {
 		t.Errorf("PeerByID(%d) = %+v, %v", c.ID, p, err)
 	}

@@ -1,8 +1,10 @@
-// Package policy picks an upstream for a profile from what is currently healthy.
+// Package policy picks an upstream for a device's route from what is
+// currently healthy.
 package policy
 
 import (
 	"cmp"
+	"fmt"
 	"slices"
 	"strings"
 	"time"
@@ -17,12 +19,32 @@ type Upstream struct {
 	Latency  time.Duration
 }
 
-// Select returns the upstream a peer with the given profile should use.
+// Match selects upstreams by their labels. An empty field matches anything,
+// so an empty Match matches every upstream.
+type Match struct {
+	Geo      string
+	Provider string
+}
+
+func (m Match) Matches(u config.Upstream) bool {
+	return (m.Geo == "" || m.Geo == u.Geo) && (m.Provider == "" || m.Provider == u.Provider)
+}
+
+// Tier is one preference level: the upstreams any of its matches selects.
+type Tier []Match
+
+func (t Tier) Matches(u config.Upstream) bool {
+	return slices.ContainsFunc(t, func(m Match) bool { return m.Matches(u) })
+}
+
+// Select returns the upstream a device whose route compiles to tiers should
+// use, among upstreams, which the caller has narrowed to the user's allowed
+// exits (see Allows).
 //
-// Preference tiers come from profile.Prefer in order; an empty Prefer is one
-// tier matching everything. Only healthy upstreams in the best available tier
-// are candidates. Degraded ones count only when the profile has no other
-// healthy upstream in any tier: slow connectivity beats none.
+// Only healthy upstreams in the best available tier are candidates; an
+// upstream belongs to the first tier that matches it. Degraded ones count
+// only when no other healthy upstream is in any tier: slow connectivity
+// beats none.
 //
 // The choice is sticky: if current is a candidate it is kept even when a
 // sibling now has lower latency, because switching costs the user every open
@@ -30,20 +52,20 @@ type Upstream struct {
 // is deterministic.
 //
 // ok is false when nothing usable exists; the caller must then fail closed.
-func Select(profile config.Profile, upstreams []Upstream, current string) (name string, ok bool) {
-	if name, ok := pick(profile, upstreams, current, false); ok {
+func Select(tiers []Tier, upstreams []Upstream, current string) (name string, ok bool) {
+	if name, ok := pick(tiers, upstreams, current, false); ok {
 		return name, true
 	}
-	return pick(profile, upstreams, current, true)
+	return pick(tiers, upstreams, current, true)
 }
 
 // pick applies Select's rules to the healthy upstreams, degraded ones
 // included only if lastResort is set.
-func pick(profile config.Profile, upstreams []Upstream, current string, lastResort bool) (name string, ok bool) {
+func pick(tiers []Tier, upstreams []Upstream, current string, lastResort bool) (name string, ok bool) {
 	var candidates []Upstream
 	bestTier := -1
 	for _, u := range upstreams {
-		tier := tierOf(profile, u.Upstream)
+		tier := slices.IndexFunc(tiers, func(t Tier) bool { return t.Matches(u.Upstream) })
 		if !u.Healthy || (u.Degraded && !lastResort) || tier < 0 {
 			continue
 		}
@@ -69,21 +91,35 @@ func pick(profile config.Profile, upstreams []Upstream, current string, lastReso
 	return best.Name, true
 }
 
-// tierOf returns the index of the first preference that matches, or -1.
-func tierOf(p config.Profile, u config.Upstream) int {
-	if len(p.Prefer) == 0 {
-		return 0
-	}
-	for i, m := range p.Prefer {
-		if m.Matches(u) {
-			return i
-		}
-	}
-	return -1
+// Allows reports whether exits, a user's allowed exits, include the upstream
+// of that name. No exits means every upstream. A name the config no longer
+// has matches nothing, so a list of only such names allows nothing: a
+// restriction never turns into "every upstream" by itself.
+func Allows(exits []string, upstream string) bool {
+	return len(exits) == 0 || slices.Contains(exits, upstream)
 }
 
-// Allows reports whether a peer with the profile may ever use u: an upstream
-// in none of its tiers is never selected for it.
-func Allows(profile config.Profile, u config.Upstream) bool {
-	return tierOf(profile, u) >= 0
+// ValidateExits checks exits being written: each must name one of the
+// upstreams, once. Like a route, a stored list may go stale later.
+func ValidateExits(exits []string, upstreams []config.Upstream) error {
+	for i, name := range exits {
+		if slices.Contains(exits[:i], name) {
+			return fmt.Errorf("exits: %q is listed twice", name)
+		}
+		if !slices.ContainsFunc(upstreams, func(u config.Upstream) bool { return u.Name == name }) {
+			return fmt.Errorf("exits: no upstream %q", name)
+		}
+	}
+	return nil
+}
+
+// Exits narrows upstreams to those exits allow.
+func Exits(upstreams []Upstream, exits []string) []Upstream {
+	var out []Upstream
+	for _, u := range upstreams {
+		if Allows(exits, u.Name) {
+			out = append(out, u)
+		}
+	}
+	return out
 }
