@@ -1,0 +1,39 @@
+// The lotsman.v1 control API, agreed with the user on 2026-11-19: user self-service (#134).
+// See status.proto for where it is served.
+syntax = "proto3";
+
+package lotsman.v1;
+
+import "lotsman/v1/profile.proto";
+import "lotsman/v1/status.proto";
+import "lotsman/v1/user.proto";
+
+option go_package = "github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1";
+
+// The acting user comes from the `Lotsman-User` request header, which only
+// lotsman web sets (after resolving the link) and always strips from browsers.
+service UserSelfService {
+  rpc ResolveLink(ResolveLinkRequest) returns (ResolveLinkResponse); // panel only
+  rpc Get(GetSelfRequest) returns (User);
+  rpc Watch(WatchStatusRequest) returns (stream StatusSnapshot); // own peers, their upstreams, no connections
+  rpc AddDevice(AddSelfDeviceRequest) returns (DeviceConfig); // max_devices, rate limit
+  rpc RemoveDevice(RemoveSelfDeviceRequest) returns (RemoveDeviceResponse);
+  rpc GetConfig(GetConfigRequest) returns (DeviceConfig); // own peers only
+  rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse); // names only, no warnings
+}
+
+message ResolveLinkRequest {
+  string token = 1;
+}
+message ResolveLinkResponse {
+  string user = 1;
+}
+message GetSelfRequest {}
+message AddSelfDeviceRequest {
+  string device = 1;
+  string profile = 2;
+}
+message RemoveSelfDeviceRequest {
+  string device = 1;
+  string profile = 2;
+}

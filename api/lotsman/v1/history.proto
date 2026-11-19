@@ -1,0 +1,34 @@
+// The lotsman.v1 control API, agreed with the user on 2026-11-19: history (#130).
+// See status.proto for where it is served.
+syntax = "proto3";
+
+package lotsman.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1";
+
+service HistoryService {
+  rpc Upstream(HistoryRequest) returns (HistoryResponse); // name = upstream
+  rpc Peer(HistoryRequest) returns (HistoryResponse); // name = peer_id
+}
+
+message HistoryRequest {
+  string name = 1;
+  google.protobuf.Timestamp from = 2;
+  google.protobuf.Timestamp to = 3; // resolution: 1 min up to 7 d back, else 1 h
+}
+
+message HistoryResponse {
+  google.protobuf.Duration step = 1;
+  repeated Sample samples = 2;
+}
+
+message Sample {
+  google.protobuf.Timestamp time = 1;
+  float up_ratio = 2; // upstream only: share of the step it was up, 0..1
+  google.protobuf.Duration latency = 3;
+  uint64 down_bytes = 4;
+  uint64 up_bytes = 5;
+}

@@ -1,0 +1,78 @@
+// The daemon control API: lotsman serve speaks it on
+// /run/lotsman/control.sock (0660 root:lotsman-web); lotsman web forwards it to
+// browsers with per-RPC scopes. Issue numbers mark where each service lands.
+syntax = "proto3";
+
+package lotsman.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1";
+
+service StatusService {
+  // A full snapshot now and then every `interval` (default 1 s, min 1 s).
+  // Scope: operator. A user session gets the same stream filtered to its own
+  // peers and the upstreams they use (via UserSelfService.Watch).
+  rpc Watch(WatchStatusRequest) returns (stream StatusSnapshot);
+}
+
+message WatchStatusRequest {
+  google.protobuf.Duration interval = 1;
+}
+
+message StatusSnapshot {
+  google.protobuf.Timestamp time = 1;
+  uint32 client_mtu = 2;
+  repeated UpstreamStatus upstreams = 3;
+  repeated PeerStatus peers = 4;
+  Traffic total = 5; // #129
+}
+
+enum UpstreamState {
+  UPSTREAM_STATE_UNSPECIFIED = 0;
+  UPSTREAM_STATE_UNKNOWN = 1; // not probed yet
+  UPSTREAM_STATE_UP = 2;
+  UPSTREAM_STATE_DEGRADED = 3; // reachable, failing transfer probes
+  UPSTREAM_STATE_DOWN = 4;
+}
+
+enum UpstreamKind {
+  UPSTREAM_KIND_UNSPECIFIED = 0;
+  UPSTREAM_KIND_AWG = 1;
+  UPSTREAM_KIND_OUTLINE = 2;
+  UPSTREAM_KIND_VLESS = 3;
+}
+
+message UpstreamStatus {
+  string name = 1;
+  UpstreamKind kind = 2;
+  string geo = 3;
+  string provider = 4;
+  repeated string tags = 5;
+  UpstreamState state = 6;
+  google.protobuf.Duration latency = 7;
+  google.protobuf.Timestamp last_handshake = 8; // unset for proxy upstreams / never
+  uint32 routed = 9; // peers directed through it
+  uint32 active = 10; // of those, handshake inside the active window
+  Traffic traffic = 11; // #129
+}
+
+message PeerStatus {
+  string peer_id = 1; // stable, opaque; survives renames
+  string user = 2;
+  string device = 3;
+  string profile = 4;
+  string address = 5; // client tunnel IP
+  string upstream = 6; // "" when blocked
+  google.protobuf.Timestamp last_handshake = 7;
+  Traffic traffic = 8; // #129
+}
+
+// Directions are from the user's side: down = towards the client.
+message Traffic {
+  uint64 down_bytes = 1; // counter since the daemon started
+  uint64 up_bytes = 2;
+  uint64 down_rate = 3; // bytes per second, last interval
+  uint64 up_rate = 4;
+}

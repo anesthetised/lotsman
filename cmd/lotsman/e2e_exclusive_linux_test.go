@@ -17,6 +17,9 @@ import (
 	"time"
 
 	"github.com/vishvananda/netlink"
+
+	lotsmanv1 "github.com/anesthetised/lotsman/api/lotsman/v1"
+	"github.com/anesthetised/lotsman/internal/control"
 )
 
 // runLotsman runs this test binary as a separate lotsman process (see
@@ -47,7 +50,7 @@ func runLotsman(t *testing.T, attr *syscall.SysProcAttr, args ...string) (string
 // A second serve, whether it shares the running daemon's state_dir, only its
 // network namespace or only its state_dir, is refused before it changes
 // anything: the running daemon keeps its pid file, interface, rules and
-// firewall table, and its client keeps working.
+// firewall table and control socket, and its client keeps working.
 func TestSecondServeLeavesRunningGatewayAlone(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("needs root: creates TUNs and programs the kernel")
@@ -98,6 +101,10 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 		return err == nil && got == "nl"
 	})
 	downIndex := linkIndex(t, "lm0")
+	socket, err := os.Stat(control.SocketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, tc := range []struct {
 		name, config, want string
@@ -127,6 +134,17 @@ health: {interval: 500ms, probe: 198.51.100.1:443, down_after: 2, up_after: 1}
 			}
 			if got, err := c.exitVia(2 * time.Second); err != nil || got != "nl" {
 				t.Errorf("client after the second serve: %q, %v", got, err)
+			}
+			if fi, err := os.Stat(control.SocketPath); err != nil || !os.SameFile(fi, socket) {
+				t.Errorf("control socket replaced or removed: %v", err)
+			}
+			stream, err := controlClient(control.SocketPath).Watch(t.Context(), &lotsmanv1.WatchStatusRequest{})
+			if err == nil {
+				_, err = stream.Receive()
+				stream.Close()
+			}
+			if err != nil {
+				t.Errorf("control socket after the second serve: %v", err)
 			}
 		})
 	}

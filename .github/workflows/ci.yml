@@ -16,6 +16,10 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
+          # just lint builds buf from tools/go.mod.
+          cache-dependency-path: |
+            go.sum
+            tools/go.sum
       - uses: extractions/setup-just@v2
       - run: just lint
       - run: go test -race ./...

@@ -1,0 +1,41 @@
+// The lotsman.v1 control API, agreed with the user on 2026-11-19: profiles (#128).
+// See status.proto for where it is served.
+syntax = "proto3";
+
+package lotsman.v1;
+
+option go_package = "github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1";
+
+service ProfileService {
+  rpc List(ListProfilesRequest) returns (ListProfilesResponse);
+  rpc Put(PutProfileRequest) returns (PutProfileResponse); // create or replace
+  rpc Delete(DeleteProfileRequest) returns (DeleteProfileResponse); // refused while in use
+}
+
+message Profile {
+  string name = 1;
+  repeated Matcher prefer = 2; // ordered tiers; empty = any upstream
+}
+
+// One tier: an upstream must match every field that is set.
+message Matcher {
+  string geo = 1;
+  string provider = 2;
+  string tag = 3;
+}
+
+message ListProfilesRequest {}
+message ListProfilesResponse {
+  repeated Profile profiles = 1;
+  repeated string warnings = 2;
+}
+message PutProfileRequest {
+  Profile profile = 1;
+}
+message PutProfileResponse {
+  repeated string warnings = 1;
+}
+message DeleteProfileRequest {
+  string name = 1;
+}
+message DeleteProfileResponse {}

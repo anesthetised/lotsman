@@ -1322,6 +1322,9 @@ const ActiveWindow = 3 * time.Minute
 type UpstreamStatus struct {
 	Name          string
 	Kind          string
+	Geo           string
+	Provider      string
+	Tags          []string
 	Interface     string
 	State         health.State
 	Degraded      bool // reachable, but failing its transfer probes
@@ -1332,8 +1335,10 @@ type UpstreamStatus struct {
 }
 
 type PeerStatus struct {
+	ID                    int64 // the store's peer row
 	User, Device, Profile string
-	Upstream              string // "" when blocked
+	Address               netip.Addr // the client's tunnel address
+	Upstream              string     // "" when blocked
 	LastHandshake         time.Time
 }
 
@@ -1350,7 +1355,7 @@ func (d *Daemon) Status() Status {
 	handshakes := d.downstreamHandshakes()
 	routed, active := map[string]int{}, map[string]int{}
 	for key, p := range d.devicePeers {
-		ps := PeerStatus{User: p.User, Device: p.Device, Profile: p.Profile, Upstream: d.assignments[p.IP], LastHandshake: handshakes[key]}
+		ps := PeerStatus{ID: p.ID, User: p.User, Device: p.Device, Profile: p.Profile, Address: p.IP, Upstream: d.assignments[p.IP], LastHandshake: handshakes[key]}
 		st.Peers = append(st.Peers, ps)
 		if ps.Upstream == "" {
 			continue
@@ -1364,7 +1369,7 @@ func (d *Daemon) Status() Status {
 		return cmp.Or(strings.Compare(a.User, b.User), strings.Compare(a.Device, b.Device), strings.Compare(a.Profile, b.Profile))
 	})
 	for _, u := range d.ups {
-		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Interface: u.InterfaceName(), State: u.Tracker.State(), Degraded: d.degraded(u),
+		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Geo: u.Geo, Provider: u.Provider, Tags: u.Tags, Interface: u.InterfaceName(), State: u.Tracker.State(), Degraded: d.degraded(u),
 			Latency: u.Tracker.Latency(), Routed: routed[u.Name], Active: active[u.Name]}
 		if peer := u.link.Stats().Peer; peer != nil {
 			s.LastHandshake = peer.LastHandshake

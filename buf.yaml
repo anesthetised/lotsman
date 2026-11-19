@@ -1,0 +1,17 @@
+# The control API's protobuf module. `just gen` generates from it with buf.gen.yaml.
+version: v2
+modules:
+  - path: api
+lint:
+  use:
+    - STANDARD
+  except:
+    # The agreed contract shares request and response messages between RPCs
+    # (StatusSnapshot, DeviceConfig, User, ...) and names some after what they
+    # carry rather than the RPC.
+    - RPC_REQUEST_STANDARD_NAME
+    - RPC_RESPONSE_STANDARD_NAME
+    - RPC_REQUEST_RESPONSE_UNIQUE
+breaking:
+  use:
+    - FILE

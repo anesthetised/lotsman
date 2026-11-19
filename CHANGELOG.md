@@ -6,6 +6,18 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Control API for the web panel: `lotsman serve` serves `lotsman.v1` over Connect on the unix socket
+  `/run/lotsman/control.sock` (`0660 root:lotsman-web`; root-only with a warning when the group is
+  missing). The socket's peer is trusted, so its file mode is the boundary. It is created after the
+  instance locks, replaces one a crashed daemon left, refuses one that still answers, and is
+  removed on stop. The whole agreed contract is committed in `api/lotsman/v1/` with its generated
+  Go code (`just gen`; `just lint` fails on stale code); only `StatusService.Watch` is implemented:
+  a full snapshot at once and then every `interval` (default and minimum 1 s), with each upstream's
+  state, latency, handshake, `geo`, `provider`, `tags` and client counts, each peer's opaque
+  `peer_id`, tunnel address, upstream and handshake, and the client MTU. Other RPCs return
+  `unimplemented`. Install: `groupadd --system lotsman-web` and `group=lotsman-web` in the
+  manifest, which `deploy/uninstall.sh` now removes; the unit gains `RuntimeDirectory=lotsman` and
+  `CAP_CHOWN`. The binary grows by about 0.7 MB. New module: `connectrpc.com/connect/v2` (#127).
 - Live connections from conntrack (core of #131; the control API wiring follows #127): the new
   `internal/flows` package reads the kernel's conntrack table over netlink, keeps clients' flows
   into the internet, maps each to its peer and current upstream, and computes per-flow byte rates
