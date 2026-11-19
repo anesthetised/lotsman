@@ -463,6 +463,13 @@ func TestDaemon(t *testing.T) {
 	if len(st.Peers) != 2 || st.Peers[0].Profile != "eu" || st.Peers[0].Upstream != "de" || st.Peers[1].Profile != "nl" || st.Peers[1].Upstream != "" {
 		t.Errorf("peers = %+v", st.Peers)
 	}
+	// The control API identifies peers by their store row and shows the upstreams' grouping.
+	if p := st.Peers[0]; p.ID != euPeer.ID || p.Address != euPeer.IP {
+		t.Errorf("eu peer id, address = %d, %v; want %d, %v", p.ID, p.Address, euPeer.ID, euPeer.IP)
+	}
+	if u := st.Upstreams[1]; u.Geo != "DE" {
+		t.Errorf("de geo = %q", u.Geo)
+	}
 	if v, ok := metric(h.d.Metrics(), "lotsman_upstream_active_clients", metrics.Label{Name: "upstream", Value: "de"}); !ok || v != 0 {
 		t.Errorf("active_clients{de} = %v, %v (no handshake in tests)", v, ok)
 	}

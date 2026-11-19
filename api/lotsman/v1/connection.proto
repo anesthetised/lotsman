@@ -1,0 +1,44 @@
+// The lotsman.v1 control API, agreed with the user on 2026-11-19: connections (#131).
+// See status.proto for where it is served.
+syntax = "proto3";
+
+package lotsman.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+import "lotsman/v1/status.proto";
+
+option go_package = "github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1";
+
+service ConnectionService {
+  // Operator only. Live, never stored. peer_id empty = all peers.
+  rpc Watch(WatchConnectionsRequest) returns (stream ConnectionSnapshot);
+}
+
+message WatchConnectionsRequest {
+  string peer_id = 1;
+  google.protobuf.Duration interval = 2;
+}
+
+message ConnectionSnapshot {
+  google.protobuf.Timestamp time = 1;
+  repeated Connection connections = 2;
+  bool truncated = 3; // more than the server cap (top by rate kept)
+}
+
+enum Protocol {
+  PROTOCOL_UNSPECIFIED = 0;
+  PROTOCOL_TCP = 1;
+  PROTOCOL_UDP = 2;
+  PROTOCOL_ICMP = 3;
+}
+
+message Connection {
+  string peer_id = 1;
+  Protocol protocol = 2;
+  string source = 3; // client IP:port
+  string destination = 4; // IP:port, no reverse DNS
+  string upstream = 5;
+  google.protobuf.Timestamp started = 6;
+  Traffic traffic = 7;
+}

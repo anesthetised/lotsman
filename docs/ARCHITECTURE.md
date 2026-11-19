@@ -25,6 +25,7 @@ user (Amnezia app) ──AWG2──▶ [lm0 TUN] ──kernel policy routing─�
 | Fail-closed | Mandatory | User traffic must never leave via the host's own IP. nftables admits only authorized peers from `lm0` into an `lm-up-*`; all other forwarding from `lm0` is dropped. |
 | Host firewalls | Accept rules inserted into foreign forward chains | Docker's `FORWARD DROP` and ufw would otherwise silently drop forwarded traffic; same approach as Tailscale. |
 | Proxy upstreams | A userspace TCP/IP stack per upstream on its own TUN, flows re-originated through a pluggable dialer (Shadowsocks, VLESS + REALITY through embedded xray-core), each in its own unprivileged helper process | Keeps kernel routing, pinning and fail-closed identical for every upstream kind; a panic in the stack takes down one upstream, not the gateway; see [Proxy upstreams](#proxy-upstreams-outline). |
+| Control API | `lotsman.v1` over Connect on a root-owned unix socket, `/run/lotsman/control.sock` | One typed API for the web panel and, through it, the browser; the socket's file mode is the only boundary, so the daemon needs no authentication of its own; see [Control API](#control-api-127). |
 
 ## AmneziaWG implementation notes (verified 2026-09-17)
 
@@ -412,6 +413,60 @@ and ignored: Xray's REALITY settings have no ALPN, the ClientHello offers the fi
   package links grpc-go's HTTP/2 client and server, of which the core packages had linked only a
   few. One new module, `google.golang.org/genproto/googleapis/rpc` (Apache-2.0, gRPC's status
   protos).
+
+## Control API (#127)
+
+`lotsman serve` serves the control API, the protobuf package `lotsman.v1` in `api/lotsman/v1/` (one
+file per service), over Connect on the unix socket `/run/lotsman/control.sock`. The web panel
+(`lotsman web`, #132) is its client and forwards it to browsers with a scope per RPC. Every service
+of the agreed contract is registered; until the issue that implements an RPC lands, it answers
+`unimplemented`. `StatusService.Watch` streams a full `StatusSnapshot` at once and then every
+`interval` (default and minimum 1 s; shorter is raised to 1 s, an invalid duration is
+`invalid_argument`), built from the daemon's `Status` plus the upstreams' `geo`, `provider` and
+`tags`, each peer's tunnel address and the client MTU. A stream opened before the first reconcile
+waits for it, so no client sees an empty gateway. `peer_id` is `p_<row id>` of the store's peer:
+opaque to clients and unchanged by renames.
+
+- Trust boundary: the socket's peer is trusted, and the file mode is the boundary. The socket is
+  `0660 root:lotsman-web`; whoever can connect has the operator's full control, and the daemon
+  checks no credentials. The `Lotsman-User` header that `UserSelfService` will read is trusted
+  for the same reason: only the panel can send it, and the panel strips it from browsers.
+- Lifecycle: the socket is created only after the instance locks (#114) are held, so a refused
+  second `serve` never touches the running daemon's socket. It is bound inside a temporary
+  `0700` directory, given its mode and group, and renamed into place, so it is never reachable
+  with the wrong ones and a socket left by a crashed daemon is replaced in one step. One that still
+  accepts connections (a daemon in another network namespace, which the locks allow) is refused,
+  and `serve` fails. On shutdown request contexts end with the daemon's, so open streams close, and
+  the socket is removed before the locks are released.
+- Without the `lotsman-web` group the socket is created `0600` (root only) and the daemon logs a
+  warning, instead of failing to start: the gateway does not need the panel, and an install without
+  one must not break. The group is looked up at start, so creating it later needs a restart.
+- Transport: HTTP/1.1 and h2c (cleartext HTTP/2) on the socket, no TLS; Connect, gRPC and gRPC-Web
+  all work. Under systemd, `RuntimeDirectory=lotsman` provides `/run/lotsman` (`ProtectSystem=strict`
+  makes `/run` read-only otherwise) and `CAP_CHOWN` lets the daemon hand the socket to the group.
+
+| Option | For | Against |
+|---|---|---|
+| **A. connect-go v2 (chosen)** | Stable since 2026-10; plain-message handler signatures, stream interfaces that tests can fake, an in-process transport for tests; its only dependencies, protobuf and go-cmp, are already ours | Six weeks old; part of the ecosystem (otelconnect, grpchealth) still targets v1, and we use none of it |
+| B. connect-go v1 | Mature, still maintained | A new API would start on the version its maintainers are moving away from; a migration later |
+| C. grpc-go | Already linked by xray (#122) | Browsers cannot speak it without a proxy; the panel would translate every RPC |
+
+Code generation: `just gen` runs `buf generate` with `protoc-gen-go` and `protoc-gen-connect-go`;
+the generated code is committed, and `just lint` (so CI) runs `just gen-check`, which fails when
+the protos are unformatted, break buf's `STANDARD` lint rules or differ from the committed code.
+The lint exceptions are the request and response naming rules: the agreed contract shares messages
+between RPCs. The TypeScript client (#135) is another plugin in `buf.gen.yaml`.
+
+| Tooling option | For | Against |
+|---|---|---|
+| **A. Plugins in `go.mod`, buf in its own `tools/go.mod` (chosen)** | Pinned, reproducible, nothing installed globally; the plugins come from modules the binary already links, so `go.mod` gains two `tool` lines and they always match the runtime | A second module to bump by hand; run as `go tool -modfile=tools/go.mod buf` |
+| B. Everything in `go.mod` | One file | buf adds about 75 modules to `go.mod` and moves `google.golang.org/protobuf` to a pre-release pseudo-version for the daemon too, as tools share the module graph |
+| C. buf's remote plugins | No local plugins | Network and BSR rate limits on every generation; versions pinned only by name |
+| D. protoc from the system | Common | Not pinned; one more thing to install on every machine and in CI |
+
+Cost: the static linux/amd64 binary grows from 30.3 MB to 31.0 MB (+0.7 MB, +2.3%; 30,265,504 to
+30,970,016 bytes, `just build`). One new module, `connectrpc.com/connect/v2` (Apache-2.0);
+`google.golang.org/protobuf` was already linked.
 
 ## Open items
 

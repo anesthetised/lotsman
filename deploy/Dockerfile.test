@@ -5,6 +5,8 @@
 # CI runs the same image through `just test-integration`.
 FROM golang:1.27-bookworm
 RUN apt-get update && apt-get install -y --no-install-recommends nftables iptables iproute2 iputils-ping && rm -rf /var/lib/apt/lists/*
+# The web panel's group, as an install creates it; the control socket test needs it.
+RUN groupadd --system lotsman-web
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

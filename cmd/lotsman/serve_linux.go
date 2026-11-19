@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/anesthetised/lotsman/internal/config"
+	"github.com/anesthetised/lotsman/internal/control"
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/dataplane/linux"
 	"github.com/anesthetised/lotsman/internal/flows"
@@ -80,6 +81,24 @@ func serve(ctx context.Context, configPath string, level slog.Level) error {
 	defer func() {
 		stop()
 		<-published
+	}()
+	// Created only now that the locks are held, so a refused second serve
+	// leaves the running one's socket alone. Like the status file, it is
+	// removed before the locks are released.
+	ln, err := control.Listen(control.SocketPath, control.Group, log)
+	if err != nil {
+		return err
+	}
+	controlled := make(chan struct{})
+	go func() {
+		defer close(controlled)
+		if err := control.Serve(ctx, ln, d); err != nil {
+			log.Error("control socket", "err", err)
+		}
+	}()
+	defer func() {
+		stop()
+		<-controlled
 	}()
 	if e.cfg.Metrics.Listen != "" {
 		go serveMetrics(ctx, e.cfg.Metrics.Listen, metrics.Handler(daemon.Families, d.Metrics), log)

@@ -129,23 +129,32 @@ func TestProbeUninstallOwnership(t *testing.T) {
 	}
 }
 
-// Uninstall removes the system users the manifest records, and only those.
+// Uninstall removes the system users and groups the manifest records, and
+// only those; a group that is already gone is skipped.
 func TestUninstallRemovesInstalledUsers(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "userdel.log")
-	stubs := map[string]string{"userdel": "#!/bin/sh\necho \"$@\" >> " + log + "\n"}
-	if out, err := runUninstallManifest(t, "ip_forward_before=\nuser=lotsman-proxy\npath=/nonexistent\n", stubs); err != nil {
+	stubs := map[string]string{
+		"userdel":  "#!/bin/sh\necho userdel \"$@\" >> " + log + "\n",
+		"groupdel": "#!/bin/sh\necho groupdel \"$@\" >> " + log + "\n",
+		"getent":   "#!/bin/sh\n[ \"$2\" != gone ]\n",
+	}
+	manifest := "ip_forward_before=\nuser=lotsman-proxy\ngroup=lotsman-web\ngroup=gone\npath=/nonexistent\n"
+	if out, err := runUninstallManifest(t, manifest, stubs); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, out)
 	}
-	if got, _ := os.ReadFile(log); string(got) != "lotsman-proxy\n" {
-		t.Errorf("userdel calls = %q, want one for lotsman-proxy", got)
+	if got, _ := os.ReadFile(log); string(got) != "userdel lotsman-proxy\ngroupdel lotsman-web\n" {
+		t.Errorf("calls = %q, want userdel lotsman-proxy, then groupdel lotsman-web", got)
 	}
 	log2 := filepath.Join(t.TempDir(), "userdel.log")
-	stubs = map[string]string{"userdel": "#!/bin/sh\necho \"$@\" >> " + log2 + "\n"}
+	stubs = map[string]string{
+		"userdel":  "#!/bin/sh\necho \"$@\" >> " + log2 + "\n",
+		"groupdel": "#!/bin/sh\necho \"$@\" >> " + log2 + "\n",
+	}
 	if out, err := runUninstallManifest(t, "path=/nonexistent\n", stubs); err != nil {
 		t.Fatalf("uninstall: %v\n%s", err, out)
 	}
 	if got, err := os.ReadFile(log2); err == nil {
-		t.Errorf("userdel ran without a manifest entry: %q", got)
+		t.Errorf("userdel or groupdel ran without a manifest entry: %q", got)
 	}
 }
 

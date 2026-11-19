@@ -1,0 +1,76 @@
+// The lotsman.v1 control API, agreed with the user on 2026-11-19: users (#134).
+// See status.proto for where it is served.
+syntax = "proto3";
+
+package lotsman.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1";
+
+service UserService {
+  rpc List(ListUsersRequest) returns (ListUsersResponse);
+  rpc AddDevice(AddDeviceRequest) returns (DeviceConfig); // creates the user if needed
+  rpc RemoveDevice(RemoveDeviceRequest) returns (RemoveDeviceResponse);
+  rpc RemoveUser(RemoveUserRequest) returns (RemoveUserResponse);
+  rpc GetConfig(GetConfigRequest) returns (DeviceConfig);
+  rpc IssueLink(IssueLinkRequest) returns (IssueLinkResponse); // rotates: old link dies
+  rpc RevokeLink(RevokeLinkRequest) returns (RevokeLinkResponse);
+}
+
+message User {
+  string name = 1;
+  repeated Device devices = 2;
+  bool has_link = 3;
+  google.protobuf.Timestamp created = 4;
+}
+
+message Device {
+  string name = 1;
+  repeated DevicePeer peers = 2; // one per profile
+}
+
+message DevicePeer {
+  string peer_id = 1;
+  string profile = 2;
+  string address = 3;
+  google.protobuf.Timestamp created = 4;
+}
+
+message DeviceConfig {
+  string peer_id = 1;
+  string config = 2; // the AmneziaWG client config text; the UI renders the QR
+}
+
+message ListUsersRequest {}
+message ListUsersResponse {
+  repeated User users = 1;
+}
+message AddDeviceRequest {
+  string user = 1;
+  string device = 2;
+  string profile = 3;
+}
+message RemoveDeviceRequest {
+  string user = 1;
+  string device = 2;
+  string profile = 3; // empty = every profile
+}
+message RemoveDeviceResponse {}
+message RemoveUserRequest {
+  string user = 1;
+}
+message RemoveUserResponse {}
+message GetConfigRequest {
+  string peer_id = 1;
+}
+message IssueLinkRequest {
+  string user = 1;
+}
+message IssueLinkResponse {
+  string token = 1; // shown once; only its hash is kept
+}
+message RevokeLinkRequest {
+  string user = 1;
+}
+message RevokeLinkResponse {}

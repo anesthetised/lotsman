@@ -5,6 +5,7 @@ go 1.27.1
 toolchain go1.27.4
 
 require (
+	connectrpc.com/connect/v2 v2.0.2
 	github.com/amnezia-vpn/amneziawg-go v0.2.19
 	github.com/amnezia-vpn/amneziawg-go/v3 v3.1.20261116
 	github.com/google/go-cmp v0.7.0
@@ -20,6 +21,7 @@ require (
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0
 	golang.zx2c4.com/wireguard v0.0.0-20260522210424-ecfc5a8d5446
+	google.golang.org/protobuf v1.36.12
 	gopkg.in/yaml.v3 v3.0.1
 	gvisor.dev/gvisor v0.0.0-20260122175437-89a5d21be8f0
 	modernc.org/sqlite v1.59.0
@@ -63,7 +65,6 @@ require (
 	golang.zx2c4.com/wintun v0.0.0-20230126152724-0fa3db229ce2 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20260817212433-ac3dfec99bb1 // indirect
 	google.golang.org/grpc v1.85.0 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 	honnef.co/go/tools v0.8.2 // indirect
 	layeh.com/gopher-luar v1.0.11 // indirect
 	lukechampine.com/blake3 v1.4.1 // indirect
@@ -74,6 +75,8 @@ require (
 )
 
 tool (
+	connectrpc.com/connect/v2/cmd/protoc-gen-connect-go
 	golang.org/x/vuln/cmd/govulncheck
+	google.golang.org/protobuf/cmd/protoc-gen-go
 	honnef.co/go/tools/cmd/staticcheck
 )

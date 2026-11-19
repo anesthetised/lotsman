@@ -19,12 +19,16 @@ sudo cp deploy/lotsman.example.yaml /etc/lotsman/lotsman.yaml
 sudo cp deploy/lotsman.service /etc/systemd/system/
 getent passwd lotsman-proxy >/dev/null || sudo useradd --system --user-group --no-create-home \
   --shell /usr/sbin/nologin lotsman-proxy
+getent group lotsman-web >/dev/null || sudo groupadd --system lotsman-web
 ```
 
-The last step creates the system user that proxy upstream helpers run as (see
+The `useradd` step creates the system user that proxy upstream helpers run as (see
 [Helper processes](#helper-processes)); it has no login shell and no home. Skip it if you have no
 `outline` or `vless` upstreams. Without it the helpers fall back to uid/gid 65534 (`nobody`) and
 the daemon logs a warning once.
+
+The `groupadd` step creates the group that may use the [control socket](#control-socket), the web
+panel's. Without it the socket is root-only and the daemon logs a warning at start.
 
 Put each provider config into `/etc/lotsman/upstreams/<name>.conf`, reference them in
 `lotsman.yaml`, then:
@@ -50,6 +54,7 @@ path=/etc/systemd/system/lotsman.service
 path=/etc/lotsman
 path=/var/lib/lotsman
 user=lotsman-proxy
+group=lotsman-web
 ```
 
 Take the two `_before` values from `sysctl -n net.ipv4.ip_forward` and
@@ -57,9 +62,10 @@ Take the two `_before` values from `sysctl -n net.ipv4.ip_forward` and
 `nf_conntrack_acct_before=` empty when the second prints nothing: `nf_conntrack` is not loaded
 yet, and a fresh load starts at 0 (see [Live connections](#live-connections)).
 
-Add `user=lotsman-proxy` only if your install created that user (the `useradd` above ran): the
-script removes each `user=` entry with `userdel`, so a user that existed before Lotsman is left
-alone. If `userdel` fails, the script says so and carries on.
+Add `user=lotsman-proxy` only if your install created that user (the `useradd` above ran), and
+`group=lotsman-web` only if it created that group: the script removes each `user=` entry with
+`userdel` and then each `group=` entry with `groupdel`, so a user or group that existed before
+Lotsman is left alone. If either fails, the script says so and carries on.
 
 ### Docker
 
@@ -530,6 +536,26 @@ database is routed somewhere whether or not it is connected. `ACTIVE` counts tho
 WireGuard handshake in the last three minutes, which is what "connected" means for WireGuard;
 `user list` shows each client's last handshake and current upstream (`blocked` when no healthy
 upstream matches its profile, `-` when the daemon is not running).
+
+### Control socket
+
+The daemon serves its control API (`lotsman.v1` over Connect, defined in `api/lotsman/v1/`) on
+`/run/lotsman/control.sock` for the web panel. Anyone who can connect to it controls the gateway:
+the daemon trusts the socket's peer and checks no credentials, so the file mode is the boundary.
+It is `0660 root:lotsman-web`; add only the panel's user to that group.
+
+```bash
+ls -l /run/lotsman/control.sock     # srw-rw---- 1 root lotsman-web ...
+```
+
+The socket appears when the daemon starts and is removed when it stops; one left by a crash is
+replaced at the next start. `serve` fails with `control socket … another process serves it` when a
+running daemon (in another network namespace) already serves that path. Without the `lotsman-web`
+group the socket is `0600 root:root` and the daemon logs `control socket is root-only`; create the
+group and restart. The unit provides `/run/lotsman` (`RuntimeDirectory=lotsman`) and needs
+`CAP_CHOWN` in its `CapabilityBoundingSet` to hand the socket to the group, as
+`deploy/lotsman.service` does. Only `StatusService.Watch` answers so far; every other RPC returns
+`unimplemented`.
 
 ## Monitoring
 
