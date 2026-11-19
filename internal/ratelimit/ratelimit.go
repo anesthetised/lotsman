@@ -53,6 +53,17 @@ func (l *Limiter[K]) Exhausted(key K, now time.Time) bool {
 	return l.refill(key, now).tokens < 1
 }
 
+// Wait is how long until key has a token again; zero if it has one now.
+func (l *Limiter[K]) Wait(key K, now time.Time) time.Duration {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	b := l.refill(key, now)
+	if b.tokens >= 1 {
+		return 0
+	}
+	return time.Duration((1 - b.tokens) * float64(l.every))
+}
+
 func (l *Limiter[K]) refill(key K, now time.Time) bucket {
 	b, ok := l.buckets[key]
 	if !ok {

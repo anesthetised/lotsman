@@ -64,3 +64,15 @@ func TestLimiterForgetsFullBuckets(t *testing.T) {
 		t.Error("pruning forgot a bucket that was not full")
 	}
 }
+
+func TestWait(t *testing.T) {
+	now := time.Unix(0, 0)
+	l := New[string](time.Minute, 1)
+	if w := l.Wait("a", now); w != 0 {
+		t.Errorf("wait with a token = %s, want 0", w)
+	}
+	l.Allow("a", now)
+	if w := l.Wait("a", now.Add(15*time.Second)); w != 45*time.Second {
+		t.Errorf("wait a quarter in = %s, want 45s", w)
+	}
+}

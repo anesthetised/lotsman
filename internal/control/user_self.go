@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connectproto"
+	"google.golang.org/protobuf/types/known/durationpb"
 
 	lotsmanv1 "github.com/anesthetised/lotsman/api/lotsman/v1"
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
@@ -194,10 +196,12 @@ func (s *userSelfService) AddDevice(ctx context.Context, req *lotsmanv1.AddSelfD
 		return nil, connect.NewError(connect.CodePermissionDenied, "adding devices is turned off; ask the operator")
 	}
 	if !slices.Contains(devices, device) && len(devices) >= limit {
-		return nil, connect.NewError(connect.CodeResourceExhausted, "at most "+strconv.Itoa(limit)+" devices; remove one first or ask the operator")
+		return nil, limitError("at most "+strconv.Itoa(limit)+" devices; remove one first or ask the operator",
+			&lotsmanv1.SelfServiceLimit{Reason: lotsmanv1.SelfServiceLimit_REASON_MAX_DEVICES, MaxDevices: uint32(limit)})
 	}
-	if !s.adds.Allow(u.Name, s.now()) {
-		return nil, connect.NewError(connect.CodeResourceExhausted, "too many devices added lately; try again in a few minutes")
+	if now := s.now(); !s.adds.Allow(u.Name, now) {
+		return nil, limitError("too many devices added lately; try again in a few minutes",
+			&lotsmanv1.SelfServiceLimit{Reason: lotsmanv1.SelfServiceLimit_REASON_RATE_LIMITED, RetryAfter: durationpb.New(s.adds.Wait(u.Name, now))})
 	}
 	p, err := s.src.AddPeer(u.Name, device, profile, false)
 	if errors.Is(err, store.ErrNotFound) {
@@ -323,4 +327,14 @@ func userUpstreams(st daemon.Status, user string, profiles map[string]config.Pro
 		})
 	}
 	return usable
+}
+
+// limitError is a resource_exhausted AddDevice whose detail says which limit
+// refused it, so clients need not read the message.
+func limitError(msg string, limit *lotsmanv1.SelfServiceLimit) error {
+	err := connect.NewError(connect.CodeResourceExhausted, msg)
+	if detail, derr := connectproto.NewErrorDetail(limit); derr == nil {
+		err = err.WithDetail(detail)
+	}
+	return err
 }

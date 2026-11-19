@@ -178,6 +178,7 @@ export const en = {
       denied: "Adding devices is turned off. Ask the operator.",
       maxDevices: (limit: number) => `You already have the most devices allowed (${limit}). Remove one first, or ask the operator for more.`,
       rateLimited: "You added too many devices lately. Try again in a few minutes.",
+      rateLimitedFor: (minutes: number) => `You added too many devices lately. Try again in ${minutes} min.`,
       exhausted: "A limit has been reached: too many devices, or too many added lately. Remove a device, or try again in a few minutes.",
       exists: "This device already has that profile.",
       notFound: "That device was not found. It may have been removed already.",

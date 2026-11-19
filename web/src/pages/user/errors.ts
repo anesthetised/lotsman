@@ -1,7 +1,9 @@
 // How the user page tells a failed call to the user. The daemon's errors are
-// Connect codes; two of them share a code and differ only in their message.
+// Connect codes; its two AddDevice limits share one and carry a
+// SelfServiceLimit detail that says which.
 
 import { Code, ConnectError } from "@connectrpc/connect";
+import { SelfServiceLimit_Reason, SelfServiceLimitSchema } from "../../gen/lotsman/v1/user_self_pb";
 import type { Dict } from "../../i18n/en";
 import { ProfileChangeError } from "./profileChange";
 
@@ -12,10 +14,11 @@ export type Failure =
   | { kind: "unavailable" }
   /** `users.max_devices` is 0: users may not add devices (nor switch a device's profile). */
   | { kind: "denied" }
-  /** The user has `limit` devices; `limit` is unknown if the message was not the one we know. */
-  | { kind: "maxDevices"; limit?: number }
-  | { kind: "rateLimited" }
-  /** A limit, but not one we can tell apart: a message we do not know. */
+  /** The user has `limit` devices already. */
+  | { kind: "maxDevices"; limit: number }
+  /** Too many additions lately; the next is allowed in `retryAfterSeconds`, when known. */
+  | { kind: "rateLimited"; retryAfterSeconds?: number }
+  /** A limit without the daemon's detail, such as the panel's own. */
   | { kind: "exhausted" }
   /** The device already has this profile. */
   | { kind: "exists" }
@@ -23,14 +26,6 @@ export type Failure =
   /** The daemon refused a name or profile; its message says why, in English. */
   | { kind: "invalid"; message: string }
   | { kind: "other"; message: string };
-
-/**
- * The daemon words its two ResourceExhausted refusals differently ("at most N
- * devices; …" and "too many devices added lately; …"); there is no other
- * way to tell them apart, so an unknown wording is a generic limit.
- */
-const maxDevicesMessage = /^at most (\d+) devices?\b/;
-const rateLimitedMessage = /^too many devices added lately\b/;
 
 /** A profile change fails in one of its two calls; what matters is why that one failed. */
 export function failureOf(error: unknown): Failure {
@@ -46,9 +41,16 @@ export function failureOf(error: unknown): Failure {
     case Code.PermissionDenied:
       return { kind: "denied" };
     case Code.ResourceExhausted: {
-      const limit = maxDevicesMessage.exec(e.rawMessage)?.[1];
-      if (limit) return { kind: "maxDevices", limit: Number(limit) };
-      return rateLimitedMessage.test(e.rawMessage) ? { kind: "rateLimited" } : { kind: "exhausted" };
+      const [limit] = e.findDetails(SelfServiceLimitSchema);
+      switch (limit?.reason) {
+        case SelfServiceLimit_Reason.MAX_DEVICES:
+          return { kind: "maxDevices", limit: limit.maxDevices };
+        case SelfServiceLimit_Reason.RATE_LIMITED: {
+          const seconds = limit.retryAfter ? Number(limit.retryAfter.seconds) : undefined;
+          return seconds === undefined ? { kind: "rateLimited" } : { kind: "rateLimited", retryAfterSeconds: seconds };
+        }
+      }
+      return { kind: "exhausted" };
     }
     case Code.AlreadyExists:
       return { kind: "exists" };
@@ -72,9 +74,9 @@ export function failureText(t: Dict, failure: Failure): string {
     case "denied":
       return text.denied;
     case "maxDevices":
-      return failure.limit === undefined ? text.exhausted : text.maxDevices(failure.limit);
+      return text.maxDevices(failure.limit);
     case "rateLimited":
-      return text.rateLimited;
+      return failure.retryAfterSeconds ? text.rateLimitedFor(Math.ceil(failure.retryAfterSeconds / 60)) : text.rateLimited;
     case "exhausted":
       return text.exhausted;
     case "exists":
