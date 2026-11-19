@@ -32,7 +32,7 @@ export default function UpstreamDetail() {
 function LiveUpstream() {
   const { t, c } = useConsoleI18n();
   const params = useParams<{ name: string }>();
-  const snapshot = createLive(() => api.status.watch({}));
+  const snapshot = createLive((signal) => api.status.watch({}, { signal }));
   const upstream = createMemo(() => snapshot().upstreams.find((u) => u.name === params.name));
   return (
     <div class="space-y-4">

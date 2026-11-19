@@ -30,7 +30,7 @@ function LiveConnections() {
   const { t, c } = useConsoleI18n();
   const [params, setParams] = useSearchParams<{ peer: string }>();
   const peer = () => params.peer ?? "";
-  const status = createLive(() => api.status.watch({}));
+  const status = createLive((signal) => api.status.watch({}, { signal }));
   const peers = createMemo(() => new Map(status().peers.map((p) => [p.peerId, p])));
   return (
     <div class="space-y-4">
@@ -81,7 +81,7 @@ const protocols: Record<Protocol, string> = {
 
 function ConnectionTable(props: { peer: string; peers: ReadonlyMap<string, PeerStatus> }) {
   const { fmt, c } = useConsoleI18n();
-  const snapshot = createLive(() => admin.connections.watch({ peerId: props.peer }));
+  const snapshot = createLive((signal) => admin.connections.watch({ peerId: props.peer }, { signal }));
   const [sort, setSort] = createSignal<SortKey>("downRate");
   const [ascending, setAscending] = createSignal(false);
   const rows = createMemo(() => sortConnections(snapshot().connections, sort(), ascending()));
