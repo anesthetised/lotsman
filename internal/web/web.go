@@ -17,6 +17,9 @@ import (
 type Deps struct {
 	Config *Config
 	Auth   Authenticator
+	// SignIn serves the sign-in endpoints under /auth/, normally the
+	// OperatorAuth that is also Auth.
+	SignIn http.Handler
 	// Daemon carries forwarded calls, normally DaemonTransport.
 	Daemon http.RoundTripper
 	// UI is the frontend's files, normally Dist.
@@ -28,6 +31,9 @@ type Deps struct {
 func New(d Deps) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(apiPrefix+"/", newAPI(Scopes, d.Auth, d.Daemon, d.Log))
+	if d.SignIn != nil {
+		mux.Handle(authPrefix+"/", d.SignIn)
+	}
 	mux.Handle("/", newUI(d.UI))
 	return secure(withClient(d.Config.trusted, sameOrigin(d.Config.origin, mux)))
 }

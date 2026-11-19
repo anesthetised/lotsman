@@ -80,14 +80,19 @@ func (o withOrigin) RoundTrip(r *http.Request) (*http.Response, error) {
 
 // browserPanel runs the panel on a real listener in front of the daemon
 // socket and returns a Connect transport as the frontend's
-// createConnectTransport({baseUrl: "/api"}) would use it.
+// createConnectTransport({baseUrl: "/api"}) would use it. A nil auth is
+// production's, over an empty web.db.
 func browserPanel(t *testing.T, socket string, auth Authenticator) connect.Transport {
 	t.Helper()
 	srv := httptest.NewUnstartedServer(nil)
-	origin := "http://" + srv.Listener.Addr().String()
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	origin := "http://localhost:" + port
 	cfg, err := ParseConfig([]byte("public_url: " + origin + "\n"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	if auth == nil {
+		auth = newTestAuth(t, cfg)
 	}
 	srv.Config.Handler = New(Deps{Config: cfg, Auth: auth, Daemon: DaemonTransport(socket), UI: fstest.MapFS{}, Log: discardLog()})
 	srv.Start()
@@ -147,10 +152,10 @@ func TestForwardUnary(t *testing.T) {
 	}
 }
 
-// Production signs in nobody: operator and user calls fail before the
-// daemon, with a code the frontend can act on.
+// Without a session, operator and user calls fail before the daemon, with
+// a code the frontend can act on.
 func TestForwardWithoutAuth(t *testing.T) {
-	transport := browserPanel(t, daemonSocket(t), NoAuth{})
+	transport := browserPanel(t, daemonSocket(t), nil)
 	client := lotsmanv1connect.NewStatusServiceClient(connect.NewClient(transport))
 	stream, err := client.Watch(t.Context(), &lotsmanv1.WatchStatusRequest{})
 	if err == nil {

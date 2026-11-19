@@ -7,8 +7,9 @@
 listen: 127.0.0.1:8080
 
 # The address browsers use, scheme://host[:port] with no path. Every API call
-# must carry this exact Origin, and passkeys are bound to its host, so changing
-# it later means enrolling them again. https only (plain http on loopback).
+# must carry this exact Origin, and passkeys are bound to its host (a name, not
+# an IP address), so changing the host later means enrolling them again. https
+# only (plain http on loopback).
 public_url: https://vpn.example.com
 
 # Proxies whose X-Forwarded-For is believed, as addresses or prefixes. The

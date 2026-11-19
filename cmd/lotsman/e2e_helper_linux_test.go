@@ -40,7 +40,7 @@ func TestMain(m *testing.M) {
 	if os.Getenv("LOTSMAN_TEST_RUN") == "1" {
 		if os.Getenv("LOTSMAN_TEST_OPERATOR") == "1" {
 			// A panel that signs everyone in, in this test binary only.
-			newAuthenticator = func() web.Authenticator { return everyoneOperator{} }
+			newAuthenticator = func(*web.OperatorAuth) web.Authenticator { return everyoneOperator{} }
 		}
 		if err := run(os.Args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "lotsman:", err)

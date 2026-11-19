@@ -7,6 +7,7 @@ const variants = {
   primary: "bg-accent px-3 py-1.5 text-accent-fg hover:opacity-90",
   secondary: "border border-line bg-surface px-3 py-1.5 hover:bg-bg",
   ghost: "p-1.5 text-muted hover:bg-bg hover:text-fg",
+  danger: "bg-bad px-3 py-1.5 text-accent-fg hover:opacity-90",
 };
 
 export type ButtonVariant = keyof typeof variants;

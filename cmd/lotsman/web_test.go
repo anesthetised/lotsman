@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/sha256"
 	"io"
 	"log/slog"
 	"net"
@@ -11,6 +13,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/anesthetised/lotsman/internal/web"
 )
 
 // writeWebConfig writes a web.yaml for a free loopback port and returns its
@@ -25,7 +29,8 @@ func writeWebConfig(t *testing.T, extra string) (path, url string) {
 	ln.Close()
 	dir := t.TempDir()
 	path = filepath.Join(dir, "web.yaml")
-	os.WriteFile(path, []byte("listen: "+addr+"\npublic_url: http://"+addr+"\nstate_dir: "+dir+"\n"+extra), 0o640)
+	_, port, _ := net.SplitHostPort(addr)
+	os.WriteFile(path, []byte("listen: "+addr+"\npublic_url: http://localhost:"+port+"\nstate_dir: "+dir+"\n"+extra), 0o640)
 	return path, "http://" + addr
 }
 
@@ -75,5 +80,41 @@ func TestWebServesUntilStopped(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("web still running after stop")
+	}
+}
+
+// web enroll prints a one-time link on the public URL and stores only the
+// token's hash; the link enrolls once.
+func TestWebEnroll(t *testing.T) {
+	path, _ := writeWebConfig(t, "")
+	t.Setenv("LOTSMAN_WEB_CONFIG", path)
+	out := mustRun(t, "web", "enroll")
+	cfg, err := web.LoadConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, link, ok := strings.Cut(out, cfg.Origin()+"/enroll#")
+	token := strings.TrimSpace(link)
+	if !ok || len(token) != 43 || !strings.Contains(out, "works once") {
+		t.Fatalf("output %q", out)
+	}
+	db, err := web.OpenDB(filepath.Join(cfg.StateDir, "web.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var hash []byte
+	var expires int64
+	if err := db.QueryRow(`SELECT token_hash, expires_at FROM enrollments`).Scan(&hash, &expires); err != nil {
+		t.Fatal(err)
+	}
+	if want := sha256.Sum256([]byte(token)); !bytes.Equal(hash, want[:]) {
+		t.Error("web.db does not hold the token's hash")
+	}
+	if left := time.Until(time.Unix(expires, 0)); left <= web.EnrollmentTTL-time.Minute || left > web.EnrollmentTTL {
+		t.Errorf("expires in %s", left)
+	}
+	if _, err := capture(t, "web", "enroll", "now"); err == nil {
+		t.Error("web enroll takes no arguments")
 	}
 }

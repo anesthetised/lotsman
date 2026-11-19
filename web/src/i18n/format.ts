@@ -23,6 +23,8 @@ export interface Formatters {
   percent(ratio: number): string;
   /** How long ago `date` was, relative to `now`: "5 seconds ago". */
   ago(date: Date, now: Date): string;
+  /** A date and time of day: "Nov 19, 2026, 12:15 PM". */
+  dateTime(date: Date): string;
 }
 
 export function formatters(locale: string): Formatters {
@@ -35,6 +37,7 @@ export function formatters(locale: string): Formatters {
     }).format(value);
   const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   const percent = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 });
+  const dateTime = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" });
 
   return {
     rate(bytesPerSecond) {
@@ -58,6 +61,9 @@ export function formatters(locale: string): Formatters {
       if (abs < 3600) return relative.format(Math.round(seconds / 60), "minute");
       if (abs < 86400) return relative.format(Math.round(seconds / 3600), "hour");
       return relative.format(Math.round(seconds / 86400), "day");
+    },
+    dateTime(date) {
+      return dateTime.format(date);
     },
   };
 }

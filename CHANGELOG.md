@@ -23,6 +23,17 @@ All notable changes to Lotsman are documented here. The format follows
   and hour rows are dropped after `history.hour_retention` (default `2160h`), hourly, in one
   transaction. A degraded upstream counts as not up. About 15 MiB for 5 upstreams and 50 peers
   at the defaults (see the operations guide). No new dependency.
+- Operator sign-in for the web panel with passkeys (#133). `lotsman web enroll` prints a one-time
+  link (`<public_url>/enroll#<token>`, 15 minutes, stored hashed in `web.db`) that enrolls a
+  passkey; any operator can issue more from the console's **Passkeys** page, which also lists and
+  revokes them. All operators are equal. Sessions are a `__Host-` cookie (`HttpOnly`, `Secure`,
+  `SameSite=Strict`) that ends after 1 hour idle, 12 hours in all, on sign-out or when its passkey
+  is revoked. Sign-in and enrollment are limited per client address (10, then one per 30 s). The
+  RP ID is `public_url`'s host, which must now be a name, not an IP address; changing it means
+  enrolling every passkey again. The endpoints are the panel's own, under `/auth/`. Frontend:
+  `/login`, `/enroll` and `/admin/passkeys`; the console sends a signed-out browser to `/login`.
+  Back up `web.db`. New dependency `github.com/go-webauthn/webauthn` v0.18.2 (and 8 modules it
+  needs); the binary grows by 2.5 MB.
 - Web panel frontend scaffold in `web/` (#135): Solid 2, @solidjs/router, Kobalte 2 alpha (patched
   for a dismiss bug, behind `web/src/ui`), Tailwind 4, uPlot, RU and EN, light and dark themes. The
   Connect-web client is generated from `api/` (`just web-gen`); a deterministic fake daemon serves
@@ -37,8 +48,8 @@ All notable changes to Lotsman are documented here. The format follows
   UI from `internal/web/dist`, or a placeholder page when the binary was built without
   `just web-build`, with single-page-app fallback, and forwards `/api/<procedure>` to the daemon's
   control socket, streams included, after checking the RPC's scope (operator, user, internal or
-  public; an RPC without one is refused). Sign-in is not implemented yet, so operator and user
-  calls answer `unauthenticated`. API calls need `Origin` equal to `public_url`;
+  public; an RPC without one is refused). User links are not implemented yet, so user calls answer
+  `unauthenticated`. API calls need `Origin` equal to `public_url`;
   `X-Forwarded-For` counts only from `trusted_proxies`; only RPC protocol headers reach the daemon,
   so a browser's `Lotsman-*` headers never do; every response carries a strict CSP,
   `frame-ancestors 'none'`, `Referrer-Policy: no-referrer` and `nosniff`. Request bodies are

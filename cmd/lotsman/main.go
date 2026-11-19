@@ -40,6 +40,7 @@ Commands:
                               remove one config, every config of a device, or the whole user
   upstream status             show upstream health as last written by the daemon
   web                         run the web panel (as the lotsman-web user)
+  web enroll                  print a one-time link that enrolls an operator's passkey
 
 A TIER is key=value pairs joined by commas, with keys geo, provider and tag, all of
 which an upstream must match (geo=NL,provider=acme), or "any". No TIER means any upstream.
@@ -79,14 +80,15 @@ func run(args []string) error {
 		return errors.New("no command")
 	}
 	cmd := rest[0]
-	if len(rest) > 1 && (cmd == "user" || cmd == "profile" || cmd == "config" || cmd == "upstream") {
+	// web alone runs the panel, so only its one subcommand joins it.
+	if len(rest) > 1 && (cmd == "user" || cmd == "profile" || cmd == "config" || cmd == "upstream" || (cmd == "web" && rest[1] == "enroll")) {
 		cmd += " " + rest[1]
 		rest = rest[1:]
 	}
 	rest = rest[1:]
 
 	switch cmd {
-	case "version", "serve", "config check", "user list", "profile list", "upstream status", "web":
+	case "version", "serve", "config check", "user list", "profile list", "upstream status", "web", "web enroll":
 		if len(rest) > 0 {
 			return fmt.Errorf("%s: unexpected argument %q", cmd, rest[0])
 		}
@@ -118,7 +120,7 @@ func run(args []string) error {
 		return profileImport(*configPath, rest)
 	case "upstream status":
 		return upstreamStatus(*configPath)
-	case "web":
+	case "web", "web enroll":
 		// The panel has its own config: lotsman.yaml is root's alone.
 		path := defaultWebConfigPath()
 		fs.Visit(func(f *flag.Flag) {
@@ -126,6 +128,9 @@ func run(args []string) error {
 				path = *configPath
 			}
 		})
+		if cmd == "web enroll" {
+			return webEnroll(path)
+		}
 		return runWeb(context.Background(), path, level)
 	}
 	fs.Usage()

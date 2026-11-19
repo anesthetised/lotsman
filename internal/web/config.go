@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"os"
@@ -20,7 +21,9 @@ type Config struct {
 	// loopback one behind the reverse proxy.
 	Listen string `yaml:"listen"`
 	// PublicURL is the origin browsers use, https://host[:port]. Origin
-	// checks and the WebAuthn RP ID come from it, never from Host.
+	// checks and the WebAuthn RP ID (its host) come from it, never from
+	// Host. Passkeys are bound to that host: changing it means enrolling
+	// again.
 	PublicURL string `yaml:"public_url"`
 	// TrustedProxies may set X-Forwarded-For; from anyone else it is ignored.
 	TrustedProxies []string `yaml:"trusted_proxies"`
@@ -30,6 +33,7 @@ type Config struct {
 	StateDir string `yaml:"state_dir"`
 
 	origin  string
+	rpID    string
 	trusted []netip.Prefix
 }
 
@@ -61,6 +65,10 @@ func ParseConfig(data []byte) (*Config, error) {
 // Origin is PublicURL as browsers send it in the Origin header.
 func (c *Config) Origin() string { return c.origin }
 
+// EnrollURL is the page that redeems an enrollment token. The token is in
+// the fragment, which browsers never send: it stays out of proxy logs.
+func (c *Config) EnrollURL(token string) string { return c.origin + "/enroll#" + token }
+
 func (c *Config) validate() error {
 	ap, err := netip.ParseAddrPort(c.Listen)
 	if err != nil {
@@ -71,6 +79,12 @@ func (c *Config) validate() error {
 	}
 	if c.origin, err = origin(c.PublicURL); err != nil {
 		return fmt.Errorf("public_url: %w", err)
+	}
+	// Passkeys are bound to the host name, the WebAuthn RP ID; browsers
+	// refuse an IP address as one.
+	u, _ := url.Parse(c.origin)
+	if c.rpID = u.Hostname(); net.ParseIP(c.rpID) != nil {
+		return fmt.Errorf("public_url: %s is an IP address; passkeys need a host name, such as localhost", c.rpID)
 	}
 	c.trusted = nil
 	for _, s := range c.TrustedProxies {
