@@ -28,6 +28,16 @@ message ListProfilesRequest {}
 message ListProfilesResponse {
   repeated Profile profiles = 1;
   repeated string warnings = 2;
+  // The running upstreams' labels, which tiers match; the console suggests
+  // them. Empty in UserSelfService.ListProfiles.
+  repeated UpstreamLabels upstreams = 3;
+}
+
+message UpstreamLabels {
+  string name = 1;
+  string geo = 2;
+  string provider = 3;
+  repeated string tags = 4;
 }
 message PutProfileRequest {
   Profile profile = 1;

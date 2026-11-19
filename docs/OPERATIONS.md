@@ -521,11 +521,13 @@ Each argument after the name is one tier, best first, so no quoting is needed: `
 joined by commas, with keys `geo`, `provider` and `tag`, or `any` for every upstream. `profile list`
 prints tiers in the same form. Names are lowercase letters, digits and `-`, up to 32 characters.
 
-`profile add` and `set` check the profile against the upstreams in `lotsman.yaml`: a profile whose
-tiers match no upstream at all is refused. A tier that
-matches no upstream, or only upstreams an earlier tier already took, is stored with a warning
-(also in `config check` and the start and reload logs), so an upstream can be removed without
-editing every profile. The daemon checks the stored profiles again at start and on every reload
+`profile add` and `set` check the profile against the upstreams in `lotsman.yaml`: every tier must
+match at least one upstream, so a typo in a geo or provider is refused, and a `geo` or `provider`
+value is at most 64 characters without spaces, commas or `=`. A tier that only matches upstreams an
+earlier tier already took is stored with a warning (also in `config check` and the start and reload
+logs). A stored tier that matches nothing after an upstream is removed also only warns, so an
+upstream can be removed without editing every profile; only a profile left with no upstream at all
+fails the check. The daemon checks the stored profiles again at start and on every reload
 against the config it applies. A change applies at once when the daemon is running: like `user
 add`, the command sends SIGUSR1 and the daemon reroutes the clients of that profile on the spot,
 keeping their open connections pinned to an upstream that is still alive. `user add -profile`
@@ -664,8 +666,9 @@ group and restart. The unit provides `/run/lotsman` (`RuntimeDirectory=lotsman`)
   `interval`.
 - `ProfileService` (`List`, `Put`, `Delete`): the [profiles](#profiles) of `lotsman profile`, with
   the same checks and warnings. `Put` creates or replaces one and reroutes its clients before it
-  answers. Errors: `invalid_argument` for a profile the checks refuse (no name, no matching
-  upstream), `failed_precondition` for deleting one that peers use, `not_found` for one that does
+  answers. `List` also returns the running upstreams' labels (`geo`, `provider`, `tags`), which the
+  panel suggests in its tier fields. Errors: `invalid_argument` for a profile the checks refuse (no
+  name, a tier that matches no upstream), `failed_precondition` for deleting one that peers use, `not_found` for one that does
   not exist.
 - `ConnectionService.Watch`: [live connections](#live-connections), for one `peer_id` or every
   peer. Errors: `not_found` for an unknown `peer_id`, `unavailable` when the kernel's table cannot
@@ -695,7 +698,8 @@ The operator console is under `/admin`. **Upstreams** lists each upstream's stat
 rate and 7-day availability; an upstream's own page adds the peers routed through it, the last 5
 minutes' rate and its history over 1 hour to 90 days (availability, average rate, latency).
 **Profiles** creates, edits and deletes profiles, with the daemon's warnings and the matching
-`lotsman profile set` command; a profile that devices use cannot be deleted. **Users** lists users
+`lotsman profile add` or `set` command; the tier fields suggest the upstreams' geo, provider and tag
+values that fit the rest of the tier, and a tier that matches no upstream is flagged before saving; a profile that devices use cannot be deleted. **Users** lists users
 with their devices and profiles: add a device (which creates its user), remove devices or whole
 users, show a device's config as a QR code, as text or as a `.conf` download, and issue or revoke a
 user's [link](#user-links). A link is shown once, when it is issued: only its hash is kept, so to

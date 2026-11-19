@@ -21,12 +21,18 @@ func (d *Daemon) Profiles() ([]config.Profile, []string, error) {
 	return profiles, d.config().Warnings(profiles), nil
 }
 
+// Upstreams returns the running config's upstreams, which profiles are
+// validated against.
+func (d *Daemon) Upstreams() []config.Upstream {
+	return d.config().Upstreams
+}
+
 // PutProfile validates p against the running upstreams, creates it or
 // replaces the profile of that name, and reconciles, so the peers that use it
 // move before it returns. It returns the warnings of every profile.
 func (d *Daemon) PutProfile(p config.Profile) ([]string, error) {
 	cfg := d.config()
-	if err := cfg.ValidateProfile(p); err != nil {
+	if err := cfg.ValidateProfileWrite(p); err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidProfile, err)
 	}
 	if err := d.store.PutProfile(p); err != nil {

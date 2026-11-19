@@ -154,14 +154,15 @@ test("ProfileService lists the profiles with the daemon's warnings", async () =>
     'profile "default": tier 2 geo=LV never applies: every upstream it matches is taken by tier 1 tag=near',
     'profile "fi": tier 1 geo=FI matches no upstream and is ignored',
   ]);
+  expect(list.upstreams.map((u) => [u.name, u.geo, u.provider, u.tags])).toContainEqual(["lv-1", "LV", "provider-a", ["near", "eu"]]);
 });
 
 test("ProfileService.Put creates and replaces, and refuses what the daemon refuses", async () => {
   const profiles = createClient(ProfileService, createFakeTransport());
   const put = (name: string, ...prefer: { geo?: string; provider?: string; tag?: string }[]) => profiles.put({ profile: { name, prefer } });
 
-  const created = await put("eu", { tag: "eu" }, { geo: "FI" }, {});
-  expect(created.warnings).toContain('profile "eu": tier 2 geo=FI matches no upstream and is ignored');
+  const created = await put("eu", { tag: "eu" }, { geo: "LV" }, {});
+  expect(created.warnings).toContain('profile "eu": tier 2 geo=LV never applies: every upstream it matches is taken by tier 1 tag=eu');
   await put("eu", { tag: "eu" });
   const list = await profiles.list({});
   expect(list.profiles.find((p) => p.name === "eu")?.prefer).toHaveLength(1);
@@ -170,7 +171,11 @@ test("ProfileService.Put creates and replaces, and refuses what the daemon refus
   await put("auto"); // no tiers: any upstream
   await expect(put("", { geo: "LV" })).rejects.toSatisfy(code(Code.InvalidArgument));
   await expect(put("Bad Name", { geo: "LV" })).rejects.toSatisfy(code(Code.InvalidArgument));
-  await expect(put("nowhere", { geo: "FI" })).rejects.toThrow(/prefer matches no upstream/);
+  // Every tier of a write must match an upstream, in values the CLI can write.
+  await expect(put("nowhere", { geo: "FI" })).rejects.toThrow(/tier 1 geo=FI matches no upstream/);
+  await expect(put("typo", { geo: "LV" }, { geo: "FI" })).rejects.toThrow(/tier 2 geo=FI matches no upstream/);
+  await expect(put("odd", { geo: "L V" })).rejects.toThrow(/tier 1: geo "L V" must be at most 64 characters/);
+  await expect(put("odd", { tag: "EU" })).rejects.toThrow(/tier 1: tag "EU" must match/);
 });
 
 test("ProfileService.Delete refuses a profile in use and an unknown one", async () => {

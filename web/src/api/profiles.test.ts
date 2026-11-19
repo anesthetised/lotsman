@@ -1,5 +1,5 @@
 import { expect, test } from "vitest";
-import { groupWarnings, tierString } from "./profiles";
+import { groupWarnings, suggestions, tierProblem, tierString } from "./profiles";
 import { profileWarnings } from "./simulation";
 
 test("tierString writes a tier as the CLI does", () => {
@@ -35,4 +35,32 @@ test("the fake's warnings parse back", () => {
     ["shadowed", 2],
     ["unmatched", 3],
   ]);
+});
+
+const upstreams = [
+  { geo: "NL", provider: "acme", tags: ["eu", "fast"] },
+  { geo: "NL", provider: "other", tags: ["eu"] },
+  { geo: "DE", provider: "acme", tags: [] },
+];
+const tier = (t: { geo?: string; provider?: string; tag?: string }) => ({ geo: "", provider: "", tag: "", ...t });
+
+test("suggestions offer the values that keep the tier matching an upstream", () => {
+  expect(suggestions(tier({}), "geo", upstreams)).toEqual(["DE", "NL"]);
+  expect(suggestions(tier({ geo: "NL" }), "provider", upstreams)).toEqual(["acme", "other"]);
+  expect(suggestions(tier({ geo: "DE" }), "provider", upstreams)).toEqual(["acme"]);
+  expect(suggestions(tier({ provider: "acme" }), "tag", upstreams)).toEqual(["eu", "fast"]);
+  // The field's own value does not narrow its suggestions.
+  expect(suggestions(tier({ geo: "N" }), "geo", upstreams)).toEqual(["DE", "NL"]);
+  expect(suggestions(tier({ geo: "FI" }), "provider", upstreams)).toEqual([]);
+});
+
+test("tierProblem refuses what the daemon refuses to write", () => {
+  expect(tierProblem(tier({}), upstreams)).toBeUndefined();
+  expect(tierProblem(tier({ geo: "NL", tag: "fast" }), upstreams)).toBeUndefined();
+  expect(tierProblem(tier({ geo: "DE", tag: "eu" }), upstreams)).toEqual({ kind: "unmatched" });
+  expect(tierProblem(tier({ geo: "N L" }), upstreams)).toEqual({ kind: "value", field: "geo" });
+  expect(tierProblem(tier({ provider: "a=b" }), upstreams)).toEqual({ kind: "value", field: "provider" });
+  expect(tierProblem(tier({ tag: "EU" }), upstreams)).toEqual({ kind: "value", field: "tag" });
+  // Nothing matches without upstreams, not even any.
+  expect(tierProblem(tier({}), [])).toEqual({ kind: "unmatched" });
 });

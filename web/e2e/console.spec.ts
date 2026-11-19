@@ -51,20 +51,22 @@ test("create, edit and delete a profile", async ({ page }) => {
   await dialog.getByLabel("Tier 1 geo").fill("FI");
   await dialog.getByRole("button", { name: "Add tier" }).click();
   await dialog.getByLabel("Tier 2 tag").fill("eu");
-  await expect(dialog.getByText("lotsman profile set eu geo=FI tag=eu")).toBeVisible();
-  // The daemon refuses a profile whose tiers match nothing at all; first try with geo=FI alone.
-  await dialog.getByRole("button", { name: "Remove tier 2" }).click();
+  await expect(dialog.getByText("lotsman profile add eu geo=FI tag=eu")).toBeVisible();
+  // No upstream is in FI: the form flags the tier and sends nothing.
   await dialog.getByRole("button", { name: "Save" }).click();
-  await expect(dialog.getByRole("alert")).toHaveText(/prefer matches no upstream/);
+  await expect(dialog.getByText("Tier 1 matches no upstream. The fields suggest the values that do.")).toBeVisible();
+  await expect(dialog.getByLabel("Tier 1 geo")).toBeFocused();
+  await expect(dialog.getByLabel("Tier 1 geo")).toHaveAttribute("aria-invalid", "true");
+  await expect(dialog.locator("#profile-new-tier-0-geo-options option")).toHaveCount(4);
 
-  await dialog.getByRole("button", { name: "Add tier" }).click();
-  await dialog.getByLabel("Tier 2 tag").fill("eu");
+  await dialog.getByLabel("Tier 1 geo").fill("LV");
+  await expect(dialog.getByText("Tier 1 matches no upstream.")).toBeHidden();
   await dialog.getByRole("button", { name: "Save" }).click();
   await expect(dialog).toBeHidden();
   const eu = table.getByRole("row", { name: /^eu/ });
   const tiers = eu.getByRole("list", { name: "Tiers of eu" }).getByRole("listitem");
-  await expect(tiers).toHaveText(["1. geo=FI", "2. tag=eu"]);
-  await expect(eu).toContainText("Tier 1 (geo=FI) matches no upstream and is ignored.");
+  await expect(tiers).toHaveText(["1. geo=LV", "2. tag=eu"]);
+  await expect(eu).not.toContainText("Warning");
 
   // Reorder from the keyboard: focus follows the moved tier.
   await page.getByRole("button", { name: "Edit eu" }).click();

@@ -65,6 +65,8 @@ func TestPutProfileValidatesAgainstRunningUpstreams(t *testing.T) {
 	for _, p := range []config.Profile{
 		{Name: "Bad Name"},
 		{Name: "fi", Prefer: []config.Match{{Geo: "FI"}}},
+		// A typo in one tier is refused although another tier matches.
+		{Name: "nl2", Prefer: []config.Match{{Geo: "NL"}, {Geo: "FI"}}},
 	} {
 		if _, err := h.d.PutProfile(p); !errors.Is(err, ErrInvalidProfile) {
 			t.Errorf("PutProfile(%+v) = %v, want ErrInvalidProfile", p, err)
@@ -74,9 +76,9 @@ func TestPutProfileValidatesAgainstRunningUpstreams(t *testing.T) {
 		t.Errorf("a refused PutProfile changed the store: %+v", after)
 	}
 
-	// A tier that matches nothing is stored and reported, for every caller.
-	want := []string{`profile "nl2": tier 2 geo=FI matches no upstream and is ignored`}
-	warnings, err := h.d.PutProfile(config.Profile{Name: "nl2", Prefer: []config.Match{{Geo: "NL"}, {Geo: "FI"}}})
+	// A tier whose upstreams an earlier tier takes is stored and reported.
+	want := []string{`profile "nl2": tier 2 geo=NL never applies: every upstream it matches is taken by tier 1 any`}
+	warnings, err := h.d.PutProfile(config.Profile{Name: "nl2", Prefer: []config.Match{{}, {Geo: "NL"}}})
 	if err != nil || !slices.Equal(warnings, want) {
 		t.Fatalf("PutProfile = %q, %v; want %q", warnings, err, want)
 	}

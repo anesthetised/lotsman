@@ -174,9 +174,12 @@ func (*ListProfilesRequest) Descriptor() ([]byte, []int) {
 }
 
 type ListProfilesResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Profiles      []*Profile             `protobuf:"bytes,1,rep,name=profiles,proto3" json:"profiles,omitempty"`
-	Warnings      []string               `protobuf:"bytes,2,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Profiles []*Profile             `protobuf:"bytes,1,rep,name=profiles,proto3" json:"profiles,omitempty"`
+	Warnings []string               `protobuf:"bytes,2,rep,name=warnings,proto3" json:"warnings,omitempty"`
+	// The running upstreams' labels, which tiers match; the console suggests
+	// them. Empty in UserSelfService.ListProfiles.
+	Upstreams     []*UpstreamLabels `protobuf:"bytes,3,rep,name=upstreams,proto3" json:"upstreams,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -225,6 +228,81 @@ func (x *ListProfilesResponse) GetWarnings() []string {
 	return nil
 }
 
+func (x *ListProfilesResponse) GetUpstreams() []*UpstreamLabels {
+	if x != nil {
+		return x.Upstreams
+	}
+	return nil
+}
+
+type UpstreamLabels struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Geo           string                 `protobuf:"bytes,2,opt,name=geo,proto3" json:"geo,omitempty"`
+	Provider      string                 `protobuf:"bytes,3,opt,name=provider,proto3" json:"provider,omitempty"`
+	Tags          []string               `protobuf:"bytes,4,rep,name=tags,proto3" json:"tags,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UpstreamLabels) Reset() {
+	*x = UpstreamLabels{}
+	mi := &file_lotsman_v1_profile_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UpstreamLabels) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UpstreamLabels) ProtoMessage() {}
+
+func (x *UpstreamLabels) ProtoReflect() protoreflect.Message {
+	mi := &file_lotsman_v1_profile_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UpstreamLabels.ProtoReflect.Descriptor instead.
+func (*UpstreamLabels) Descriptor() ([]byte, []int) {
+	return file_lotsman_v1_profile_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *UpstreamLabels) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *UpstreamLabels) GetGeo() string {
+	if x != nil {
+		return x.Geo
+	}
+	return ""
+}
+
+func (x *UpstreamLabels) GetProvider() string {
+	if x != nil {
+		return x.Provider
+	}
+	return ""
+}
+
+func (x *UpstreamLabels) GetTags() []string {
+	if x != nil {
+		return x.Tags
+	}
+	return nil
+}
+
 type PutProfileRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Profile       *Profile               `protobuf:"bytes,1,opt,name=profile,proto3" json:"profile,omitempty"`
@@ -234,7 +312,7 @@ type PutProfileRequest struct {
 
 func (x *PutProfileRequest) Reset() {
 	*x = PutProfileRequest{}
-	mi := &file_lotsman_v1_profile_proto_msgTypes[4]
+	mi := &file_lotsman_v1_profile_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -246,7 +324,7 @@ func (x *PutProfileRequest) String() string {
 func (*PutProfileRequest) ProtoMessage() {}
 
 func (x *PutProfileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_profile_proto_msgTypes[4]
+	mi := &file_lotsman_v1_profile_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -259,7 +337,7 @@ func (x *PutProfileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutProfileRequest.ProtoReflect.Descriptor instead.
 func (*PutProfileRequest) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_profile_proto_rawDescGZIP(), []int{4}
+	return file_lotsman_v1_profile_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *PutProfileRequest) GetProfile() *Profile {
@@ -278,7 +356,7 @@ type PutProfileResponse struct {
 
 func (x *PutProfileResponse) Reset() {
 	*x = PutProfileResponse{}
-	mi := &file_lotsman_v1_profile_proto_msgTypes[5]
+	mi := &file_lotsman_v1_profile_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -290,7 +368,7 @@ func (x *PutProfileResponse) String() string {
 func (*PutProfileResponse) ProtoMessage() {}
 
 func (x *PutProfileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_profile_proto_msgTypes[5]
+	mi := &file_lotsman_v1_profile_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -303,7 +381,7 @@ func (x *PutProfileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutProfileResponse.ProtoReflect.Descriptor instead.
 func (*PutProfileResponse) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_profile_proto_rawDescGZIP(), []int{5}
+	return file_lotsman_v1_profile_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *PutProfileResponse) GetWarnings() []string {
@@ -322,7 +400,7 @@ type DeleteProfileRequest struct {
 
 func (x *DeleteProfileRequest) Reset() {
 	*x = DeleteProfileRequest{}
-	mi := &file_lotsman_v1_profile_proto_msgTypes[6]
+	mi := &file_lotsman_v1_profile_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -334,7 +412,7 @@ func (x *DeleteProfileRequest) String() string {
 func (*DeleteProfileRequest) ProtoMessage() {}
 
 func (x *DeleteProfileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_profile_proto_msgTypes[6]
+	mi := &file_lotsman_v1_profile_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -347,7 +425,7 @@ func (x *DeleteProfileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteProfileRequest.ProtoReflect.Descriptor instead.
 func (*DeleteProfileRequest) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_profile_proto_rawDescGZIP(), []int{6}
+	return file_lotsman_v1_profile_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *DeleteProfileRequest) GetName() string {
@@ -365,7 +443,7 @@ type DeleteProfileResponse struct {
 
 func (x *DeleteProfileResponse) Reset() {
 	*x = DeleteProfileResponse{}
-	mi := &file_lotsman_v1_profile_proto_msgTypes[7]
+	mi := &file_lotsman_v1_profile_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -377,7 +455,7 @@ func (x *DeleteProfileResponse) String() string {
 func (*DeleteProfileResponse) ProtoMessage() {}
 
 func (x *DeleteProfileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_profile_proto_msgTypes[7]
+	mi := &file_lotsman_v1_profile_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -390,7 +468,7 @@ func (x *DeleteProfileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteProfileResponse.ProtoReflect.Descriptor instead.
 func (*DeleteProfileResponse) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_profile_proto_rawDescGZIP(), []int{7}
+	return file_lotsman_v1_profile_proto_rawDescGZIP(), []int{8}
 }
 
 var File_lotsman_v1_profile_proto protoreflect.FileDescriptor
@@ -406,10 +484,16 @@ const file_lotsman_v1_profile_proto_rawDesc = "" +
 	"\x03geo\x18\x01 \x01(\tR\x03geo\x12\x1a\n" +
 	"\bprovider\x18\x02 \x01(\tR\bprovider\x12\x10\n" +
 	"\x03tag\x18\x03 \x01(\tR\x03tag\"\x15\n" +
-	"\x13ListProfilesRequest\"c\n" +
+	"\x13ListProfilesRequest\"\x9d\x01\n" +
 	"\x14ListProfilesResponse\x12/\n" +
 	"\bprofiles\x18\x01 \x03(\v2\x13.lotsman.v1.ProfileR\bprofiles\x12\x1a\n" +
-	"\bwarnings\x18\x02 \x03(\tR\bwarnings\"B\n" +
+	"\bwarnings\x18\x02 \x03(\tR\bwarnings\x128\n" +
+	"\tupstreams\x18\x03 \x03(\v2\x1a.lotsman.v1.UpstreamLabelsR\tupstreams\"f\n" +
+	"\x0eUpstreamLabels\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x10\n" +
+	"\x03geo\x18\x02 \x01(\tR\x03geo\x12\x1a\n" +
+	"\bprovider\x18\x03 \x01(\tR\bprovider\x12\x12\n" +
+	"\x04tags\x18\x04 \x03(\tR\x04tags\"B\n" +
 	"\x11PutProfileRequest\x12-\n" +
 	"\aprofile\x18\x01 \x01(\v2\x13.lotsman.v1.ProfileR\aprofile\"0\n" +
 	"\x12PutProfileResponse\x12\x1a\n" +
@@ -434,32 +518,34 @@ func file_lotsman_v1_profile_proto_rawDescGZIP() []byte {
 	return file_lotsman_v1_profile_proto_rawDescData
 }
 
-var file_lotsman_v1_profile_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_lotsman_v1_profile_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_lotsman_v1_profile_proto_goTypes = []any{
 	(*Profile)(nil),               // 0: lotsman.v1.Profile
 	(*Matcher)(nil),               // 1: lotsman.v1.Matcher
 	(*ListProfilesRequest)(nil),   // 2: lotsman.v1.ListProfilesRequest
 	(*ListProfilesResponse)(nil),  // 3: lotsman.v1.ListProfilesResponse
-	(*PutProfileRequest)(nil),     // 4: lotsman.v1.PutProfileRequest
-	(*PutProfileResponse)(nil),    // 5: lotsman.v1.PutProfileResponse
-	(*DeleteProfileRequest)(nil),  // 6: lotsman.v1.DeleteProfileRequest
-	(*DeleteProfileResponse)(nil), // 7: lotsman.v1.DeleteProfileResponse
+	(*UpstreamLabels)(nil),        // 4: lotsman.v1.UpstreamLabels
+	(*PutProfileRequest)(nil),     // 5: lotsman.v1.PutProfileRequest
+	(*PutProfileResponse)(nil),    // 6: lotsman.v1.PutProfileResponse
+	(*DeleteProfileRequest)(nil),  // 7: lotsman.v1.DeleteProfileRequest
+	(*DeleteProfileResponse)(nil), // 8: lotsman.v1.DeleteProfileResponse
 }
 var file_lotsman_v1_profile_proto_depIdxs = []int32{
 	1, // 0: lotsman.v1.Profile.prefer:type_name -> lotsman.v1.Matcher
 	0, // 1: lotsman.v1.ListProfilesResponse.profiles:type_name -> lotsman.v1.Profile
-	0, // 2: lotsman.v1.PutProfileRequest.profile:type_name -> lotsman.v1.Profile
-	2, // 3: lotsman.v1.ProfileService.List:input_type -> lotsman.v1.ListProfilesRequest
-	4, // 4: lotsman.v1.ProfileService.Put:input_type -> lotsman.v1.PutProfileRequest
-	6, // 5: lotsman.v1.ProfileService.Delete:input_type -> lotsman.v1.DeleteProfileRequest
-	3, // 6: lotsman.v1.ProfileService.List:output_type -> lotsman.v1.ListProfilesResponse
-	5, // 7: lotsman.v1.ProfileService.Put:output_type -> lotsman.v1.PutProfileResponse
-	7, // 8: lotsman.v1.ProfileService.Delete:output_type -> lotsman.v1.DeleteProfileResponse
-	6, // [6:9] is the sub-list for method output_type
-	3, // [3:6] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	4, // 2: lotsman.v1.ListProfilesResponse.upstreams:type_name -> lotsman.v1.UpstreamLabels
+	0, // 3: lotsman.v1.PutProfileRequest.profile:type_name -> lotsman.v1.Profile
+	2, // 4: lotsman.v1.ProfileService.List:input_type -> lotsman.v1.ListProfilesRequest
+	5, // 5: lotsman.v1.ProfileService.Put:input_type -> lotsman.v1.PutProfileRequest
+	7, // 6: lotsman.v1.ProfileService.Delete:input_type -> lotsman.v1.DeleteProfileRequest
+	3, // 7: lotsman.v1.ProfileService.List:output_type -> lotsman.v1.ListProfilesResponse
+	6, // 8: lotsman.v1.ProfileService.Put:output_type -> lotsman.v1.PutProfileResponse
+	8, // 9: lotsman.v1.ProfileService.Delete:output_type -> lotsman.v1.DeleteProfileResponse
+	7, // [7:10] is the sub-list for method output_type
+	4, // [4:7] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_lotsman_v1_profile_proto_init() }
@@ -473,7 +559,7 @@ func file_lotsman_v1_profile_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lotsman_v1_profile_proto_rawDesc), len(file_lotsman_v1_profile_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

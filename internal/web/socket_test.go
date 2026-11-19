@@ -47,6 +47,7 @@ func (fakeSource) Traffic() traffic.Snapshot { return traffic.Snapshot{} }
 func (fakeSource) Profiles() ([]config.Profile, []string, error) {
 	return []config.Profile{{Name: "eu"}}, nil, nil
 }
+func (fakeSource) Upstreams() []config.Upstream                { return nil }
 func (fakeSource) PutProfile(config.Profile) ([]string, error) { return nil, nil }
 func (fakeSource) DeleteProfile(string) error                  { return store.ErrInUse }
 

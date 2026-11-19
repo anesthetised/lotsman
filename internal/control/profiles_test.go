@@ -20,9 +20,10 @@ import (
 
 // fakeProfiles answers with what the test sets and records what it is given.
 type fakeProfiles struct {
-	profiles []config.Profile
-	warnings []string
-	err      error
+	profiles  []config.Profile
+	warnings  []string
+	upstreams []config.Upstream
+	err       error
 
 	put     []config.Profile
 	deleted []string
@@ -31,6 +32,8 @@ type fakeProfiles struct {
 func (f *fakeProfiles) Profiles() ([]config.Profile, []string, error) {
 	return f.profiles, f.warnings, f.err
 }
+
+func (f *fakeProfiles) Upstreams() []config.Upstream { return f.upstreams }
 
 func (f *fakeProfiles) PutProfile(p config.Profile) ([]string, error) {
 	f.put = append(f.put, p)
@@ -57,6 +60,10 @@ func TestProfileList(t *testing.T) {
 	src := &fakeProfiles{
 		profiles: []config.Profile{euProfile, {Name: "any"}},
 		warnings: []string{`profile "eu": tier 3 matches nothing new`},
+		upstreams: []config.Upstream{
+			{Name: "nl", Geo: "NL", Provider: "acme", Tags: []string{"eu", "fast"}},
+			{Name: "any"},
+		},
 	}
 	got, err := profileClient(src).List(t.Context(), &lotsmanv1.ListProfilesRequest{})
 	if err != nil {
@@ -66,6 +73,10 @@ func TestProfileList(t *testing.T) {
 	want := &lotsmanv1.ListProfilesResponse{
 		Profiles: []*lotsmanv1.Profile{euMessage, {Name: "any"}},
 		Warnings: src.warnings,
+		Upstreams: []*lotsmanv1.UpstreamLabels{
+			{Name: "nl", Geo: "NL", Provider: "acme", Tags: []string{"eu", "fast"}},
+			{Name: "any"},
+		},
 	}
 	if diff := cmp.Diff(want, got, protocmp.Transform()); diff != "" {
 		t.Errorf("list (-want +got):\n%s", diff)

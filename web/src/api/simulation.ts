@@ -20,7 +20,7 @@ import {
   UpstreamStatusSchema,
 } from "../gen/lotsman/v1/status_pb";
 import { type DevicePeer, DevicePeerSchema, DeviceSchema, type User, UserSchema } from "../gen/lotsman/v1/user_pb";
-import { type Tier, tierString } from "./profiles";
+import { TAG, type Tier, tierMatches, tierProblem, tierString } from "./profiles";
 
 const MINUTE = 60_000;
 const HOUR = 3_600_000;
@@ -420,9 +420,13 @@ export class Simulation {
     return clientConfig(p.id, p.address);
   }
 
-  /** The stored profiles and their warnings against the upstreams. */
-  listProfiles(): { profiles: Profile[]; warnings: string[] } {
-    return { profiles: this.profiles, warnings: profileWarnings(this.profiles) };
+  /** The stored profiles, their warnings against the upstreams, and the upstreams' labels. */
+  listProfiles(): { profiles: Profile[]; warnings: string[]; upstreams: { name: string; geo: string; provider: string; tags: string[] }[] } {
+    return {
+      profiles: this.profiles,
+      warnings: profileWarnings(this.profiles),
+      upstreams: upstreams.map((u) => ({ name: u.name, geo: u.geo, provider: u.provider, tags: [...u.tags] })),
+    };
   }
 
   /** Creates or replaces a profile, as `profile add` and `profile set` do; returns every profile's warnings. */
@@ -431,8 +435,14 @@ export class Simulation {
     if (!NAME_RE.test(profile.name)) {
       throw new ConnectError(`invalid profile: profile name "${profile.name}" must match ${NAME_RE.source}`, Code.InvalidArgument);
     }
-    if (profile.prefer.length > 0 && !tierSizes(profile).some((t) => t.own > 0)) {
-      throw new ConnectError(`invalid profile: profile "${profile.name}": prefer matches no upstream`, Code.InvalidArgument);
+    // Every tier must match an upstream now, as the daemon checks a write.
+    for (const [j, t] of profile.prefer.entries()) {
+      const problem = tierProblem(t, upstreams);
+      if (problem?.kind === "value") {
+        const rule = problem.field === "tag" ? `must match ${TAG.source}` : "must be at most 64 characters without spaces, commas or =";
+        throw new ConnectError(`invalid profile: profile "${profile.name}": tier ${j + 1}: ${problem.field} "${t[problem.field]}" ${rule}`, Code.InvalidArgument);
+      }
+      if (problem) throw new ConnectError(`invalid profile: profile "${profile.name}": tier ${j + 1} ${tierString(t)} matches no upstream`, Code.InvalidArgument);
     }
     const stored = { name: profile.name, prefer: profile.prefer.map((t) => ({ geo: t.geo, provider: t.provider, tag: t.tag })) };
     const i = this.profiles.findIndex((p) => p.name === profile.name);
@@ -548,10 +558,6 @@ function connection(f: Flow): Connection {
   });
 }
 
-function matches(t: Tier, u: Upstream): boolean {
-  return (!t.geo || t.geo === u.geo) && (!t.provider || t.provider === u.provider) && (!t.tag || u.tags.includes(t.tag));
-}
-
 /**
  * Per tier, as the daemon counts them: the upstreams it matches, those for
  * which it is the first match (its own), and the earlier tiers that took the rest.
@@ -561,7 +567,7 @@ function tierSizes(p: Profile): { matched: number; own: number; shadowers: numbe
   for (const u of upstreams) {
     let first = -1;
     for (const [j, t] of p.prefer.entries()) {
-      if (!matches(t, u)) continue;
+      if (!tierMatches(t, u)) continue;
       const size = tiers[j]!;
       size.matched++;
       if (first < 0) {
@@ -593,7 +599,7 @@ export function profileWarnings(profiles: readonly Profile[]): string[] {
 /** The upstream a new peer of the profile gets: the first tier with one up, lowest latency first; "" if none. */
 function selectUpstream(p: Profile): string {
   for (const t of p.prefer.length > 0 ? p.prefer : [{ geo: "", provider: "", tag: "" }]) {
-    const up = upstreams.filter((u) => u.state === UpstreamState.UP && matches(t, u)).sort((a, b) => a.latencyMs - b.latencyMs);
+    const up = upstreams.filter((u) => u.state === UpstreamState.UP && tierMatches(t, u)).sort((a, b) => a.latencyMs - b.latencyMs);
     if (up[0]) return up[0].name;
   }
   return "";

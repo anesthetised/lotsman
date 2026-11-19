@@ -13,7 +13,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file lotsman/v1/profile.proto.
  */
 export const file_lotsman_v1_profile: GenFile = /*@__PURE__*/
-  fileDesc("Chhsb3RzbWFuL3YxL3Byb2ZpbGUucHJvdG8SCmxvdHNtYW4udjEiPAoHUHJvZmlsZRIMCgRuYW1lGAEgASgJEiMKBnByZWZlchgCIAMoCzITLmxvdHNtYW4udjEuTWF0Y2hlciI1CgdNYXRjaGVyEgsKA2dlbxgBIAEoCRIQCghwcm92aWRlchgCIAEoCRILCgN0YWcYAyABKAkiFQoTTGlzdFByb2ZpbGVzUmVxdWVzdCJPChRMaXN0UHJvZmlsZXNSZXNwb25zZRIlCghwcm9maWxlcxgBIAMoCzITLmxvdHNtYW4udjEuUHJvZmlsZRIQCgh3YXJuaW5ncxgCIAMoCSI5ChFQdXRQcm9maWxlUmVxdWVzdBIkCgdwcm9maWxlGAEgASgLMhMubG90c21hbi52MS5Qcm9maWxlIiYKElB1dFByb2ZpbGVSZXNwb25zZRIQCgh3YXJuaW5ncxgBIAMoCSIkChREZWxldGVQcm9maWxlUmVxdWVzdBIMCgRuYW1lGAEgASgJIhcKFURlbGV0ZVByb2ZpbGVSZXNwb25zZTLwAQoOUHJvZmlsZVNlcnZpY2USSQoETGlzdBIfLmxvdHNtYW4udjEuTGlzdFByb2ZpbGVzUmVxdWVzdBogLmxvdHNtYW4udjEuTGlzdFByb2ZpbGVzUmVzcG9uc2USRAoDUHV0Eh0ubG90c21hbi52MS5QdXRQcm9maWxlUmVxdWVzdBoeLmxvdHNtYW4udjEuUHV0UHJvZmlsZVJlc3BvbnNlEk0KBkRlbGV0ZRIgLmxvdHNtYW4udjEuRGVsZXRlUHJvZmlsZVJlcXVlc3QaIS5sb3RzbWFuLnYxLkRlbGV0ZVByb2ZpbGVSZXNwb25zZUI6WjhnaXRodWIuY29tL2FuZXN0aGV0aXNlZC9sb3RzbWFuL2FwaS9sb3RzbWFuL3YxO2xvdHNtYW52MWIGcHJvdG8z");
+  fileDesc("Chhsb3RzbWFuL3YxL3Byb2ZpbGUucHJvdG8SCmxvdHNtYW4udjEiPAoHUHJvZmlsZRIMCgRuYW1lGAEgASgJEiMKBnByZWZlchgCIAMoCzITLmxvdHNtYW4udjEuTWF0Y2hlciI1CgdNYXRjaGVyEgsKA2dlbxgBIAEoCRIQCghwcm92aWRlchgCIAEoCRILCgN0YWcYAyABKAkiFQoTTGlzdFByb2ZpbGVzUmVxdWVzdCJ+ChRMaXN0UHJvZmlsZXNSZXNwb25zZRIlCghwcm9maWxlcxgBIAMoCzITLmxvdHNtYW4udjEuUHJvZmlsZRIQCgh3YXJuaW5ncxgCIAMoCRItCgl1cHN0cmVhbXMYAyADKAsyGi5sb3RzbWFuLnYxLlVwc3RyZWFtTGFiZWxzIksKDlVwc3RyZWFtTGFiZWxzEgwKBG5hbWUYASABKAkSCwoDZ2VvGAIgASgJEhAKCHByb3ZpZGVyGAMgASgJEgwKBHRhZ3MYBCADKAkiOQoRUHV0UHJvZmlsZVJlcXVlc3QSJAoHcHJvZmlsZRgBIAEoCzITLmxvdHNtYW4udjEuUHJvZmlsZSImChJQdXRQcm9maWxlUmVzcG9uc2USEAoId2FybmluZ3MYASADKAkiJAoURGVsZXRlUHJvZmlsZVJlcXVlc3QSDAoEbmFtZRgBIAEoCSIXChVEZWxldGVQcm9maWxlUmVzcG9uc2Uy8AEKDlByb2ZpbGVTZXJ2aWNlEkkKBExpc3QSHy5sb3RzbWFuLnYxLkxpc3RQcm9maWxlc1JlcXVlc3QaIC5sb3RzbWFuLnYxLkxpc3RQcm9maWxlc1Jlc3BvbnNlEkQKA1B1dBIdLmxvdHNtYW4udjEuUHV0UHJvZmlsZVJlcXVlc3QaHi5sb3RzbWFuLnYxLlB1dFByb2ZpbGVSZXNwb25zZRJNCgZEZWxldGUSIC5sb3RzbWFuLnYxLkRlbGV0ZVByb2ZpbGVSZXF1ZXN0GiEubG90c21hbi52MS5EZWxldGVQcm9maWxlUmVzcG9uc2VCOlo4Z2l0aHViLmNvbS9hbmVzdGhldGlzZWQvbG90c21hbi9hcGkvbG90c21hbi92MTtsb3RzbWFudjFiBnByb3RvMw");
 
 /**
  * @generated from message lotsman.v1.Profile
@@ -94,6 +94,14 @@ export type ListProfilesResponse = Message<"lotsman.v1.ListProfilesResponse"> & 
    * @generated from field: repeated string warnings = 2;
    */
   warnings: string[];
+
+  /**
+   * The running upstreams' labels, which tiers match; the console suggests
+   * them. Empty in UserSelfService.ListProfiles.
+   *
+   * @generated from field: repeated lotsman.v1.UpstreamLabels upstreams = 3;
+   */
+  upstreams: UpstreamLabels[];
 };
 
 /**
@@ -102,6 +110,38 @@ export type ListProfilesResponse = Message<"lotsman.v1.ListProfilesResponse"> & 
  */
 export const ListProfilesResponseSchema: GenMessage<ListProfilesResponse> = /*@__PURE__*/
   messageDesc(file_lotsman_v1_profile, 3);
+
+/**
+ * @generated from message lotsman.v1.UpstreamLabels
+ */
+export type UpstreamLabels = Message<"lotsman.v1.UpstreamLabels"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string geo = 2;
+   */
+  geo: string;
+
+  /**
+   * @generated from field: string provider = 3;
+   */
+  provider: string;
+
+  /**
+   * @generated from field: repeated string tags = 4;
+   */
+  tags: string[];
+};
+
+/**
+ * Describes the message lotsman.v1.UpstreamLabels.
+ * Use `create(UpstreamLabelsSchema)` to create a new message.
+ */
+export const UpstreamLabelsSchema: GenMessage<UpstreamLabels> = /*@__PURE__*/
+  messageDesc(file_lotsman_v1_profile, 4);
 
 /**
  * @generated from message lotsman.v1.PutProfileRequest
@@ -118,7 +158,7 @@ export type PutProfileRequest = Message<"lotsman.v1.PutProfileRequest"> & {
  * Use `create(PutProfileRequestSchema)` to create a new message.
  */
 export const PutProfileRequestSchema: GenMessage<PutProfileRequest> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_profile, 4);
+  messageDesc(file_lotsman_v1_profile, 5);
 
 /**
  * @generated from message lotsman.v1.PutProfileResponse
@@ -135,7 +175,7 @@ export type PutProfileResponse = Message<"lotsman.v1.PutProfileResponse"> & {
  * Use `create(PutProfileResponseSchema)` to create a new message.
  */
 export const PutProfileResponseSchema: GenMessage<PutProfileResponse> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_profile, 5);
+  messageDesc(file_lotsman_v1_profile, 6);
 
 /**
  * @generated from message lotsman.v1.DeleteProfileRequest
@@ -152,7 +192,7 @@ export type DeleteProfileRequest = Message<"lotsman.v1.DeleteProfileRequest"> & 
  * Use `create(DeleteProfileRequestSchema)` to create a new message.
  */
 export const DeleteProfileRequestSchema: GenMessage<DeleteProfileRequest> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_profile, 6);
+  messageDesc(file_lotsman_v1_profile, 7);
 
 /**
  * @generated from message lotsman.v1.DeleteProfileResponse
@@ -165,7 +205,7 @@ export type DeleteProfileResponse = Message<"lotsman.v1.DeleteProfileResponse"> 
  * Use `create(DeleteProfileResponseSchema)` to create a new message.
  */
 export const DeleteProfileResponseSchema: GenMessage<DeleteProfileResponse> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_profile, 7);
+  messageDesc(file_lotsman_v1_profile, 8);
 
 /**
  * @generated from service lotsman.v1.ProfileService
