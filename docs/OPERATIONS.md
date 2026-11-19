@@ -28,7 +28,8 @@ The `useradd` step creates the system user that proxy upstream helpers run as (s
 the daemon logs a warning once.
 
 The `groupadd` step creates the group that may use the [control socket](#control-socket), the web
-panel's. Without it the socket is root-only and the daemon logs a warning at start.
+panel's. Without it the socket is root-only and the daemon logs a warning at start. The
+[web panel](#web-panel) has its own install steps.
 
 Put each provider config into `/etc/lotsman/upstreams/<name>.conf`, reference them in
 `lotsman.yaml`, then:
@@ -53,7 +54,10 @@ path=/usr/local/bin/lotsman
 path=/etc/systemd/system/lotsman.service
 path=/etc/lotsman
 path=/var/lib/lotsman
+path=/etc/systemd/system/lotsman-web.service
+path=/var/lib/lotsman-web
 user=lotsman-proxy
+user=lotsman-web
 group=lotsman-web
 ```
 
@@ -62,7 +66,8 @@ Take the two `_before` values from `sysctl -n net.ipv4.ip_forward` and
 `nf_conntrack_acct_before=` empty when the second prints nothing: `nf_conntrack` is not loaded
 yet, and a fresh load starts at 0 (see [Live connections](#live-connections)).
 
-Add `user=lotsman-proxy` only if your install created that user (the `useradd` above ran), and
+Add `user=lotsman-proxy` only if your install created that user (the `useradd` above ran),
+`user=lotsman-web` only if you installed the [web panel](#web-panel) and created its user, and
 `group=lotsman-web` only if it created that group: the script removes each `user=` entry with
 `userdel` and then each `group=` entry with `groupdel`, so a user or group that existed before
 Lotsman is left alone. If either fails, the script says so and carries on.
@@ -95,6 +100,7 @@ sudo /tmp/lotsman config check              # the new binary must accept the cur
 sudo install -m 0755 /tmp/lotsman /usr/local/bin/lotsman
 sudo cp deploy/lotsman.service /etc/systemd/system/ && sudo systemctl daemon-reload  # if the unit changed
 sudo systemctl restart lotsman              # clients reconnect on their own within seconds
+sudo systemctl try-restart lotsman-web      # the web panel, if installed, runs the same binary
 sudo lotsman upstream status
 ```
 
@@ -612,7 +618,106 @@ group the socket is `0600 root:root` and the daemon logs `control socket is root
 group and restart. The unit provides `/run/lotsman` (`RuntimeDirectory=lotsman`) and needs
 `CAP_CHOWN` in its `CapabilityBoundingSet` to hand the socket to the group, as
 `deploy/lotsman.service` does. Only `StatusService.Watch` answers so far; every other RPC returns
-`unimplemented`.
+`unimplemented`. Self-service RPCs act for the user named in the `Lotsman-User` request header,
+which only the [web panel](#web-panel) sets.
+
+## Web panel
+
+`lotsman web` is the web panel: it serves the browser UI and forwards the UI's calls to the
+daemon over the [control socket](#control-socket). It runs as the unprivileged user
+`lotsman-web`, whose primary group, `lotsman-web`, may use the socket. It never opens
+`lotsman.db`; its own state, `web.db` (operator passkeys, sessions, enrollment tokens), lives in
+`/var/lib/lotsman-web`. It listens on loopback and needs a reverse proxy in front for TLS.
+
+Operator sign-in and user links are not implemented yet: the panel serves the UI, but every API
+call answers `unauthenticated`. A binary built without the frontend (`go build`, `just build`
+without `just web-build`) serves a page saying so, and the panel logs a warning at start.
+
+Install, after the gateway itself:
+
+```bash
+getent passwd lotsman-web >/dev/null || sudo useradd --system --gid lotsman-web --no-create-home \
+  --shell /usr/sbin/nologin lotsman-web
+sudo install -m 0640 -g lotsman-web deploy/web.example.yaml /etc/lotsman/web.yaml
+sudoedit /etc/lotsman/web.yaml               # public_url at least
+sudo cp deploy/lotsman-web.service /etc/systemd/system/
+sudo systemctl daemon-reload && sudo systemctl enable --now lotsman-web
+```
+
+Record `user=lotsman-web` and the unit and state paths in the [manifest](#removing-it). If the
+daemon was already running when the group was created, restart it once so the socket gets the
+group.
+
+### Panel configuration
+
+`/etc/lotsman/web.yaml`, separate from `lotsman.yaml` because that file is root's alone and the
+panel must not read the daemon's config. Keep it `0640 root:lotsman-web`. `lotsman web` reads
+`-config` (given before `web`), else `$LOTSMAN_WEB_CONFIG`, else `/etc/lotsman/web.yaml`; see
+`deploy/web.example.yaml`.
+
+| Key | Meaning |
+|---|---|
+| `listen` | Numeric TCP address, default `127.0.0.1:8080`. `0.0.0.0` and `[::]` are refused: only the reverse proxy should reach the panel. |
+| `public_url` | Required. The address browsers use, `https://host[:port]` with no path (plain `http` only for a loopback host). Every API call must carry exactly this `Origin`; the `Host` header plays no part. Passkeys (#133) are bound to its host, so changing it means enrolling them again. |
+| `trusted_proxies` | Addresses or prefixes whose `X-Forwarded-For` the panel believes, such as `[127.0.0.1, "::1"]` for a proxy on the same host. Default none: the client address is the peer's own. Used for rate limits and logs. |
+| `socket` | The daemon's control socket, default `/run/lotsman/control.sock`. |
+| `state_dir` | Where `web.db` lives, default `/var/lib/lotsman-web` (the unit's `StateDirectory=`). |
+
+Changes need `systemctl restart lotsman-web`. A bad config stops the panel at start, with the
+key in the journal. The log level follows `-log-level` or `$LOTSMAN_LOG_LEVEL`, as for `serve`.
+
+### Reverse proxy
+
+The proxy terminates TLS for `public_url` and passes everything to `listen`. Live views are
+server-streaming calls that stay open for as long as the page is, so the proxy must pass each
+response chunk on as it arrives (no response buffering) and must not time out an open response
+after a minute or two. It should set `X-Forwarded-For` and keep the browser's `Origin`.
+
+Caddy (it sets `X-Forwarded-For` itself; `flush_interval -1` turns response buffering off):
+
+```
+vpn.example.com {
+	reverse_proxy 127.0.0.1:8080 {
+		flush_interval -1
+	}
+}
+```
+
+nginx:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name vpn.example.com;
+    # ssl_certificate ... as usual
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_buffering off;
+        proxy_read_timeout 1h;
+    }
+}
+```
+
+Set `trusted_proxies: [127.0.0.1, "::1"]` with either. Add HSTS at the proxy if you want it; the
+panel sets its own security headers on every response (a `default-src 'self'` CSP with nothing
+inline, `frame-ancestors 'none'`, `Referrer-Policy: no-referrer`, `nosniff`) and `no-store` on
+API responses.
+
+### What the panel forwards
+
+The browser calls the same `lotsman.v1` API as the socket, under `/api/` (for example
+`/api/lotsman.v1.StatusService/Watch`). Each RPC has a scope in the panel: operator (a signed-in
+operator), user (a user's link), or internal (`UserSelfService.ResolveLink`, which only the panel
+calls); an RPC without a scope is refused with `permission_denied`. Only POST is accepted, a
+request body is at most 64 KiB, and only the RPC protocol headers reach the daemon: cookies,
+credentials, forwarded addresses and every `Lotsman-*` header the browser sent are dropped. For
+self-service calls the panel sets `Lotsman-User` itself. When the daemon is down, or the panel's
+user is not in the `lotsman-web` group, calls answer `unavailable` and the panel logs
+`daemon unreachable` with the reason.
 
 ## Monitoring
 

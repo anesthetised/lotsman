@@ -1,0 +1,46 @@
+[Unit]
+Description=Lotsman web panel
+Documentation=https://github.com/anesthetised/lotsman
+# The panel forwards to the daemon's control socket; it starts without it
+# and answers unavailable until the daemon is up.
+After=network.target lotsman.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/lotsman web
+Restart=on-failure
+RestartSec=5s
+Environment=LOTSMAN_WEB_CONFIG=/etc/lotsman/web.yaml
+# lotsman-web's primary group, lotsman-web, may use /run/lotsman/control.sock.
+User=lotsman-web
+Group=lotsman-web
+StateDirectory=lotsman-web
+StateDirectoryMode=0700
+UMask=0077
+# No capabilities at all: the panel binds an unprivileged loopback port and
+# talks to the daemon only through the socket.
+CapabilityBoundingSet=
+AmbientCapabilities=
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

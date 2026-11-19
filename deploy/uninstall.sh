@@ -9,6 +9,7 @@ if [ ! -f "$manifest" ]; then
 	exit 1
 fi
 
+systemctl disable --now lotsman-web 2>/dev/null || true
 systemctl disable --now lotsman 2>/dev/null || true
 
 # A failed stop can leave the daemon and downstream alive. Stop ingress before

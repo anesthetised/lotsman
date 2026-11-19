@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/anesthetised/lotsman/internal/proxy/helper"
+	"github.com/anesthetised/lotsman/internal/web"
 )
 
 // TestMain lets this test binary be a proxy helper: serve starts helpers as
@@ -37,6 +38,10 @@ func TestMain(m *testing.M) {
 	}
 	// Another lotsman process, such as a second serve (see runLotsman).
 	if os.Getenv("LOTSMAN_TEST_RUN") == "1" {
+		if os.Getenv("LOTSMAN_TEST_OPERATOR") == "1" {
+			// A panel that signs everyone in, in this test binary only.
+			newAuthenticator = func() web.Authenticator { return everyoneOperator{} }
+		}
 		if err := run(os.Args[1:]); err != nil {
 			fmt.Fprintln(os.Stderr, "lotsman:", err)
 			os.Exit(1)

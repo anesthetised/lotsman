@@ -20,6 +20,10 @@ const (
 	// Group is the system group that may connect to the socket: the web
 	// panel's user.
 	Group = "lotsman-web"
+	// UserHeader names the user a self-service RPC acts for. Only the
+	// panel sets it, after resolving the user's link, and it strips the
+	// header from every browser request.
+	UserHeader = "Lotsman-User"
 )
 
 // Listen creates the unix socket at path with mode 0660 and the given group.

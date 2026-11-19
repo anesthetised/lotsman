@@ -13,6 +13,23 @@ All notable changes to Lotsman are documented here. The format follows
   and a `web` CI job (frozen lockfile, typecheck, Vitest, build, codegen check, Playwright smoke under
   the production CSP). The build goes to `internal/web/dist`, which only tracks `.gitkeep`. Go
   builds need no Node.
+- Web panel process, `lotsman web` (#132): runs as the unprivileged user `lotsman-web`
+  (`deploy/lotsman-web.service`, no capabilities, `StateDirectory=lotsman-web`) with its own
+  config, `/etc/lotsman/web.yaml` (`listen`, default `127.0.0.1:8080`; `public_url`;
+  `trusted_proxies`; `socket`; `state_dir`; see `deploy/web.example.yaml`). It serves the embedded
+  UI from `internal/web/dist`, or a placeholder page when the binary was built without
+  `just web-build`, with single-page-app fallback, and forwards `/api/<procedure>` to the daemon's
+  control socket, streams included, after checking the RPC's scope (operator, user, internal or
+  public; an RPC without one is refused). Sign-in is not implemented yet, so operator and user
+  calls answer `unauthenticated`. API calls need `Origin` equal to `public_url`;
+  `X-Forwarded-For` counts only from `trusted_proxies`; only RPC protocol headers reach the daemon,
+  so a browser's `Lotsman-*` headers never do; every response carries a strict CSP,
+  `frame-ancestors 'none'`, `Referrer-Policy: no-referrer` and `nosniff`. Request bodies are
+  limited to 64 KiB. The panel keeps `web.db` (`0600`) in its state directory with the tables for
+  passkeys, sessions and enrollment tokens. Install: `useradd --system --gid lotsman-web …
+  lotsman-web`, and `user=lotsman-web` plus the unit and `/var/lib/lotsman-web` in the manifest;
+  `deploy/uninstall.sh` also stops `lotsman-web`. The operations guide has Caddy and nginx
+  examples. The binary grows by about 0.2 MB. No new dependency.
 - Control API for the web panel: `lotsman serve` serves `lotsman.v1` over Connect on the unix socket
   `/run/lotsman/control.sock` (`0660 root:lotsman-web`; root-only with a warning when the group is
   missing). The socket's peer is trusted, so its file mode is the boundary. It is created after the
