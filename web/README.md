@@ -90,7 +90,9 @@ preferences, else English. Units come from `Intl`, not the dictionaries.
 - No external assets (system fonts, inline SVG icons) and no inline scripts or
   styles in the build, so the page runs under `script-src 'self'; style-src 'self'`.
 - The user page carries a secret in its URL: `<meta name="referrer" content="no-referrer">`
-  is in `index.html`, and the panel should also send `Referrer-Policy: no-referrer`.
+  is in `index.html`, and the panel also sends `Referrer-Policy: no-referrer`. The page's calls
+  carry the token as `Authorization: Bearer <token>` (`selfApi` in `src/api/client.ts`); the panel
+  resolves it and never forwards it. The fake ignores it.
 
 ## Pins and patches
 

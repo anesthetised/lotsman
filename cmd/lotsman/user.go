@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/store"
+	"github.com/anesthetised/lotsman/internal/web"
 )
 
 func userAdd(configPath string, args []string) error {
@@ -130,6 +132,77 @@ func userRemove(configPath string, args []string) error {
 		return fmt.Errorf("%s: %w", a.name, err)
 	}
 	nudgeDaemon(e)
+	return nil
+}
+
+// userLink issues NAME's link to their page in the web panel, replacing the
+// one they had, or with -revoke ends it. The link is printed once, to
+// stdout: only its hash is stored. Its address is the panel's public_url,
+// read from the panel's config, or -url; without either only the token is
+// printed.
+func userLink(configPath string, args []string) error {
+	fs := flag.NewFlagSet("user link", flag.ContinueOnError)
+	revoke := fs.Bool("revoke", false, "end the user's link instead of issuing one")
+	base := fs.String("url", "", "the panel's public URL (default: public_url of the panel's config, see `web`)")
+	if len(args) == 0 || args[0] == "" || args[0][0] == '-' {
+		return errors.New("user link: NAME is required")
+	}
+	name := args[0]
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("user link: unexpected argument %q (flags go after NAME as -flag value)", fs.Arg(0))
+	}
+	origin := *base
+	if origin == "" {
+		origin = panelOrigin()
+	} else if err := checkPanelURL(origin); err != nil {
+		return fmt.Errorf("user link: -url: %w", err)
+	}
+	e, err := openEnv(configPath)
+	if err != nil {
+		return err
+	}
+	defer e.store.Close()
+	if *revoke {
+		if err := e.store.RevokeLink(name); err != nil {
+			return fmt.Errorf("%s: %w", name, err)
+		}
+		return nil
+	}
+	token, err := e.store.IssueLink(name)
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	if origin == "" {
+		fmt.Println(token)
+		fmt.Fprintln(os.Stderr, "lotsman: no public URL known (-url, or public_url in the panel's config); the page is <public_url>/u/<token>")
+	} else {
+		fmt.Println(strings.TrimRight(origin, "/") + "/u/" + token)
+	}
+	fmt.Fprintf(os.Stderr, "lotsman: the link is shown only this once and replaces %s's previous one; it gives their configs to whoever has it\n", name)
+	return nil
+}
+
+// panelOrigin is the panel's public_url, or "" without a readable panel
+// config.
+func panelOrigin() string {
+	cfg, err := web.LoadConfig(defaultWebConfigPath())
+	if err != nil {
+		return ""
+	}
+	return cfg.Origin()
+}
+
+func checkPanelURL(s string) error {
+	u, err := url.Parse(s)
+	if err != nil {
+		return err
+	}
+	if (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || (u.Path != "" && u.Path != "/") || u.RawQuery != "" || u.Fragment != "" {
+		return fmt.Errorf("%q: want https://host[:port]; the panel is served at the root", s)
+	}
 	return nil
 }
 

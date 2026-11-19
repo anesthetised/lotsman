@@ -34,6 +34,19 @@ All notable changes to Lotsman are documented here. The format follows
   `/login`, `/enroll` and `/admin/passkeys`; the console sends a signed-out browser to `/login`.
   Back up `web.db`. New dependency `github.com/go-webauthn/webauthn` v0.18.2 (and 8 modules it
   needs); the binary grows by 2.5 MB.
+- User links and device self-service (#134). `lotsman user link NAME` prints a new link to the
+  user's page in the web panel, `<public_url>/u/<token>` (the address from `-url` or the panel's
+  `public_url`, else the token alone), and revokes the previous one; `-revoke` ends it. Tokens are
+  256-bit, stored as SHA-256 only (a new `user_links` table, migrated automatically), shown once and
+  never logged. The page sends the token as `Authorization: Bearer`; the panel resolves it through
+  the daemon, caches it for 30 s, ends a live view whose link was revoked, refuses an address after
+  10 failed links (one more every 6 s), and never forwards the header. The control API implements
+  `UserService` (list, add and remove devices and users, configs, issue and revoke links) and
+  `UserSelfService` but its history RPCs: a user sees and changes only their own devices (another
+  user's peer is `not_found`), may add devices up to `users.max_devices` (new in `lotsman.yaml`,
+  default 5) and at most 10 at once, then one every 6 minutes, and their `Watch` shows their own
+  peers and the upstreams their profiles may use, without those upstreams' routed, active and
+  traffic. Changes made through the API apply at once, without the CLI's SIGUSR1.
 - Web panel frontend scaffold in `web/` (#135): Solid 2, @solidjs/router, Kobalte 2 alpha (patched
   for a dismiss bug, behind `web/src/ui`), Tailwind 4, uPlot, RU and EN, light and dark themes. The
   Connect-web client is generated from `api/` (`just web-gen`); a deterministic fake daemon serves

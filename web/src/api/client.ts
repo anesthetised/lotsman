@@ -3,7 +3,7 @@
 // real panel endpoint otherwise. In a production build the condition is a
 // constant, so the fake and its simulation are dropped from the bundle.
 
-import { createClient, type Transport } from "@connectrpc/connect";
+import { createClient, type Interceptor, type Transport } from "@connectrpc/connect";
 import { createConnectTransport } from "@connectrpc/connect-web";
 import { HistoryService } from "../gen/lotsman/v1/history_pb";
 import { StatusService } from "../gen/lotsman/v1/status_pb";
@@ -22,8 +22,27 @@ const transport: Transport = fakeAuth
 export const api = {
   status: createClient(StatusService, transport),
   history: createClient(HistoryService, transport),
-  self: createClient(UserSelfService, transport),
 };
+
+/**
+ * The user page's client. Every call carries the link from the page's
+ * address, `/u/<token>`, as `Authorization: Bearer <token>`; the panel
+ * resolves it to the user and never forwards the header. A header rather
+ * than a cookie: no other site can make the browser send it. The fake
+ * ignores it.
+ */
+export function selfApi(token: string) {
+  const linked = fakeAuth ? transport : createConnectTransport({ baseUrl: "/api", interceptors: [withLink(token)] });
+  return createClient(UserSelfService, linked);
+}
+
+/** Sends the user's link with every call. */
+export function withLink(token: string): Interceptor {
+  return (next) => (req) => {
+    req.header.set("Authorization", `Bearer ${token}`);
+    return next(req);
+  };
+}
 
 export const auth = createAuth({
   fetch: fakeAuth ? fakeAuth.fetch : (url, init) => fetch(url, init),

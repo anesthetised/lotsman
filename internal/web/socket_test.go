@@ -19,16 +19,19 @@ import (
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
 	"github.com/anesthetised/lotsman/internal/config"
 	"github.com/anesthetised/lotsman/internal/control"
+	"github.com/anesthetised/lotsman/internal/control/controltest"
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/traffic"
 )
 
 // fakeSource is a daemon with one upstream and one profile, which peers
-// use. The test never calls the connection and history services.
+// use. The test never calls the connection and history services. Its users
+// are nil unless a test sets them.
 type fakeSource struct {
 	control.ConnectionSource
 	control.HistorySource
+	*controltest.Users
 }
 
 func (fakeSource) Ready() <-chan struct{} {
@@ -49,7 +52,10 @@ func (fakeSource) DeleteProfile(string) error                  { return store.Er
 
 // daemonSocket serves the real control API, over a fake daemon, on a unix
 // socket, as lotsman serve does.
-func daemonSocket(t *testing.T) string {
+func daemonSocket(t *testing.T) string { return usersSocket(t, nil) }
+
+// usersSocket is daemonSocket with users.
+func usersSocket(t *testing.T, users *controltest.Users) string {
 	t.Helper()
 	// t.TempDir is too long for sun_path on macOS.
 	dir, err := os.MkdirTemp("/tmp", "lw")
@@ -64,7 +70,7 @@ func daemonSocket(t *testing.T) string {
 	}
 	ctx, stop := context.WithCancel(context.Background())
 	served := make(chan error, 1)
-	go func() { served <- control.Serve(ctx, ln, fakeSource{}) }()
+	go func() { served <- control.Serve(ctx, ln, fakeSource{Users: users}) }()
 	t.Cleanup(func() { stop(); <-served })
 	return path
 }

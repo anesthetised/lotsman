@@ -346,6 +346,24 @@ func TestMetricsListen(t *testing.T) {
 	}
 }
 
+func TestUsersMaxDevices(t *testing.T) {
+	for _, tc := range []struct {
+		extra string
+		want  int
+		ok    bool
+	}{
+		{"", DefaultMaxDevices, true},
+		{"users: {max_devices: 2}\n", 2, true},
+		{"users: {max_devices: 0}\n", 0, true}, // users add no devices
+		{"users: {max_devices: -1}\n", 0, false},
+	} {
+		cfg, err := Parse([]byte(minimal + tc.extra))
+		if (err == nil) != tc.ok || (tc.ok && cfg.Users.MaxDevices != tc.want) {
+			t.Errorf("%q: %+v, %v; want %d", tc.extra, cfg, err, tc.want)
+		}
+	}
+}
+
 func TestInterfaceName(t *testing.T) {
 	if got := (Upstream{Name: "ac-nl"}).InterfaceName(); got != "lm-up-ac-nl" || len(got) > 15 {
 		t.Errorf("InterfaceName = %q", got)

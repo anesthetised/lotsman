@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -16,10 +17,12 @@ import (
 	"github.com/anesthetised/lotsman/internal/web"
 )
 
-// newAuthenticator decides who may call operator and user RPCs: the
-// operators' passkey sessions. Integration tests replace it in their own
-// binary only.
-var newAuthenticator = func(operators *web.OperatorAuth) web.Authenticator { return operators }
+// newAuthenticator decides who may call operator and user RPCs: operators
+// by their passkey sessions, users by their links, which the daemon
+// resolves. Integration tests replace it in their own binary only.
+var newAuthenticator = func(operators *web.OperatorAuth, daemon http.RoundTripper) web.Authenticator {
+	return web.WithLinks(operators, web.NewLinks(web.DaemonResolver(daemon)))
+}
 
 func defaultWebConfigPath() string {
 	if p := os.Getenv("LOTSMAN_WEB_CONFIG"); p != "" {
@@ -54,9 +57,10 @@ func runWeb(ctx context.Context, configPath string, level slog.Level) error {
 	if err != nil {
 		return err
 	}
+	daemon := web.DaemonTransport(cfg.Socket)
 	h := web.New(web.Deps{
-		Config: cfg, Auth: newAuthenticator(operators), SignIn: operators,
-		Daemon: web.DaemonTransport(cfg.Socket), UI: web.Dist(), Log: log,
+		Config: cfg, Auth: newAuthenticator(operators, daemon), SignIn: operators,
+		Daemon: daemon, UI: web.Dist(), Log: log,
 	})
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

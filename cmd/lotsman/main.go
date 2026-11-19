@@ -38,6 +38,9 @@ Commands:
   user list                   list users, devices and profiles
   user rm NAME [-device D] [-profile P]
                               remove one config, every config of a device, or the whole user
+  user link NAME [-url URL] [-revoke]
+                              print a new link to NAME's page in the web panel (the old one
+                              stops working), or end their link
   upstream status             show upstream health as last written by the daemon
   web                         run the web panel (as the lotsman-web user)
   web enroll                  print a one-time link that enrolls an operator's passkey
@@ -110,6 +113,8 @@ func run(args []string) error {
 		return userList(*configPath)
 	case "user rm":
 		return userRemove(*configPath, rest)
+	case "user link":
+		return userLink(*configPath, rest)
 	case "profile list":
 		return profileList(*configPath)
 	case "profile add", "profile set":

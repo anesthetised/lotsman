@@ -54,7 +54,7 @@ const (
 var (
 	errNoSession      = errors.New("not signed in")
 	errSessionExpired = errors.New("the session has expired; sign in again")
-	errNoUserLinks    = errors.New("user links are not available yet")
+	errNoUserLink     = errors.New("no user link")
 )
 
 // OperatorAuth signs operators in with passkeys (WebAuthn) and keeps their
@@ -128,8 +128,9 @@ func (a *OperatorAuth) Operator(r *http.Request) error {
 	return err
 }
 
-// User refuses everyone until user links (#134) land.
-func (a *OperatorAuth) User(*http.Request) (string, error) { return "", errNoUserLinks }
+// User refuses everyone: users sign in by their links, which WithLinks
+// adds.
+func (a *OperatorAuth) User(*http.Request) (string, error) { return "", errNoUserLink }
 
 // passkey is an operator: the webauthn.User of one credential.
 type passkey struct {

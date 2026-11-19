@@ -81,3 +81,22 @@ func TestSelect(t *testing.T) {
 		})
 	}
 }
+
+func TestAllows(t *testing.T) {
+	nl := config.Upstream{Name: "nl", Geo: "NL", Provider: "rs", Tags: []string{"eu"}}
+	us := config.Upstream{Name: "us", Geo: "US", Provider: "rs"}
+	for _, tc := range []struct {
+		prefer []config.Match
+		nl, us bool
+	}{
+		{nil, true, true}, // no tiers: any upstream
+		{[]config.Match{{Geo: "NL"}}, true, false},
+		{[]config.Match{{Tag: "eu"}, {Geo: "US"}}, true, true},
+		{[]config.Match{{Geo: "DE"}}, false, false},
+	} {
+		p := config.Profile{Name: "p", Prefer: tc.prefer}
+		if Allows(p, nl) != tc.nl || Allows(p, us) != tc.us {
+			t.Errorf("prefer %v: nl %v us %v, want %v %v", tc.prefer, Allows(p, nl), Allows(p, us), tc.nl, tc.us)
+		}
+	}
+}
