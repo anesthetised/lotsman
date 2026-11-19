@@ -7,6 +7,13 @@ import { expect, test } from "./fixtures";
 const link = "/u#q2V8Zp0nY3xW_4b-Lk9sTq1RmA7cJd5eHf6gUi0oPzE";
 const open = (token: string) => `/u#${token}`;
 
+/** The new-device form, opened first when the user has devices and it waits behind its button. */
+async function addForm(page: Page) {
+  const button = page.getByRole("button", { name: "Add a device" });
+  if (await button.isVisible()) await button.click();
+  return page.getByRole("region", { name: "New device" });
+}
+
 /** A device's card on the user page. */
 const card = (page: Page, device: string) => page.locator("#devices ~ ul > li").filter({ has: page.getByRole("heading", { name: device, exact: true }) });
 
@@ -22,12 +29,13 @@ test("the user page shows live speed, devices, their exits now and the exits in 
   await expect(card(page, "phone")).toContainText("Now: Latvia · provider-a");
   await expect(card(page, "tv")).toContainText("Now: Latvia · provider-b");
 
-  // Only the exits the user's devices use, by country and provider, each with its 7-day availability and latency.
+  // Every allowed exit, by country and provider, each with its 7-day availability, latency and the devices using it.
   const exits = page.getByRole("region", { name: "Exits" });
-  await expect(exits.getByRole("listitem")).toHaveCount(2);
+  await expect(exits.getByRole("listitem")).toHaveCount(5);
   await expect(exits.getByRole("img", { name: /^Availability of Latvia · provider-a over 7 days: \d/ })).toBeVisible();
   await expect(exits.getByRole("img", { name: /^Availability of Latvia · provider-b over 7 days: \d/ })).toBeVisible();
   await expect(exits).toContainText("Used by phone, laptop");
+  await expect(exits.getByRole("listitem").filter({ hasText: "Albania" })).toContainText("No device uses it now");
   await expect(exits).toContainText("Latency:");
   await expect(exits).not.toContainText("lv-1"); // never the upstream's name
 
@@ -135,10 +143,14 @@ test("the fastest mode, providers, and the strict switch", async ({ page }) => {
 
 test("adding a device shows its config and QR code at once, with the route chosen", async ({ page }) => {
   await page.goto(link);
-  const add = page.getByRole("region", { name: "New device" });
+  // With devices there, the form waits behind its button.
+  await expect(page.getByRole("region", { name: "New device" })).toHaveCount(0);
+  const add = await addForm(page);
   await add.getByLabel("Name").fill("tablet");
-  await expect(add.getByRole("button", { name: "Any, fastest", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await add.getByRole("button", { name: /^Same as “phone” Latvia → Netherlands$/ }).click();
+  // The route starts as any exit, the fastest; this one is Latvia only.
+  await expect(add.getByRole("button", { name: "Fastest" })).toHaveAttribute("aria-pressed", "true");
+  await add.getByRole("button", { name: "In order" }).click();
+  for (const country of ["Albania", "Germany", "Netherlands"]) await add.getByRole("switch", { name: `Use ${country}` }).click();
   await add.getByRole("button", { name: "Create" }).click();
 
   const issued = page.getByRole("region", { name: "tablet added" });
@@ -146,9 +158,10 @@ test("adding a device shows its config and QR code at once, with the route chose
   await expect(issued.getByRole("img", { name: "QR code of the config for tablet" })).toBeVisible();
   await expect(issued.getByRole("heading")).toBeFocused();
   await expect(page.locator("#devices ~ ul > li > div h3")).toHaveText(["phone", "laptop", "tv", "tablet"]);
-  await expect(add.getByLabel("Name")).toHaveValue("");
+  await expect(add).toHaveCount(0); // closed again
+  await expect(page.getByRole("button", { name: "Add a device" })).toBeVisible();
   const tablet = card(page, "tablet");
-  await expect(tablet.getByRole("button", { name: "Latvia, 1 of 2" })).toBeVisible();
+  await expect(tablet.getByRole("button", { name: "Latvia, 1 of 1" })).toBeVisible();
   await expect(tablet).toContainText("Now: Latvia · provider-a");
 
   const [download] = await Promise.all([page.waitForEvent("download"), issued.getByRole("button", { name: "Download .conf" }).click()]);
@@ -173,8 +186,8 @@ test("removing a device asks first", async ({ page }) => {
   await page.getByRole("dialog", { name: "Remove tv?" }).getByRole("button", { name: "Remove device" }).click();
   await expect(dialog).toBeHidden();
   await expect(devices).toHaveText(["phone", "laptop"]);
-  // Its exit is no longer used by anyone of ours.
-  await expect(page.getByRole("region", { name: "Exits" }).getByRole("listitem")).toHaveCount(1);
+  // Its exit stays listed, now used by none of ours.
+  await expect(page.getByRole("region", { name: "Exits" }).getByRole("listitem").filter({ hasText: "Latvia · provider-b" })).toContainText("No device uses it now");
 });
 
 test("a blocked device says so, and turning on another country lifts it", async ({ page }) => {
@@ -205,7 +218,7 @@ test("a user whose routes the operator sets sees them read-only", async ({ page 
   await expect(phone.getByRole("switch")).toHaveCount(0);
   await expect(phone.getByRole("button", { name: "Apply" })).toHaveCount(0);
   // A new device gets the default route: no choice to make.
-  await expect(page.getByRole("region", { name: "New device" }).getByRole("group")).toHaveCount(0);
+  await expect((await addForm(page)).getByRole("group")).toHaveCount(0);
   // Only his two exits exist for him.
   await expect(card(page, "laptop").getByRole("list", { name: "Countries" }).getByRole("listitem")).toHaveCount(2);
 });
@@ -214,10 +227,12 @@ test("the device limit is explained, and removing a device lifts it", async ({ p
   await page.goto(link);
   const add = page.getByRole("region", { name: "New device" });
   for (const name of ["d4", "d5"]) {
+    await addForm(page);
     await add.getByLabel("Name").fill(name);
     await add.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("region", { name: `${name} added` })).toBeVisible();
   }
+  await addForm(page);
   await add.getByLabel("Name").fill("d6");
   await add.getByRole("button", { name: "Create" }).click();
   await expect(add.getByRole("alert")).toHaveText("You already have the most devices allowed (5). Remove one first, or ask the operator for more.");
@@ -231,7 +246,7 @@ test("the device limit is explained, and removing a device lifts it", async ({ p
 
 test("a user whose adding is turned off is told so", async ({ page }) => {
   await page.goto(open(FAKE_LINKS.noAdding));
-  const add = page.getByRole("region", { name: "New device" });
+  const add = await addForm(page);
   await add.getByLabel("Name").fill("tablet");
   await add.getByRole("button", { name: "Create" }).click();
   await expect(add.getByRole("alert")).toHaveText("Adding devices is turned off. Ask the operator.");
@@ -246,6 +261,7 @@ test("too many additions are told apart from the device limit", async ({ page })
   const add = page.getByRole("region", { name: "New device" });
   // The fake allows ten additions at once; adding and removing the same device keeps the limit out of the way.
   for (let i = 0; i < 10; i++) {
+    await addForm(page);
     await add.getByLabel("Name").fill("loop");
     await add.getByRole("button", { name: "Create" }).click();
     await expect(page.getByRole("region", { name: "loop added" })).toBeVisible();
@@ -254,6 +270,7 @@ test("too many additions are told apart from the device limit", async ({ page })
     await page.getByRole("dialog").getByRole("button", { name: "Remove device" }).click();
     await expect(page.getByRole("button", { name: "Remove loop" })).toHaveCount(0);
   }
+  await addForm(page);
   await add.getByLabel("Name").fill("loop");
   await add.getByRole("button", { name: "Create" }).click();
   await expect(add.getByRole("alert")).toHaveText("You added too many devices lately. Try again in 6 min.");
@@ -319,7 +336,7 @@ test("the link stays in the address for bookmarks and nowhere else", async ({ pa
   await page.goto(link);
   await page.getByRole("button", { name: "Config and QR code phone" }).click();
   await expect(page.getByRole("img", { name: /^QR code/ })).toBeVisible();
-  await page.getByLabel("Name").fill("tablet");
+  await (await addForm(page)).getByLabel("Name").fill("tablet");
   await page.getByRole("button", { name: "Create" }).click();
   await expect(page.getByRole("region", { name: "tablet added" })).toBeVisible();
 

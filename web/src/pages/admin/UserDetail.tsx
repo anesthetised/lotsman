@@ -15,10 +15,10 @@ import { useConsoleI18n } from "../../i18n/console";
 import { buttonClass } from "../../ui/button";
 import { Dialog } from "../../ui/Dialog";
 import { QrCode } from "../../ui/QrCode";
-import { Chip, Segmented, SwitchField } from "../../ui/Toggles";
+import { Chip, SwitchField } from "../../ui/Toggles";
 import { LiveError } from "../LiveError";
 import { DEFAULT_ROUTE, routeSummary } from "../route";
-import { RouteEditor } from "../RouteEditor";
+import { createNewRoute, RouteEditor, RouteFields } from "../RouteEditor";
 import { ApiError, errorMessage } from "./ApiError";
 import { Confirm } from "./Confirm";
 import { configFileName, download, userLink } from "./devices";
@@ -80,7 +80,7 @@ function UserView(props: { user: User; snapshot: StatusSnapshot; onChanged: () =
         <Show when={u().created}>{(created) => <span class="text-xs text-muted">{c.users.since(fmt.dateTime(timestampDate(created())))}</span>}</Show>
         <span class="text-xs">{u().hasLink ? c.users.hasLink : <span class="text-muted">{c.users.noLink}</span>}</span>
         <div class="ml-auto flex flex-wrap gap-2">
-          <AddDevice user={u()} onAdded={props.onChanged} />
+          <AddDevice user={u()} exits={exits()} onAdded={props.onChanged} />
           <IssueLink user={u()} onIssued={props.onChanged} />
           <Show when={u().hasLink}>
             <Confirm
@@ -293,12 +293,12 @@ function RightsBlock(props: { user: User; rights: Rights; upstreams: readonly Up
   );
 }
 
-/** Adds a device for the user, with the default route or that of a device they have, and then shows its config. */
-function AddDevice(props: { user: User; onAdded: () => void }) {
-  const { t, fmt, c } = useConsoleI18n();
+/** Adds a device for the user, with the default route unless the form sets another, and then shows its config. */
+function AddDevice(props: { user: User; exits: readonly UpstreamStatus[]; onAdded: () => void }) {
+  const { t, c } = useConsoleI18n();
   const [open, setOpen] = createSignal(false);
   const [device, setDevice] = createSignal("");
-  const [like, setLike] = createSignal("");
+  const route = createNewRoute(() => props.exits, () => true);
   const [busy, setBusy] = createSignal(false);
   const [error, setError] = createSignal<unknown>();
   const [added, setAdded] = createSignal<{ config: string; file: string; title: string }>();
@@ -307,7 +307,7 @@ function AddDevice(props: { user: User; onAdded: () => void }) {
     setOpen(next);
     if (!next) return;
     setDevice("");
-    setLike("");
+    route.reset();
     setError(undefined);
     setAdded(undefined);
   };
@@ -316,9 +316,8 @@ function AddDevice(props: { user: User; onAdded: () => void }) {
     setBusy(true);
     setError(undefined);
     const name = device().trim();
-    const route = props.user.devices.find((d) => d.name === like())?.route;
     try {
-      const res = await admin.users.addDevice({ user: props.user.name, device: name, route });
+      const res = await admin.users.addDevice({ user: props.user.name, device: name, route: route.route() });
       setAdded({ config: res.config, file: configFileName(props.user.name, name), title: `${props.user.name}/${name}` });
       props.onAdded();
     } catch (err) {
@@ -360,28 +359,12 @@ function AddDevice(props: { user: User; onAdded: () => void }) {
                 {c.users.deviceHint}
               </p>
             </div>
-            <Show when={props.user.devices.length > 0}>
-              <div class="space-y-1">
-                <p class="font-medium">{t.route.choice}</p>
-                <Segmented
-                  label={t.route.choice}
-                  value={props.user.devices.some((d) => d.name === like()) ? like() : ""}
-                  options={[
-                    { value: "", label: t.route.summary.any },
-                    ...props.user.devices.map((d) => ({
-                      value: d.name,
-                      label: (
-                        <span class="flex flex-col">
-                          <span>{t.route.sameAs(d.name)}</span>
-                          <span class="text-xs font-normal text-muted">{routeSummary(d.route ?? DEFAULT_ROUTE, t, fmt.country)}</span>
-                        </span>
-                      ),
-                    })),
-                  ]}
-                  onChange={setLike}
-                />
+            <Show when={route.offer().size > 0}>
+              <fieldset class="space-y-3">
+                <legend class="mb-1 font-medium">{t.route.title}</legend>
+                <RouteFields draft={route.draft()} setDraft={route.setDraft} offer={route.offer()} exits={props.exits} />
                 <p class="text-xs text-muted">{t.route.later}</p>
-              </div>
+              </fieldset>
             </Show>
             <ApiError error={error()} />
             <div class="flex justify-end gap-2">

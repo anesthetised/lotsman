@@ -216,6 +216,10 @@ All notable changes to Lotsman are documented here. The format follows
   timer (three times that) overflows and wipes every session's keys at once (#76).
 
 ### Changed
+- Web panel: a new device's route is set in the same controls as an existing device's, instead
+  of copying another device's route; with devices already there the form waits behind an "Add a
+  device" button. The user page's Exits section lists every allowed exit, saying which devices use
+  it now or that none does.
 - **Breaking:** per-device routes and user rights replace profiles and upstream tags (#161). A
   device is one tunnel with its own route: countries in order (the first with an available exit
   wins) or the fastest of them, each country optionally narrowed to some providers, and
