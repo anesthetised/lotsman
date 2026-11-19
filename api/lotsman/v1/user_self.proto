@@ -1,9 +1,10 @@
-// The lotsman.v1 control API, agreed with the user on 2026-11-19: user self-service (#134).
+// The lotsman.v1 control API: user self-service (#134).
 // See status.proto for where it is served.
 syntax = "proto3";
 
 package lotsman.v1;
 
+import "lotsman/v1/history.proto";
 import "lotsman/v1/profile.proto";
 import "lotsman/v1/status.proto";
 import "lotsman/v1/user.proto";
@@ -15,11 +16,20 @@ option go_package = "github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1";
 service UserSelfService {
   rpc ResolveLink(ResolveLinkRequest) returns (ResolveLinkResponse); // panel only
   rpc Get(GetSelfRequest) returns (User);
-  rpc Watch(WatchStatusRequest) returns (stream StatusSnapshot); // own peers, their upstreams, no connections
+  // Own peers and the upstreams their profiles may use. Other users show
+  // through upstreams, so for those the daemon leaves traffic, routed and
+  // active unset, and the snapshot's total covers only the user's own peers.
+  rpc Watch(WatchStatusRequest) returns (stream StatusSnapshot);
   rpc AddDevice(AddSelfDeviceRequest) returns (DeviceConfig); // max_devices, rate limit
   rpc RemoveDevice(RemoveSelfDeviceRequest) returns (RemoveDeviceResponse);
   rpc GetConfig(GetConfigRequest) returns (DeviceConfig); // own peers only
   rpc ListProfiles(ListProfilesRequest) returns (ListProfilesResponse); // names only, no warnings
+  // History of an upstream the user's profiles may use: up_ratio and latency
+  // only, no bytes. Any other upstream is NotFound.
+  rpc UpstreamHistory(HistoryRequest) returns (HistoryResponse);
+  // History of one of the user's own peers (name = peer_id). Any other peer
+  // is NotFound.
+  rpc PeerHistory(HistoryRequest) returns (HistoryResponse);
 }
 
 message ResolveLinkRequest {
