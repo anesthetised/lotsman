@@ -6,6 +6,13 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Web panel frontend scaffold in `web/` (#135): Solid 2, @solidjs/router, Kobalte 2 alpha (patched
+  for a dismiss bug, behind `web/src/ui`), Tailwind 4, uPlot, RU and EN, light and dark themes. The
+  Connect-web client is generated from `api/` (`just web-gen`); a deterministic fake daemon serves
+  development and tests. Routes `/admin` and `/u/:token`. `just web-install|web-dev|web-build|web-test`
+  and a `web` CI job (frozen lockfile, typecheck, Vitest, build, codegen check, Playwright smoke under
+  the production CSP). The build goes to `internal/web/dist`, which only tracks `.gitkeep`. Go
+  builds need no Node.
 - Control API for the web panel: `lotsman serve` serves `lotsman.v1` over Connect on the unix socket
   `/run/lotsman/control.sock` (`0660 root:lotsman-web`; root-only with a warning when the group is
   missing). The socket's peer is trusted, so its file mode is the boundary. It is created after the
