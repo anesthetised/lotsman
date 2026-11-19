@@ -95,8 +95,6 @@ export const en = {
     noExits: "No exits are available.",
     now: "Now",
     blocked: "traffic blocked",
-    choice: "Route",
-    sameAs: (device: string) => `Same as “${device}”`,
     later: "You can change the route later; the config does not change.",
     summary: {
       any: "Any, fastest",
@@ -169,6 +167,8 @@ export const en = {
       off: "Adding devices is turned off. Ask the operator.",
       submit: "Create",
       busy: "Creating…",
+      open: "Add a device",
+      cancel: "Cancel",
     },
     history: {
       title: "Your traffic",
@@ -181,7 +181,8 @@ export const en = {
       empty: "No traffic recorded yet.",
     },
     exits: "Exits",
-    exitsIntro: "The exits your devices use now.",
+    exitsIntro: "The exits you may use, and which of your devices go through them now.",
+    unused: "No device uses it now",
     usedBy: (devices: string) => `Used by ${devices}`,
     latency: "Latency",
     availabilityLabel: (name: string) => `Availability of ${name} over 7 days`,
