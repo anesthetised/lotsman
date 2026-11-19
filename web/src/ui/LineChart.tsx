@@ -31,6 +31,15 @@ export function LineChart(props: LineChartProps) {
   const clock = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   const hours = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" });
   const days = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" });
+  // uPlot keeps ticks 40 px apart by default, which crowds 12-hour labels
+  // such as "04:29:40 PM" into each other; leave room for the widest one.
+  const sample = new Date(2000, 11, 28, 23, 58, 58);
+  const space = (...formats: Intl.DateTimeFormat[]) => {
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) return 100;
+    ctx.font = "12px system-ui, sans-serif";
+    return Math.ceil(Math.max(...formats.map((f) => ctx.measureText(f.format(sample)).width))) + 24;
+  };
   let el!: HTMLDivElement;
   let plot: uPlot | undefined;
 
@@ -46,8 +55,8 @@ export function LineChart(props: LineChartProps) {
     // of day. Live: whole-second ticks in the user's clock format.
     const timeAxis: uPlot.Axis =
       props.axis === "date"
-        ? { values: (_u, ticks, _i, _space, incr) => ticks.map((s) => (incr >= 86_400 ? days : hours).format(s * 1000)) }
-        : { incrs: [1, 5, 10, 15, 30, 60, 120, 300, 600, 900], values: (_u, ticks) => ticks.map((s) => clock.format(s * 1000)) };
+        ? { space: space(hours, days), values: (_u, ticks, _i, _space, incr) => ticks.map((s) => (incr >= 86_400 ? days : hours).format(s * 1000)) }
+        : { space: space(clock), incrs: [1, 5, 10, 15, 30, 60, 120, 300, 600, 900], values: (_u, ticks) => ticks.map((s) => clock.format(s * 1000)) };
     return {
       width,
       height: props.height ?? 200,
