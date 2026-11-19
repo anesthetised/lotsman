@@ -13,6 +13,16 @@ All notable changes to Lotsman are documented here. The format follows
   a peer's or every peer's conntrack flows at once and then every `interval` (default and minimum
   1 s), each stream with its own rates, endpoints as `IP:port` (bare IP for ICMP); an unknown
   `peer_id` is `not_found`, a failed conntrack read `unavailable` (#131). No new dependency.
+- Availability and traffic history (#130): the daemon writes each upstream's up ratio and latency
+  and each upstream's and peer's bytes (down towards the client) once a minute, in one
+  transaction, into `lotsman.db` (migration 5; a backup of the old database is made as for any
+  migration), and serves them through `HistoryService.Upstream` and `.Peer` (name = upstream,
+  or `p_<id>`) as samples of a step: one minute for ranges within `history.minute_retention`
+  (default `168h`), one hour beyond; the requested `step` is rounded up to a multiple of that and
+  until at most 2000 samples come back. Minute rows fold into hour rows after `minute_retention`
+  and hour rows are dropped after `history.hour_retention` (default `2160h`), hourly, in one
+  transaction. A degraded upstream counts as not up. About 15 MiB for 5 upstreams and 50 peers
+  at the defaults (see the operations guide). No new dependency.
 - Web panel frontend scaffold in `web/` (#135): Solid 2, @solidjs/router, Kobalte 2 alpha (patched
   for a dismiss bug, behind `web/src/ui`), Tailwind 4, uPlot, RU and EN, light and dark themes. The
   Connect-web client is generated from `api/` (`just web-gen`); a deterministic fake daemon serves

@@ -603,6 +603,93 @@ and two upstreams takes about 0.2 ms, 85 % of it the downstream device's UAPI du
 upstreams. The static linux/amd64 binary grows by 24 KB (30,982,304 to 31,006,880 bytes); no new
 module.
 
+## History (#130)
+
+`HistoryService.Upstream` and `.Peer` return an upstream's availability and latency and an upstream's
+or peer's traffic over a time range, as samples of a step. The daemon writes them itself, in
+`lotsman.db`, so the panel never opens it. Peers are keyed by the store's row id, which
+`AUTOINCREMENT` never reuses (migration 4); the API name is `p_<id>` (`control.PeerID`).
+
+**Writer.** `internal/history`: a `Recorder` (pure: time and readings in, finished minutes out) behind
+a `Writer` that reads the daemon once a second, next to the traffic sampler: the upstreams' health
+(`Daemon.UpstreamHealth`) and the sampler's latest totals (`Daemon.Traffic`). Each reading adds
+to the current wall-clock minute; the first reading of the next minute makes the writer store the
+finished one, in one transaction (`Store.AddSamples`): about 55 small rows for 5 upstreams and 50 peers.
+
+- Bytes are the growth of the sampler's totals between readings, summed, so they are bytes per
+  minute, not counters, and a skipped or doubled reading loses nothing. The first sample the
+  recorder sees is a baseline, not traffic, so a recorder started against totals that already
+  held bytes does not show them as one minute's spike; a daemon restart starts the sampler and the
+  recorder from zero together. A series that first appears later counts in full, as in the
+  sampler. A total that goes back counts as a restart (no unsigned underflow). A series missing
+  from a sample, such as an upstream whose interface is recreated, keeps its baseline and
+  returns with a plain delta; a removed peer's bytes up to its last reading are in the minute it
+  left.
+- Every upstream the daemon runs and every peer in the sample gets a row each minute, idle or
+  not, so a missing minute means the daemon was not running. The minute being folded when the
+  daemon stops is not written; a restart loses under a minute. A failed write loses its minute
+  and is logged.
+- `up_ratio` is the share of the minute's readings that found the upstream up, and the latency
+  the mean of the latest probe time over those. **Degraded counts as not up** (as does unknown,
+  until the first probe): a degraded upstream handshakes but carries nothing, which the transfer
+  probe exists to catch, and calling it up would hide the outages users feel. The alternative,
+  counting it as up, matches the tracker's `State` but turns the chart green exactly when it is
+  not. A reading is a second, so ratios are exact to 1/60.
+- `lotsman_upstream_up`'s own definition is unchanged; only the history uses this one.
+
+**Schema** (migration 5): `upstream_samples(upstream, ts, up_ratio, rtt_ms, down_bytes, up_bytes)`
+and `peer_samples(peer_id, ts, down_bytes, up_bytes)` for minutes, and the same two with
+`_hour_` in the name (`upstream_hour_samples`, `peer_hour_samples`) for hours; `ts` is the unix
+second a period starts at; `rtt_ms` is NULL when the upstream was never up in the period. Every
+table is `WITHOUT ROWID` with the primary key `(series, ts)`, so a range of one series is one
+contiguous scan and no second index is kept.
+
+| Option | For | Against |
+|---|---|---|
+| **A. A table per resolution (chosen)** | No resolution column in every row; retention and the fold are whole-table range deletes; a query reads minute and hour rows in one `UNION ALL` without caring which is which | Four tables, two copies of each statement |
+| B. One table with a `res` column in the key | Two tables, one set of statements | A byte in every row; the fold updates a table it also reads; every query needs `res` in its filter |
+| C. Dense peer rows (chosen) against rows only where there was traffic | A gap always means "daemon not running"; the client never guesses whether a missing minute was idle | About 50 rows a minute of zeros while peers are offline: tens of MB over 90 days (see below); a sparse table would be smaller |
+| D. `up_ratio` as seconds up and seconds seen | Exact weighting of partial minutes | Two columns, and the fold and the query need both; partial minutes are a restart's first and last |
+
+**Compaction.** `Store.Compact`, run at start and then hourly by the writer: in one transaction,
+minute rows that started before `floor_hour(now − minute_retention)` fold into hour rows (bytes
+add, `up_ratio` and latency average) and are deleted, and hour rows that started before
+`now − hour_retention` are deleted. Whole hours only, so no hour is ever half minutes and half
+folded, and a query that mixes both counts every minute once. A second run finds nothing to do, and a
+crash leaves either the old rows or the new ones. A minute that turns up after its hour was folded
+(a clock step) merges into the hour row, adding the bytes and averaging the ratios. The retention is
+read at each run, so a reload applies. A removed peer's rows are not deleted with it; they age
+out, and are not served (the peer is unknown to `Peer`).
+
+**Queries.** `history.Resolve` plans a range at `now`: the finest step kept is one minute while the
+range starts within `minute_retention` of now, and an hour otherwise (so a range that reaches
+past it is hours throughout, including the recent part, summed from minute rows). The step the
+client asks for is rounded up to a multiple of that, and again until the range fits in 2000
+samples; `from` and `to` widen to whole steps, so every sample covers a full step, and `to` unset
+is now. `from` unset, `to` not after `from` or a negative step is `InvalidArgument`
+(`history.ErrRange`); an upstream the daemon does not run or a peer the store does not have is
+`NotFound`, as is a name that is no `p_<digits>`. A step sums the bytes and takes the mean of the
+up ratio and latency over the rows in it, an hour row weighing sixty minutes. A step without a
+row is left out of the response. The current minute is not stored yet, so a chart's last point
+is up to a minute and a bit old.
+
+The query is a Go API, `Daemon.UpstreamHistory(name, history.Range)` and `Daemon.PeerHistory(id,
+history.Range)`; the handlers in `internal/control/history.go` only map it, and the user-scoped
+history RPCs of #134 call the same two after checking ownership.
+
+**Cost.** Measured on an Apple M1 Max with a throwaway test, 90 days of 5 upstreams and 50 peers (random byte
+counts of the size a busy peer moves, so the integers are not shorter than in practice), filled
+a minute at a time with hourly compactions: 14.4 MiB of live pages (3,681 pages of 4 KiB; 1.3 MiB
+upstream minutes, 0.3 MiB upstream hours, 10.5 MiB peer minutes, 2.2 MiB peer hours), 18.9 MiB on
+disk counting the WAL before its checkpoint. That is about 21 bytes a peer minute row and 22 a peer
+hour row. A peer's week by minute (1,680 samples after the 2000 cap's step of 6 min) takes 7 ms to
+query, a day by the minute 2 ms, 90 days by 2 h 7 ms. A compaction that folds an hour averaged
+107 ms (up to 0.7 s) and one with nothing to fold, which is the scan of the minute tables, 73 ms:
+an hourly cost of about 0.003 % of a core on that machine, and the minute writer waits behind it for
+at most that long. A 1 vCPU VPS is slower by a small factor, not by an order of magnitude. A
+minute's transaction is about 55 rows; the writer's own work is a map update per series per
+second.
+
 ## Open items
 
 - [x] The official Amnezia client (macOS) connects to a Lotsman downstream device on a real host

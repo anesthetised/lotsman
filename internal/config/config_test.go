@@ -425,3 +425,23 @@ func TestTransfer(t *testing.T) {
 		})
 	}
 }
+
+func TestHistoryRetention(t *testing.T) {
+	cfg, err := Parse([]byte(minimal))
+	if err != nil || cfg.History.MinuteRetention != 7*24*time.Hour || cfg.History.HourRetention != 90*24*time.Hour {
+		t.Fatalf("defaults = %+v, %v", cfg.History, err)
+	}
+	// One key keeps the other's default.
+	cfg, err = Parse([]byte(minimal + "history: {minute_retention: 48h}\n"))
+	if err != nil || cfg.History.MinuteRetention != 48*time.Hour || cfg.History.HourRetention != 90*24*time.Hour {
+		t.Errorf("minute_retention only = %+v, %v", cfg.History, err)
+	}
+	for name, yaml := range map[string]string{
+		"history.minute_retention": "history: {minute_retention: 30m}\n",
+		"history.hour_retention":   "history: {minute_retention: 240h, hour_retention: 24h}\n",
+	} {
+		if _, err := Parse([]byte(minimal + yaml)); err == nil || !strings.Contains(err.Error(), name) {
+			t.Errorf("%s: err = %v", yaml, err)
+		}
+	}
+}

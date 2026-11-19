@@ -25,8 +25,11 @@ import (
 )
 
 // fakeSource is a daemon with one upstream and one profile, which peers
-// use. The test never calls the connection service.
-type fakeSource struct{ control.ConnectionSource }
+// use. The test never calls the connection and history services.
+type fakeSource struct {
+	control.ConnectionSource
+	control.HistorySource
+}
 
 func (fakeSource) Ready() <-chan struct{} {
 	ready := make(chan struct{})

@@ -131,6 +131,7 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `state_dir` | Server identity, SQLite database, pid, status and `serve.lock` files, cached dynamic Outline keys. |
 | `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, `outline` or `vless`), `conf` path (the provider's AmneziaWG config, for `outline` a file with the access key or its `ssconf://` URL, for `vless` a file with the `vless://` link), free-form `geo` and `provider` labels, `tags`: a list of free-form groups (lowercase letters, digits, `-`; no duplicates), and for the proxy kinds `outline` and `vless` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams) and [VLESS upstreams](#vless-upstreams)). |
 | `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline and VLESS upstream; default `1.1.1.1:53`), `down_after`, `up_after`, and the optional `transfer` block (off when absent; see [Throttled upstreams](#throttled-upstreams-transfer-probe)). |
+| `history` | `minute_retention` (default `168h`, 7 days; at least `1h`) and `hour_retention` (default `2160h`, 90 days; not shorter than `minute_retention`): how long the [history](#history) keeps samples of a minute and of an hour. Go durations, so hours (`168h`), not days. Applies on reload. |
 
 `listen` binds exactly the configured numeric address; hostnames and an omitted
 host are unsupported. An occupied port, unavailable family, or unassigned address
@@ -629,6 +630,8 @@ group and restart. The unit provides `/run/lotsman` (`RuntimeDirectory=lotsman`)
 - `ConnectionService.Watch`: [live connections](#live-connections), for one `peer_id` or every
   peer. Errors: `not_found` for an unknown `peer_id`, `unavailable` when the kernel's table cannot
   be read.
+- `HistoryService` (`Upstream`, `Peer`): the [history](#history) of an upstream or a `peer_id`.
+  Errors: `invalid_argument` for a bad range or step, `not_found` for an unknown name.
 
 Every other RPC returns `unimplemented`. Self-service RPCs act for the user named in the `Lotsman-User` request header,
 which only the [web panel](#web-panel) sets.
@@ -777,6 +780,53 @@ scrape_configs:
     static_configs:
       - targets: ["10.77.0.1:9100"]
 ```
+
+## History
+
+The daemon records each upstream's availability and latency and each upstream's and peer's traffic
+a minute at a time in `lotsman.db`, for the web panel's charts (`HistoryService`). Nothing to enable.
+
+```yaml
+history:
+  minute_retention: 168h   # samples of a minute: 7 days (default; at least 1h)
+  hour_retention: 2160h    # samples of an hour: 90 days (default; not shorter than the above)
+```
+
+Minute samples older than `minute_retention` are folded into hour samples (bytes added, availability
+and latency averaged) and hour samples older than `hour_retention` are deleted; both run at start and
+then every hour, and a reload with new values applies at the next run. The fold takes whole
+hours, so minute samples reach back up to an hour further than `minute_retention`.
+Shortening a retention drops history that no longer fits at the next run, without a way back
+except the pre-migration backups; lengthening it does not bring back what was dropped.
+
+- Traffic is bytes per period, down towards the client. An upstream's bytes are its `lm-up-<name>`
+  interface's, the same counters `StatusService.Watch` reports; a peer's are its tunnel's, encrypted, with the
+  AmneziaWG overhead.
+- The availability of an upstream is the share of the minute it was up, read once a second. A
+  degraded upstream (reachable, failing its transfer probes) counts as not up, as does one not yet
+  probed; latency is the mean over the time it was up. This is not `lotsman_upstream_up`, which
+  stays 1 while degraded.
+- A peer has a sample for every minute the daemon ran, idle or not; a gap is a time the daemon
+  was not running (a restart loses its last, unfinished minute). The current minute shows up in
+  the charts after it ends.
+- Removing a peer leaves its samples until they expire; they are no longer served. Removing an
+  upstream from the config does the same. Peer ids are never reused, so a new peer never inherits
+  a removed one's history.
+- A query returns at most 2000 samples: it asks for a step, the daemon rounds it up to a
+  multiple of one minute (ranges starting within `minute_retention`) or one hour (older), and
+  further until the range fits.
+
+**Disk.** 5 upstreams and 50 peers kept 7 days by the minute and 83 more by the hour take about
+**15 MiB** (14.4 MiB measured; up to about 19 MiB including the write-ahead log) once the hour
+samples are in, and the size is flat from then on: a peer costs about 0.24 MiB for its 90 days
+(21 bytes × 10,080 minute rows plus 22 bytes × 1,992 hour rows) and an upstream about 0.33 MiB.
+Scale linearly with `peers × (7 d × 1,440 + 83 d × 24)` rows for the defaults, which is the part that
+`minute_retention` drives: a 30-day `minute_retention` is about four times the minute share
+(roughly 50 MiB for the same gateway). The database lives in `state_dir`, so budget it there, and
+note that the pre-migration backups (`lotsman.db.v<N>-…bak`) are copies of the whole file. The
+first start of a version with history migrates the schema (to 5) and makes such a backup.
+Writing costs one short transaction a minute; compaction an hour's worth of folding, about
+0.1 s on a modern core (up to a second on a small VPS), once an hour.
 
 ## Live connections
 

@@ -34,6 +34,7 @@ type Source interface {
 	Traffic() traffic.Snapshot
 	ProfileSource
 	ConnectionSource
+	HistorySource
 }
 
 // NewServer registers every service of the API. An RPC whose issue has not
@@ -41,7 +42,7 @@ type Source interface {
 func NewServer(src Source) *connect.Server {
 	s := connect.NewServer()
 	lotsmanv1connect.RegisterStatusServiceHandler(s, statusService{src})
-	lotsmanv1connect.RegisterHistoryServiceHandler(s, lotsmanv1connect.UnimplementedHistoryServiceHandler{})
+	lotsmanv1connect.RegisterHistoryServiceHandler(s, historyService{src})
 	lotsmanv1connect.RegisterConnectionServiceHandler(s, connectionService{src, flows.Conntrack{}})
 	lotsmanv1connect.RegisterProfileServiceHandler(s, profileService{src})
 	lotsmanv1connect.RegisterUserServiceHandler(s, lotsmanv1connect.UnimplementedUserServiceHandler{})
