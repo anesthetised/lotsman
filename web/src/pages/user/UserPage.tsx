@@ -1,25 +1,23 @@
-// Placeholder user page behind the secret link `/u#<token>` (#137 builds the
-// real one): mobile-first cards with the live speed, the user's devices and
-// the 7-day availability of the exits they use.
-// The token is in the fragment, so the browser never sends it with the page
-// (see link.ts). Every call sends it to the panel, and only there, as
-// `Authorization: Bearer` (see selfApi); the panel resolves it and scopes
-// UserSelfService to that user.
+// The user page behind the secret link `/u#<token>`: mobile first, one
+// column on a phone and two on a wider screen. The token is in the fragment,
+// so the browser never sends it with the page (see link.ts). Every call sends
+// it to the panel, and only there, as `Authorization: Bearer` (see selfApi);
+// the panel resolves it and scopes UserSelfService to that user.
 
-import { timestampDate } from "@bufbuild/protobuf/wkt";
-import { createMemo, Errored, For, Loading, Show } from "solid-js";
+import { createMemo, createSignal, Errored, Loading, refresh, Show } from "solid-js";
 import { selfApi } from "../../api/client";
 import { linkToken } from "../../api/link";
 import { createLive, num } from "../../api/live";
-import type { PeerStatus, UpstreamStatus } from "../../gen/lotsman/v1/status_pb";
-import type { DevicePeer } from "../../gen/lotsman/v1/user_pb";
 import { useI18n } from "../../i18n";
-import { Sparkline } from "../../ui/Sparkline";
-import { StateBadge } from "../../ui/StateBadge";
-import { Availability } from "../Availability";
-import { LiveError } from "../LiveError";
+import { buttonClass } from "../../ui/button";
 import { SkipLink } from "../SkipLink";
-import { stateLabel, stateLevel } from "../upstream";
+import { AddDevice } from "./AddDevice";
+import { type Issued, type Outcome, UserProvider } from "./context";
+import { Devices, IssuedConfig } from "./Devices";
+import { failureOf, failureText, type Failure } from "./errors";
+import { Exits } from "./Exits";
+import { HowTo } from "./HowTo";
+import { History, Speed } from "./Traffic";
 
 export default function UserPage() {
   const { t } = useI18n();
@@ -28,17 +26,10 @@ export default function UserPage() {
   return (
     <div class="min-h-screen">
       <SkipLink />
-      <main id="main" class="mx-auto max-w-md space-y-4 px-4 py-6">
-        <Show
-          when={token}
-          fallback={
-            <p role="alert" class="rounded-md border border-bad p-3">
-              {t.user.badLink}
-            </p>
-          }
-        >
+      <main id="main" class="mx-auto max-w-5xl space-y-4 px-4 py-6">
+        <Show when={token} fallback={<Problem text={t.user.badLink} />}>
           {(token) => (
-            <Errored fallback={(error, reset) => <LiveError error={error()} retry={reset} />}>
+            <Errored fallback={(error, reset) => <FailureView failure={failureOf(error())} retry={reset} />}>
               <Loading fallback={<p class="text-muted">{t.common.connecting}</p>}>
                 <LiveUser token={token()} />
               </Loading>
@@ -50,104 +41,94 @@ export default function UserPage() {
   );
 }
 
+function Problem(props: { text: string }) {
+  return (
+    <p role="alert" class="rounded-md border border-bad bg-surface p-3">
+      {props.text}
+    </p>
+  );
+}
+
+/** A failure that stops the page: a dead link has no way out, anything else can be retried. */
+function FailureView(props: { failure: Failure; retry: () => void }) {
+  const { t } = useI18n();
+  return (
+    <div role="alert" class="space-y-3 rounded-md border border-bad bg-surface p-4">
+      <p>{failureText(t, props.failure)}</p>
+      <Show when={props.failure.kind !== "revoked"}>
+        <button type="button" class={[...buttonClass(), "min-h-11 px-4"]} onClick={() => props.retry()}>
+          {t.common.retry}
+        </button>
+      </Show>
+    </div>
+  );
+}
+
 function LiveUser(props: { token: string }) {
-  const { t, fmt } = useI18n();
+  const { t } = useI18n();
   const self = selfApi(props.token);
   const user = createMemo(() => self.get({}));
+  const profiles = createMemo(async () => (await self.listProfiles({})).profiles.map((p) => p.name));
   const snapshot = createLive(() => self.watch({}));
   const trend = createMemo<number[]>((prev = []) => [...prev, num(snapshot().total?.downRate)].slice(-60));
   const peers = createMemo(() => new Map(snapshot().peers.map((p) => [p.peerId, p])));
   const upstreams = createMemo(() => new Map(snapshot().upstreams.map((u) => [u.name, u])));
 
-  return (
-    <>
-      <h1 class="text-xl font-semibold">{t.user.title(user().name)}</h1>
+  const [issued, issue] = createSignal<Issued>();
+  const [busy, setBusy] = createSignal(false);
+  const [dead, setDead] = createSignal(false);
 
-      <section aria-labelledby="speed" class="rounded-xl border border-line bg-surface p-4">
-        <h2 id="speed" class="text-sm text-muted">
-          {t.user.speedNow}
-        </h2>
-        <dl class="mt-2 grid grid-cols-2 gap-2">
-          <div>
-            <dt class="text-xs text-muted">{t.traffic.down}</dt>
-            <dd class="text-2xl font-semibold tabular-nums">{fmt.rate(num(snapshot().total?.downRate))}</dd>
+  const mutate = async <T,>(task: () => Promise<T>): Promise<Outcome<T>> => {
+    setBusy(true);
+    try {
+      return { ok: true, value: await task() };
+    } catch (e) {
+      const failure = failureOf(e);
+      if (failure.kind === "revoked") setDead(true);
+      return { ok: false, failure };
+    } finally {
+      setBusy(false);
+      // Whatever happened, the devices may differ now: a change can stop halfway.
+      if (!dead()) refresh(user);
+    }
+  };
+
+  return (
+    <Show when={!dead()} fallback={<FailureView failure={{ kind: "revoked" }} retry={() => {}} />}>
+      <UserProvider
+        value={{
+          self,
+          user,
+          peer: (id) => peers().get(id),
+          upstream: (name) => upstreams().get(name),
+          profiles,
+          configs: new Map(),
+          issued,
+          issue,
+          busy,
+          mutate,
+        }}
+      >
+        <h1 class="text-2xl font-semibold">{t.user.title(user().name)}</h1>
+        <div class="grid gap-4 lg:grid-cols-2 lg:items-start lg:gap-6">
+          <div class="space-y-4">
+            <Speed snapshot={snapshot()} trend={trend()} />
+            <section aria-labelledby="devices" class="space-y-3">
+              <h2 id="devices" class="text-sm text-muted">
+                {t.user.devices}
+              </h2>
+              <IssuedConfig />
+              <Devices />
+              <AddDevice />
+            </section>
           </div>
-          <div>
-            <dt class="text-xs text-muted">{t.traffic.up}</dt>
-            <dd class="text-2xl font-semibold tabular-nums">{fmt.rate(num(snapshot().total?.upRate))}</dd>
+          <div class="space-y-4">
+            <History />
+            <Exits />
+            <HowTo />
           </div>
-        </dl>
-        <div class="mt-3">
-          <Sparkline values={trend()} label={t.user.speedTrend} size="h-10 w-full" />
         </div>
-      </section>
-
-      <section aria-labelledby="devices" class="space-y-2">
-        <h2 id="devices" class="text-sm text-muted">
-          {t.user.devices}
-        </h2>
-        <ul class="space-y-2">
-          <For each={user().devices} keyed={(d) => d.name}>
-            {(device) => (
-              <li class="rounded-xl border border-line bg-surface p-4">
-                <h3 class="font-medium">{device().name}</h3>
-                <ul class="mt-2 space-y-2">
-                  <For each={device().peers} keyed={(p) => p.peerId}>
-                    {(peer) => {
-                      const status = () => peers().get(peer().peerId);
-                      return <PeerLine peer={peer()} status={status()} upstream={upstreams().get(status()?.upstream ?? "")} />;
-                    }}
-                  </For>
-                </ul>
-              </li>
-            )}
-          </For>
-        </ul>
-      </section>
-
-      <section aria-labelledby="exits" class="space-y-2">
-        <h2 id="exits" class="text-sm text-muted">
-          {t.user.exits}
-        </h2>
-        <ul class="space-y-2">
-          <For each={snapshot().upstreams} keyed={(u) => u.name}>
-            {(u) => (
-              <li class="space-y-2 rounded-xl border border-line bg-surface p-4">
-                <div class="flex items-center justify-between gap-2">
-                  <span class="font-medium">{u().name}</span>
-                  <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />
-                </div>
-                <Availability name={u().name} label={t.user.availabilityLabel(u().name)} load={self.upstreamHistory} />
-              </li>
-            )}
-          </For>
-        </ul>
-      </section>
-    </>
-  );
-}
-
-function PeerLine(props: { peer: DevicePeer; status: PeerStatus | undefined; upstream: UpstreamStatus | undefined }) {
-  const { t, fmt } = useI18n();
-  return (
-    <li class="text-sm">
-      <div class="flex items-center justify-between gap-2">
-        <span>
-          {t.user.profile}: <span class="font-medium">{props.peer.profile}</span>
-        </span>
-        <span class="tabular-nums">{fmt.bytes(num(props.status?.traffic?.downBytes))}</span>
-      </div>
-      <div class="mt-1 flex flex-wrap gap-x-3 text-xs text-muted">
-        <Show when={props.upstream} fallback={<StateBadge level="bad" label={t.user.blocked} />}>
-          {(u) => <StateBadge level={stateLevel(u().state)} label={`${t.user.upstream} ${u().name}: ${stateLabel(t, u().state)}`} />}
-        </Show>
-        <span>
-          {t.user.lastSeen}:{" "}
-          <Show when={props.status?.lastHandshake} fallback={t.user.never}>
-            {(ts) => <>{fmt.ago(timestampDate(ts()), new Date())}</>}
-          </Show>
-        </span>
-      </div>
-    </li>
+      </UserProvider>
+    </Show>
   );
 }

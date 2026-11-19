@@ -40,6 +40,7 @@ interface Peer {
   profile: string;
   address: string;
   upstream: string;
+  created?: number; // ms since the epoch; the seeded peers predate the simulation
   lastHandshake: number; // ms since the epoch, 0 = never
   downRate: number;
   upRate: number;
@@ -62,6 +63,9 @@ const peerSeeds = [
   ["bob", "laptop", "streaming", "nl-1"],
   ["carol", "phone", "default", ""], // blocked: no upstream fits her profile
 ] as const;
+
+/** The upstream each profile resolves to for peers added at runtime. */
+const profileUpstream: Readonly<Record<string, string>> = { default: "lv-1", streaming: "nl-1", backup: "al-1" };
 
 /** mulberry32: a tiny seeded PRNG returning floats in [0, 1). */
 function random(seed: number): () => number {
@@ -88,6 +92,7 @@ export class Simulation {
   private readonly rand: () => number;
   private readonly peers: Peer[];
   private time: number;
+  private lastId = peerSeeds.length;
 
   constructor(
     seed = 1,
@@ -175,7 +180,12 @@ export class Simulation {
   user(name: string): User {
     const devices = new Map<string, DevicePeer[]>();
     for (const p of this.peers.filter((p) => p.user === name)) {
-      const peer = create(DevicePeerSchema, { peerId: p.id, profile: p.profile, address: p.address });
+      const peer = create(DevicePeerSchema, {
+        peerId: p.id,
+        profile: p.profile,
+        address: p.address,
+        created: p.created ? timestampFromMs(p.created) : undefined,
+      });
       devices.set(p.device, [...(devices.get(p.device) ?? []), peer]);
     }
     return create(UserSchema, {
@@ -227,6 +237,54 @@ export class Simulation {
     return create(HistoryResponseSchema, { step: durationFromMs(step), samples });
   }
 
+  /** The profiles users may choose from, in the order the daemon lists them. */
+  profileNames(): string[] {
+    return Object.keys(profileUpstream);
+  }
+
+  /** The device names of `user`, in the order they were added. */
+  devicesOf(user: string): string[] {
+    return [...new Set(this.peers.filter((p) => p.user === user).map((p) => p.device))];
+  }
+
+  /** Whether `user` has the device with this profile. */
+  hasPeer(user: string, device: string, profile: string): boolean {
+    return this.peers.some((p) => p.user === user && p.device === device && p.profile === profile);
+  }
+
+  /** Adds a peer for a known profile: routed through that profile's upstream, never connected yet. */
+  addPeer(user: string, device: string, profile: string, created = this.clock()): DevicePeer {
+    const id = `peer-${++this.lastId}`;
+    this.peers.push({
+      id,
+      user,
+      device,
+      profile,
+      address: `10.8.0.${this.lastId + 1}`,
+      upstream: profileUpstream[profile] ?? "",
+      created,
+      lastHandshake: 0,
+      downRate: 0,
+      upRate: 0,
+      down: 0,
+      up: 0,
+    });
+    return create(DevicePeerSchema, { peerId: id, profile, address: `10.8.0.${this.lastId + 1}`, created: timestampFromMs(created) });
+  }
+
+  /** Removes one profile of a device, or all of them when `profile` is empty; how many peers went. */
+  removePeers(user: string, device: string, profile: string): number {
+    const gone = this.peers.filter((p) => p.user === user && p.device === device && (!profile || p.profile === profile));
+    for (const p of gone) this.peers.splice(this.peers.indexOf(p), 1);
+    return gone.length;
+  }
+
+  /** The client config of a peer, or undefined for an unknown peer. Made-up keys, deterministic. */
+  config(peerId: string): string | undefined {
+    const p = this.peers.find((p) => p.id === peerId);
+    return p && clientConfig(p.id, p.address);
+  }
+
   private isActive(p: Peer): boolean {
     return p.lastHandshake > 0 && this.time - p.lastHandshake < 180_000;
   }
@@ -268,4 +326,40 @@ function availability(u: Upstream, t: number, now: number): number {
   const h = random(Math.floor(t / HOUR) * 31 + u.name.charCodeAt(0))();
   if (u.state === UpstreamState.DEGRADED) return h < 0.3 ? 0.7 + h : 1;
   return h < 0.04 ? 0.5 + h * 10 : 1;
+}
+
+/** A made-up 32-byte key in base64, stable for a seed. Not a real key. */
+function fakeKey(seed: string): string {
+  const rand = random([...seed].reduce((h, c) => Math.imul(h ^ c.charCodeAt(0), 16777619), 2166136261));
+  return btoa(String.fromCharCode(...Array.from({ length: 32 }, () => Math.floor(rand() * 256))));
+}
+
+/** What the daemon's ClientConfig renders for a peer: an AmneziaWG client config of about 600 bytes. */
+function clientConfig(peerId: string, address: string): string {
+  return [
+    "[Interface]",
+    `PrivateKey = ${fakeKey(`private-${peerId}`)}`,
+    `Address = ${address}/32`,
+    "DNS = 1.1.1.1, 9.9.9.9",
+    "MTU = 1376",
+    "Jc = 4",
+    "Jmin = 40",
+    "Jmax = 70",
+    "S1 = 52",
+    "S2 = 97",
+    "S3 = 21",
+    "S4 = 9",
+    "H1 = 1823591044-1823591099",
+    "H2 = 2047392011-2047392077",
+    "H3 = 3174402331-3174402388",
+    "H4 = 4012345678-4012345710",
+    "I1 = <b 0xc000000001><r 64><t>",
+    "",
+    "[Peer]",
+    `PublicKey = ${fakeKey("gateway")}`,
+    "Endpoint = vpn.example.com:51820",
+    "AllowedIPs = 0.0.0.0/0",
+    "PersistentKeepalive = 25",
+    "",
+  ].join("\n");
 }
