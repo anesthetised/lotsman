@@ -7,6 +7,7 @@ package lotsman.v1;
 
 import "google/protobuf/duration.proto";
 import "google/protobuf/timestamp.proto";
+import "lotsman/v1/incident.proto";
 
 option go_package = "github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1";
 
@@ -55,6 +56,15 @@ message UpstreamStatus {
   uint32 routed = 8; // peers directed through it
   uint32 active = 9; // of those, handshake inside the active window
   Traffic traffic = 10; // unset until the daemon has sampled it
+  Speed speed = 11; // the latest speed test; unset before the first or with health.speed off
+  repeated IncidentKind incidents = 12; // open now; empty for a user session
+}
+
+// A speed test through one upstream: bytes per second each way.
+message Speed {
+  uint64 down_rate = 1;
+  uint64 up_rate = 2;
+  google.protobuf.Timestamp time = 3;
 }
 
 message PeerStatus {

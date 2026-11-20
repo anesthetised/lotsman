@@ -262,10 +262,12 @@ type UpstreamStatus struct {
 	Provider      string                 `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"`
 	State         UpstreamState          `protobuf:"varint,5,opt,name=state,proto3,enum=lotsman.v1.UpstreamState" json:"state,omitempty"`
 	Latency       *durationpb.Duration   `protobuf:"bytes,6,opt,name=latency,proto3" json:"latency,omitempty"`
-	LastHandshake *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_handshake,json=lastHandshake,proto3" json:"last_handshake,omitempty"` // unset for proxy upstreams / never
-	Routed        uint32                 `protobuf:"varint,8,opt,name=routed,proto3" json:"routed,omitempty"`                                   // peers directed through it
-	Active        uint32                 `protobuf:"varint,9,opt,name=active,proto3" json:"active,omitempty"`                                   // of those, handshake inside the active window
-	Traffic       *Traffic               `protobuf:"bytes,10,opt,name=traffic,proto3" json:"traffic,omitempty"`                                 // unset until the daemon has sampled it
+	LastHandshake *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_handshake,json=lastHandshake,proto3" json:"last_handshake,omitempty"`          // unset for proxy upstreams / never
+	Routed        uint32                 `protobuf:"varint,8,opt,name=routed,proto3" json:"routed,omitempty"`                                            // peers directed through it
+	Active        uint32                 `protobuf:"varint,9,opt,name=active,proto3" json:"active,omitempty"`                                            // of those, handshake inside the active window
+	Traffic       *Traffic               `protobuf:"bytes,10,opt,name=traffic,proto3" json:"traffic,omitempty"`                                          // unset until the daemon has sampled it
+	Speed         *Speed                 `protobuf:"bytes,11,opt,name=speed,proto3" json:"speed,omitempty"`                                              // the latest speed test; unset before the first or with health.speed off
+	Incidents     []IncidentKind         `protobuf:"varint,12,rep,packed,name=incidents,proto3,enum=lotsman.v1.IncidentKind" json:"incidents,omitempty"` // open now; empty for a user session
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -370,6 +372,81 @@ func (x *UpstreamStatus) GetTraffic() *Traffic {
 	return nil
 }
 
+func (x *UpstreamStatus) GetSpeed() *Speed {
+	if x != nil {
+		return x.Speed
+	}
+	return nil
+}
+
+func (x *UpstreamStatus) GetIncidents() []IncidentKind {
+	if x != nil {
+		return x.Incidents
+	}
+	return nil
+}
+
+// A speed test through one upstream: bytes per second each way.
+type Speed struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DownRate      uint64                 `protobuf:"varint,1,opt,name=down_rate,json=downRate,proto3" json:"down_rate,omitempty"`
+	UpRate        uint64                 `protobuf:"varint,2,opt,name=up_rate,json=upRate,proto3" json:"up_rate,omitempty"`
+	Time          *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=time,proto3" json:"time,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Speed) Reset() {
+	*x = Speed{}
+	mi := &file_lotsman_v1_status_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Speed) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Speed) ProtoMessage() {}
+
+func (x *Speed) ProtoReflect() protoreflect.Message {
+	mi := &file_lotsman_v1_status_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Speed.ProtoReflect.Descriptor instead.
+func (*Speed) Descriptor() ([]byte, []int) {
+	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *Speed) GetDownRate() uint64 {
+	if x != nil {
+		return x.DownRate
+	}
+	return 0
+}
+
+func (x *Speed) GetUpRate() uint64 {
+	if x != nil {
+		return x.UpRate
+	}
+	return 0
+}
+
+func (x *Speed) GetTime() *timestamppb.Timestamp {
+	if x != nil {
+		return x.Time
+	}
+	return nil
+}
+
 type PeerStatus struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"` // stable, opaque; survives renames
@@ -385,7 +462,7 @@ type PeerStatus struct {
 
 func (x *PeerStatus) Reset() {
 	*x = PeerStatus{}
-	mi := &file_lotsman_v1_status_proto_msgTypes[3]
+	mi := &file_lotsman_v1_status_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -397,7 +474,7 @@ func (x *PeerStatus) String() string {
 func (*PeerStatus) ProtoMessage() {}
 
 func (x *PeerStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_status_proto_msgTypes[3]
+	mi := &file_lotsman_v1_status_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -410,7 +487,7 @@ func (x *PeerStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerStatus.ProtoReflect.Descriptor instead.
 func (*PeerStatus) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{3}
+	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *PeerStatus) GetPeerId() string {
@@ -477,7 +554,7 @@ type Traffic struct {
 
 func (x *Traffic) Reset() {
 	*x = Traffic{}
-	mi := &file_lotsman_v1_status_proto_msgTypes[4]
+	mi := &file_lotsman_v1_status_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -489,7 +566,7 @@ func (x *Traffic) String() string {
 func (*Traffic) ProtoMessage() {}
 
 func (x *Traffic) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_status_proto_msgTypes[4]
+	mi := &file_lotsman_v1_status_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -502,7 +579,7 @@ func (x *Traffic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Traffic.ProtoReflect.Descriptor instead.
 func (*Traffic) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{4}
+	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Traffic) GetDownBytes() uint64 {
@@ -538,7 +615,7 @@ var File_lotsman_v1_status_proto protoreflect.FileDescriptor
 const file_lotsman_v1_status_proto_rawDesc = "" +
 	"\n" +
 	"\x17lotsman/v1/status.proto\x12\n" +
-	"lotsman.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"K\n" +
+	"lotsman.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19lotsman/v1/incident.proto\"K\n" +
 	"\x12WatchStatusRequest\x125\n" +
 	"\binterval\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\binterval\"\xf2\x01\n" +
 	"\x0eStatusSnapshot\x12.\n" +
@@ -547,7 +624,7 @@ const file_lotsman_v1_status_proto_rawDesc = "" +
 	"client_mtu\x18\x02 \x01(\rR\tclientMtu\x128\n" +
 	"\tupstreams\x18\x03 \x03(\v2\x1a.lotsman.v1.UpstreamStatusR\tupstreams\x12,\n" +
 	"\x05peers\x18\x04 \x03(\v2\x16.lotsman.v1.PeerStatusR\x05peers\x12)\n" +
-	"\x05total\x18\x05 \x01(\v2\x13.lotsman.v1.TrafficR\x05total\"\x88\x03\n" +
+	"\x05total\x18\x05 \x01(\v2\x13.lotsman.v1.TrafficR\x05total\"\xe9\x03\n" +
 	"\x0eUpstreamStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x18.lotsman.v1.UpstreamKindR\x04kind\x12\x10\n" +
@@ -559,7 +636,13 @@ const file_lotsman_v1_status_proto_rawDesc = "" +
 	"\x06routed\x18\b \x01(\rR\x06routed\x12\x16\n" +
 	"\x06active\x18\t \x01(\rR\x06active\x12-\n" +
 	"\atraffic\x18\n" +
-	" \x01(\v2\x13.lotsman.v1.TrafficR\atraffic\"\xf9\x01\n" +
+	" \x01(\v2\x13.lotsman.v1.TrafficR\atraffic\x12'\n" +
+	"\x05speed\x18\v \x01(\v2\x11.lotsman.v1.SpeedR\x05speed\x126\n" +
+	"\tincidents\x18\f \x03(\x0e2\x18.lotsman.v1.IncidentKindR\tincidents\"m\n" +
+	"\x05Speed\x12\x1b\n" +
+	"\tdown_rate\x18\x01 \x01(\x04R\bdownRate\x12\x17\n" +
+	"\aup_rate\x18\x02 \x01(\x04R\x06upRate\x12.\n" +
+	"\x04time\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\"\xf9\x01\n" +
 	"\n" +
 	"PeerStatus\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x12\n" +
@@ -602,38 +685,43 @@ func file_lotsman_v1_status_proto_rawDescGZIP() []byte {
 }
 
 var file_lotsman_v1_status_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_lotsman_v1_status_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_lotsman_v1_status_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_lotsman_v1_status_proto_goTypes = []any{
 	(UpstreamState)(0),            // 0: lotsman.v1.UpstreamState
 	(UpstreamKind)(0),             // 1: lotsman.v1.UpstreamKind
 	(*WatchStatusRequest)(nil),    // 2: lotsman.v1.WatchStatusRequest
 	(*StatusSnapshot)(nil),        // 3: lotsman.v1.StatusSnapshot
 	(*UpstreamStatus)(nil),        // 4: lotsman.v1.UpstreamStatus
-	(*PeerStatus)(nil),            // 5: lotsman.v1.PeerStatus
-	(*Traffic)(nil),               // 6: lotsman.v1.Traffic
-	(*durationpb.Duration)(nil),   // 7: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil), // 8: google.protobuf.Timestamp
+	(*Speed)(nil),                 // 5: lotsman.v1.Speed
+	(*PeerStatus)(nil),            // 6: lotsman.v1.PeerStatus
+	(*Traffic)(nil),               // 7: lotsman.v1.Traffic
+	(*durationpb.Duration)(nil),   // 8: google.protobuf.Duration
+	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
+	(IncidentKind)(0),             // 10: lotsman.v1.IncidentKind
 }
 var file_lotsman_v1_status_proto_depIdxs = []int32{
-	7,  // 0: lotsman.v1.WatchStatusRequest.interval:type_name -> google.protobuf.Duration
-	8,  // 1: lotsman.v1.StatusSnapshot.time:type_name -> google.protobuf.Timestamp
+	8,  // 0: lotsman.v1.WatchStatusRequest.interval:type_name -> google.protobuf.Duration
+	9,  // 1: lotsman.v1.StatusSnapshot.time:type_name -> google.protobuf.Timestamp
 	4,  // 2: lotsman.v1.StatusSnapshot.upstreams:type_name -> lotsman.v1.UpstreamStatus
-	5,  // 3: lotsman.v1.StatusSnapshot.peers:type_name -> lotsman.v1.PeerStatus
-	6,  // 4: lotsman.v1.StatusSnapshot.total:type_name -> lotsman.v1.Traffic
+	6,  // 3: lotsman.v1.StatusSnapshot.peers:type_name -> lotsman.v1.PeerStatus
+	7,  // 4: lotsman.v1.StatusSnapshot.total:type_name -> lotsman.v1.Traffic
 	1,  // 5: lotsman.v1.UpstreamStatus.kind:type_name -> lotsman.v1.UpstreamKind
 	0,  // 6: lotsman.v1.UpstreamStatus.state:type_name -> lotsman.v1.UpstreamState
-	7,  // 7: lotsman.v1.UpstreamStatus.latency:type_name -> google.protobuf.Duration
-	8,  // 8: lotsman.v1.UpstreamStatus.last_handshake:type_name -> google.protobuf.Timestamp
-	6,  // 9: lotsman.v1.UpstreamStatus.traffic:type_name -> lotsman.v1.Traffic
-	8,  // 10: lotsman.v1.PeerStatus.last_handshake:type_name -> google.protobuf.Timestamp
-	6,  // 11: lotsman.v1.PeerStatus.traffic:type_name -> lotsman.v1.Traffic
-	2,  // 12: lotsman.v1.StatusService.Watch:input_type -> lotsman.v1.WatchStatusRequest
-	3,  // 13: lotsman.v1.StatusService.Watch:output_type -> lotsman.v1.StatusSnapshot
-	13, // [13:14] is the sub-list for method output_type
-	12, // [12:13] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	8,  // 7: lotsman.v1.UpstreamStatus.latency:type_name -> google.protobuf.Duration
+	9,  // 8: lotsman.v1.UpstreamStatus.last_handshake:type_name -> google.protobuf.Timestamp
+	7,  // 9: lotsman.v1.UpstreamStatus.traffic:type_name -> lotsman.v1.Traffic
+	5,  // 10: lotsman.v1.UpstreamStatus.speed:type_name -> lotsman.v1.Speed
+	10, // 11: lotsman.v1.UpstreamStatus.incidents:type_name -> lotsman.v1.IncidentKind
+	9,  // 12: lotsman.v1.Speed.time:type_name -> google.protobuf.Timestamp
+	9,  // 13: lotsman.v1.PeerStatus.last_handshake:type_name -> google.protobuf.Timestamp
+	7,  // 14: lotsman.v1.PeerStatus.traffic:type_name -> lotsman.v1.Traffic
+	2,  // 15: lotsman.v1.StatusService.Watch:input_type -> lotsman.v1.WatchStatusRequest
+	3,  // 16: lotsman.v1.StatusService.Watch:output_type -> lotsman.v1.StatusSnapshot
+	16, // [16:17] is the sub-list for method output_type
+	15, // [15:16] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_lotsman_v1_status_proto_init() }
@@ -641,13 +729,14 @@ func file_lotsman_v1_status_proto_init() {
 	if File_lotsman_v1_status_proto != nil {
 		return
 	}
+	file_lotsman_v1_incident_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lotsman_v1_status_proto_rawDesc), len(file_lotsman_v1_status_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   5,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

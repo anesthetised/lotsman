@@ -35,4 +35,8 @@ message Sample {
   google.protobuf.Duration latency = 3;
   uint64 down_bytes = 4;
   uint64 up_bytes = 5;
+  // Upstream only: the speed tests in the step, averaged, bytes per second;
+  // 0 when none ran.
+  uint64 down_rate = 6;
+  uint64 up_rate = 7;
 }

@@ -150,12 +150,16 @@ func (x *HistoryResponse) GetSamples() []*Sample {
 }
 
 type Sample struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Time          *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=time,proto3" json:"time,omitempty"`
-	UpRatio       float32                `protobuf:"fixed32,2,opt,name=up_ratio,json=upRatio,proto3" json:"up_ratio,omitempty"` // upstream only: share of the step it was up, 0..1
-	Latency       *durationpb.Duration   `protobuf:"bytes,3,opt,name=latency,proto3" json:"latency,omitempty"`
-	DownBytes     uint64                 `protobuf:"varint,4,opt,name=down_bytes,json=downBytes,proto3" json:"down_bytes,omitempty"`
-	UpBytes       uint64                 `protobuf:"varint,5,opt,name=up_bytes,json=upBytes,proto3" json:"up_bytes,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	Time      *timestamppb.Timestamp `protobuf:"bytes,1,opt,name=time,proto3" json:"time,omitempty"`
+	UpRatio   float32                `protobuf:"fixed32,2,opt,name=up_ratio,json=upRatio,proto3" json:"up_ratio,omitempty"` // upstream only: share of the step it was up, 0..1
+	Latency   *durationpb.Duration   `protobuf:"bytes,3,opt,name=latency,proto3" json:"latency,omitempty"`
+	DownBytes uint64                 `protobuf:"varint,4,opt,name=down_bytes,json=downBytes,proto3" json:"down_bytes,omitempty"`
+	UpBytes   uint64                 `protobuf:"varint,5,opt,name=up_bytes,json=upBytes,proto3" json:"up_bytes,omitempty"`
+	// Upstream only: the speed tests in the step, averaged, bytes per second;
+	// 0 when none ran.
+	DownRate      uint64 `protobuf:"varint,6,opt,name=down_rate,json=downRate,proto3" json:"down_rate,omitempty"`
+	UpRate        uint64 `protobuf:"varint,7,opt,name=up_rate,json=upRate,proto3" json:"up_rate,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -225,6 +229,20 @@ func (x *Sample) GetUpBytes() uint64 {
 	return 0
 }
 
+func (x *Sample) GetDownRate() uint64 {
+	if x != nil {
+		return x.DownRate
+	}
+	return 0
+}
+
+func (x *Sample) GetUpRate() uint64 {
+	if x != nil {
+		return x.UpRate
+	}
+	return 0
+}
+
 var File_lotsman_v1_history_proto protoreflect.FileDescriptor
 
 const file_lotsman_v1_history_proto_rawDesc = "" +
@@ -238,14 +256,16 @@ const file_lotsman_v1_history_proto_rawDesc = "" +
 	"\x04step\x18\x04 \x01(\v2\x19.google.protobuf.DurationR\x04step\"n\n" +
 	"\x0fHistoryResponse\x12-\n" +
 	"\x04step\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\x04step\x12,\n" +
-	"\asamples\x18\x02 \x03(\v2\x12.lotsman.v1.SampleR\asamples\"\xc2\x01\n" +
+	"\asamples\x18\x02 \x03(\v2\x12.lotsman.v1.SampleR\asamples\"\xf8\x01\n" +
 	"\x06Sample\x12.\n" +
 	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x12\x19\n" +
 	"\bup_ratio\x18\x02 \x01(\x02R\aupRatio\x123\n" +
 	"\alatency\x18\x03 \x01(\v2\x19.google.protobuf.DurationR\alatency\x12\x1d\n" +
 	"\n" +
 	"down_bytes\x18\x04 \x01(\x04R\tdownBytes\x12\x19\n" +
-	"\bup_bytes\x18\x05 \x01(\x04R\aupBytes2\x96\x01\n" +
+	"\bup_bytes\x18\x05 \x01(\x04R\aupBytes\x12\x1b\n" +
+	"\tdown_rate\x18\x06 \x01(\x04R\bdownRate\x12\x17\n" +
+	"\aup_rate\x18\a \x01(\x04R\x06upRate2\x96\x01\n" +
 	"\x0eHistoryService\x12C\n" +
 	"\bUpstream\x12\x1a.lotsman.v1.HistoryRequest\x1a\x1b.lotsman.v1.HistoryResponse\x12?\n" +
 	"\x04Peer\x12\x1a.lotsman.v1.HistoryRequest\x1a\x1b.lotsman.v1.HistoryResponseB:Z8github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1b\x06proto3"
