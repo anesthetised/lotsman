@@ -7,7 +7,11 @@ import { connectionKey, sortConnections } from "./connectionSort";
 import { RightsSchema } from "../../gen/lotsman/v1/user_pb";
 import { consoleEn } from "../../i18n/console.en";
 import { configFileName, rightsSummary, userLink, userPath } from "./devices";
-import { historyRanges, rateSeries } from "./history";
+import { IncidentKind, type Incident, IncidentSchema } from "../../gen/lotsman/v1/incident_pb";
+import { UpstreamStatusSchema } from "../../gen/lotsman/v1/status_pb";
+import { consoleRu } from "../../i18n/console.ru";
+import { historyRanges, meanOf, rateSeries, speedSeries } from "./history";
+import { incidentDuration, incidentKind, incidentLevel, incidentsPath, openCount, openKey, sortIncidents, worstLevel } from "./incidentLog";
 
 function conn(source: string, downRate: number, upRate = 0, downBytes = 0): Connection {
   return create(ConnectionSchema, {
@@ -59,4 +63,67 @@ test("history samples become average rates per step", () => {
   ]);
   // Every range fits the daemon's 2000 samples at its step.
   for (const r of historyRanges) expect(r.span / r.step).toBeLessThanOrEqual(2000);
+});
+
+test("speed tests become rates with gaps where none ran", () => {
+  const samples = [0, 1, 2].map((i) => create(SampleSchema, { time: timestampFromMs(60_000 * i), downRate: i === 1 ? 0n : 1000n * BigInt(i + 1), upRate: i === 1 ? 0n : 100n }));
+  expect(speedSeries(samples)).toEqual([
+    [0, 60, 120],
+    [1000, null, 3000],
+    [100, null, 100],
+  ]);
+  expect(meanOf([1000, null, 3000])).toBe(2000);
+  expect(meanOf([null, null])).toBeUndefined();
+});
+
+function incident(id: string, startedMin: number, endedMin?: number): Incident {
+  return create(IncidentSchema, {
+    id,
+    upstream: "nl-1",
+    kind: IncidentKind.UPLOAD,
+    started: timestampFromMs(startedMin * 60_000),
+    ended: endedMin === undefined ? undefined : timestampFromMs(endedMin * 60_000),
+  });
+}
+
+test("incidents: open ones first, then newest, ties by id", () => {
+  const list = [incident("a", 10, 20), incident("b", 5), incident("c", 30, 31), incident("d", 1), incident("e", 30, 40)];
+  expect(sortIncidents(list).map((i) => i.id)).toEqual(["b", "d", "c", "e", "a"]);
+  expect(list.map((i) => i.id)).toEqual(["a", "b", "c", "d", "e"]); // untouched
+});
+
+test("an incident lasts until it ended, or until now while open", () => {
+  const now = new Date(90 * 60_000);
+  expect(incidentDuration(incident("a", 10, 20), now)).toBe(10 * 60_000);
+  expect(incidentDuration(incident("b", 30), now)).toBe(60 * 60_000);
+});
+
+test("open incidents of a snapshot: the count, and a key that changes when one opens or closes", () => {
+  const u = (name: string, incidents: IncidentKind[]) => create(UpstreamStatusSchema, { name, incidents });
+  const before = [u("lv-1", [IncidentKind.SEND_ERRORS]), u("nl-1", [IncidentKind.UPLOAD, IncidentKind.DOWNLOAD])];
+  expect(openCount(before)).toBe(3);
+  expect(openKey(before)).toBe("lv-1:4 nl-1:2 nl-1:3");
+  // One closes and another opens: the same count, a new key.
+  const after = [u("lv-1", [IncidentKind.SEND_ERRORS]), u("nl-1", [IncidentKind.UPLOAD]), u("de-1", [IncidentKind.DOWN])];
+  expect(openCount(after)).toBe(3);
+  expect(openKey(after)).not.toBe(openKey(before));
+  expect(openKey([])).toBe("");
+});
+
+test("incident kinds read as words, with a level", () => {
+  expect([IncidentKind.DOWN, IncidentKind.DOWNLOAD, IncidentKind.UPLOAD, IncidentKind.SEND_ERRORS].map((k) => incidentKind(consoleEn, k).label)).toEqual([
+    "Down",
+    "Download fails",
+    "Upload fails",
+    "Send errors",
+  ]);
+  expect(incidentKind(consoleRu, IncidentKind.UPLOAD).label).toBe("Сбой отдачи");
+  expect(incidentKind(consoleEn, IncidentKind.UNSPECIFIED).label).toBe("Other");
+  expect(incidentKind(consoleEn, IncidentKind.SEND_ERRORS).hint).toContain("routes unchanged");
+  expect(incidentLevel(IncidentKind.DOWN)).toBe("bad");
+  expect(incidentLevel(IncidentKind.SEND_ERRORS)).toBe("warn");
+  expect([worstLevel([]), worstLevel([IncidentKind.UPLOAD]), worstLevel([IncidentKind.UPLOAD, IncidentKind.DOWN])]).toEqual(["none", "warn", "bad"]);
+  expect(consoleEn.incidents.badge(2, "Upload fails, Send errors")).toBe("Incidents: Upload fails, Send errors");
+  expect(incidentsPath()).toBe("/admin/incidents");
+  expect(incidentsPath("nl 1")).toBe("/admin/incidents?upstream=nl%201");
 });

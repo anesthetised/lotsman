@@ -30,6 +30,8 @@ export const en = {
     upstreams: "Upstreams",
     users: "Users",
     connections: "Connections",
+    incidents: "Incidents",
+    openIncidents: (n: number) => `${n} open`,
     name: "Name",
     kind: "Kind",
     location: "Location",

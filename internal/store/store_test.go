@@ -3,12 +3,16 @@ package store
 import (
 	"database/sql"
 	"errors"
+	"fmt"
 	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
 	"syscall"
 	"testing"
+	"time"
+
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/anesthetised/lotsman/internal/awgconf"
 	"github.com/anesthetised/lotsman/internal/policy"
@@ -297,6 +301,50 @@ func TestMigrateFromVersion6(t *testing.T) {
 	}
 	if _, err := s.AddPeer("alice", "phone", nl, subnet); !errors.Is(err, ErrExists) {
 		t.Errorf("a second phone for alice: %v", err)
+	}
+}
+
+// A database as the routes release left it (schema 7) keeps its history;
+// its upstream rows read as having had no speed test (#167).
+func TestMigrateFromVersion7(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "lotsman.db")
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, m := range migrations[:7] {
+		if _, err := db.Exec(m); err != nil {
+			t.Fatal(err)
+		}
+	}
+	minute, hour := time.Date(2026, 11, 19, 1, 0, 0, 0, time.UTC), time.Date(2026, 11, 19, 0, 0, 0, 0, time.UTC)
+	if _, err := db.Exec(fmt.Sprintf(`PRAGMA user_version = 7;
+		INSERT INTO upstream_samples VALUES ('nl', %d, 1, 20, 1000, 100);
+		INSERT INTO upstream_hour_samples VALUES ('nl', %d, 0.5, 30, 5000, 500);`, minute.Unix(), hour.Unix())); err != nil {
+		t.Fatal(err)
+	}
+	db.Close()
+
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	var version int
+	s.db.QueryRow(`PRAGMA user_version`).Scan(&version)
+	if version != len(migrations) {
+		t.Errorf("user_version = %d, want %d", version, len(migrations))
+	}
+	got, err := s.UpstreamSamples("nl", hour, minute.Add(time.Minute), time.Hour)
+	want := []Sample{
+		{Time: hour, UpRatio: 0.5, Latency: 30 * time.Millisecond, Down: 5000, Up: 500},
+		{Time: minute, UpRatio: 1, Latency: 20 * time.Millisecond, Down: 1000, Up: 100},
+	}
+	if diff := cmp.Diff(want, got); err != nil || diff != "" {
+		t.Errorf("history after migration: %v (-want +got):\n%s", err, diff)
+	}
+	if _, err := s.OpenIncident("nl", IncidentDown, minute, "", 0); err != nil {
+		t.Errorf("incidents after migration: %v", err)
 	}
 }
 

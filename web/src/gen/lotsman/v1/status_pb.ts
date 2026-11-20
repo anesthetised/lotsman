@@ -10,13 +10,15 @@ import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobu
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Duration, Timestamp } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_duration, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { IncidentKind } from "./incident_pb";
+import { file_lotsman_v1_incident } from "./incident_pb";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file lotsman/v1/status.proto.
  */
 export const file_lotsman_v1_status: GenFile = /*@__PURE__*/
-  fileDesc("Chdsb3RzbWFuL3YxL3N0YXR1cy5wcm90bxIKbG90c21hbi52MSJBChJXYXRjaFN0YXR1c1JlcXVlc3QSKwoIaW50ZXJ2YWwYASABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iyAEKDlN0YXR1c1NuYXBzaG90EigKBHRpbWUYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmNsaWVudF9tdHUYAiABKA0SLQoJdXBzdHJlYW1zGAMgAygLMhoubG90c21hbi52MS5VcHN0cmVhbVN0YXR1cxIlCgVwZWVycxgEIAMoCzIWLmxvdHNtYW4udjEuUGVlclN0YXR1cxIiCgV0b3RhbBgFIAEoCzITLmxvdHNtYW4udjEuVHJhZmZpYyK1AgoOVXBzdHJlYW1TdGF0dXMSDAoEbmFtZRgBIAEoCRImCgRraW5kGAIgASgOMhgubG90c21hbi52MS5VcHN0cmVhbUtpbmQSCwoDZ2VvGAMgASgJEhAKCHByb3ZpZGVyGAQgASgJEigKBXN0YXRlGAUgASgOMhkubG90c21hbi52MS5VcHN0cmVhbVN0YXRlEioKB2xhdGVuY3kYBiABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SMgoObGFzdF9oYW5kc2hha2UYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg4KBnJvdXRlZBgIIAEoDRIOCgZhY3RpdmUYCSABKA0SJAoHdHJhZmZpYxgKIAEoCzITLmxvdHNtYW4udjEuVHJhZmZpYyK4AQoKUGVlclN0YXR1cxIPCgdwZWVyX2lkGAEgASgJEgwKBHVzZXIYAiABKAkSDgoGZGV2aWNlGAMgASgJEg8KB2FkZHJlc3MYBCABKAkSEAoIdXBzdHJlYW0YBSABKAkSMgoObGFzdF9oYW5kc2hha2UYBiABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEiQKB3RyYWZmaWMYByABKAsyEy5sb3RzbWFuLnYxLlRyYWZmaWMiUwoHVHJhZmZpYxISCgpkb3duX2J5dGVzGAEgASgEEhAKCHVwX2J5dGVzGAIgASgEEhEKCWRvd25fcmF0ZRgDIAEoBBIPCgd1cF9yYXRlGAQgASgEKpgBCg1VcHN0cmVhbVN0YXRlEh4KGlVQU1RSRUFNX1NUQVRFX1VOU1BFQ0lGSUVEEAASGgoWVVBTVFJFQU1fU1RBVEVfVU5LTk9XThABEhUKEVVQU1RSRUFNX1NUQVRFX1VQEAISGwoXVVBTVFJFQU1fU1RBVEVfREVHUkFERUQQAxIXChNVUFNUUkVBTV9TVEFURV9ET1dOEAQqeAoMVXBzdHJlYW1LaW5kEh0KGVVQU1RSRUFNX0tJTkRfVU5TUEVDSUZJRUQQABIVChFVUFNUUkVBTV9LSU5EX0FXRxABEhkKFVVQU1RSRUFNX0tJTkRfT1VUTElORRACEhcKE1VQU1RSRUFNX0tJTkRfVkxFU1MQAzJWCg1TdGF0dXNTZXJ2aWNlEkUKBVdhdGNoEh4ubG90c21hbi52MS5XYXRjaFN0YXR1c1JlcXVlc3QaGi5sb3RzbWFuLnYxLlN0YXR1c1NuYXBzaG90MAFCOlo4Z2l0aHViLmNvbS9hbmVzdGhldGlzZWQvbG90c21hbi9hcGkvbG90c21hbi92MTtsb3RzbWFudjFiBnByb3RvMw", [file_google_protobuf_duration, file_google_protobuf_timestamp]);
+  fileDesc("Chdsb3RzbWFuL3YxL3N0YXR1cy5wcm90bxIKbG90c21hbi52MSJBChJXYXRjaFN0YXR1c1JlcXVlc3QSKwoIaW50ZXJ2YWwYASABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iyAEKDlN0YXR1c1NuYXBzaG90EigKBHRpbWUYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmNsaWVudF9tdHUYAiABKA0SLQoJdXBzdHJlYW1zGAMgAygLMhoubG90c21hbi52MS5VcHN0cmVhbVN0YXR1cxIlCgVwZWVycxgEIAMoCzIWLmxvdHNtYW4udjEuUGVlclN0YXR1cxIiCgV0b3RhbBgFIAEoCzITLmxvdHNtYW4udjEuVHJhZmZpYyKEAwoOVXBzdHJlYW1TdGF0dXMSDAoEbmFtZRgBIAEoCRImCgRraW5kGAIgASgOMhgubG90c21hbi52MS5VcHN0cmVhbUtpbmQSCwoDZ2VvGAMgASgJEhAKCHByb3ZpZGVyGAQgASgJEigKBXN0YXRlGAUgASgOMhkubG90c21hbi52MS5VcHN0cmVhbVN0YXRlEioKB2xhdGVuY3kYBiABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SMgoObGFzdF9oYW5kc2hha2UYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg4KBnJvdXRlZBgIIAEoDRIOCgZhY3RpdmUYCSABKA0SJAoHdHJhZmZpYxgKIAEoCzITLmxvdHNtYW4udjEuVHJhZmZpYxIgCgVzcGVlZBgLIAEoCzIRLmxvdHNtYW4udjEuU3BlZWQSKwoJaW5jaWRlbnRzGAwgAygOMhgubG90c21hbi52MS5JbmNpZGVudEtpbmQiVQoFU3BlZWQSEQoJZG93bl9yYXRlGAEgASgEEg8KB3VwX3JhdGUYAiABKAQSKAoEdGltZRgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiuAEKClBlZXJTdGF0dXMSDwoHcGVlcl9pZBgBIAEoCRIMCgR1c2VyGAIgASgJEg4KBmRldmljZRgDIAEoCRIPCgdhZGRyZXNzGAQgASgJEhAKCHVwc3RyZWFtGAUgASgJEjIKDmxhc3RfaGFuZHNoYWtlGAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIkCgd0cmFmZmljGAcgASgLMhMubG90c21hbi52MS5UcmFmZmljIlMKB1RyYWZmaWMSEgoKZG93bl9ieXRlcxgBIAEoBBIQCgh1cF9ieXRlcxgCIAEoBBIRCglkb3duX3JhdGUYAyABKAQSDwoHdXBfcmF0ZRgEIAEoBCqYAQoNVXBzdHJlYW1TdGF0ZRIeChpVUFNUUkVBTV9TVEFURV9VTlNQRUNJRklFRBAAEhoKFlVQU1RSRUFNX1NUQVRFX1VOS05PV04QARIVChFVUFNUUkVBTV9TVEFURV9VUBACEhsKF1VQU1RSRUFNX1NUQVRFX0RFR1JBREVEEAMSFwoTVVBTVFJFQU1fU1RBVEVfRE9XThAEKngKDFVwc3RyZWFtS2luZBIdChlVUFNUUkVBTV9LSU5EX1VOU1BFQ0lGSUVEEAASFQoRVVBTVFJFQU1fS0lORF9BV0cQARIZChVVUFNUUkVBTV9LSU5EX09VVExJTkUQAhIXChNVUFNUUkVBTV9LSU5EX1ZMRVNTEAMyVgoNU3RhdHVzU2VydmljZRJFCgVXYXRjaBIeLmxvdHNtYW4udjEuV2F0Y2hTdGF0dXNSZXF1ZXN0GhoubG90c21hbi52MS5TdGF0dXNTbmFwc2hvdDABQjpaOGdpdGh1Yi5jb20vYW5lc3RoZXRpc2VkL2xvdHNtYW4vYXBpL2xvdHNtYW4vdjE7bG90c21hbnYxYgZwcm90bzM", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_lotsman_v1_incident]);
 
 /**
  * @generated from message lotsman.v1.WatchStatusRequest
@@ -135,6 +137,20 @@ export type UpstreamStatus = Message<"lotsman.v1.UpstreamStatus"> & {
    * @generated from field: lotsman.v1.Traffic traffic = 10;
    */
   traffic?: Traffic | undefined;
+
+  /**
+   * the latest speed test; unset before the first or with health.speed off
+   *
+   * @generated from field: lotsman.v1.Speed speed = 11;
+   */
+  speed?: Speed | undefined;
+
+  /**
+   * open now; empty for a user session
+   *
+   * @generated from field: repeated lotsman.v1.IncidentKind incidents = 12;
+   */
+  incidents: IncidentKind[];
 };
 
 /**
@@ -143,6 +159,35 @@ export type UpstreamStatus = Message<"lotsman.v1.UpstreamStatus"> & {
  */
 export const UpstreamStatusSchema: GenMessage<UpstreamStatus> = /*@__PURE__*/
   messageDesc(file_lotsman_v1_status, 2);
+
+/**
+ * A speed test through one upstream: bytes per second each way.
+ *
+ * @generated from message lotsman.v1.Speed
+ */
+export type Speed = Message<"lotsman.v1.Speed"> & {
+  /**
+   * @generated from field: uint64 down_rate = 1;
+   */
+  downRate: bigint;
+
+  /**
+   * @generated from field: uint64 up_rate = 2;
+   */
+  upRate: bigint;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp time = 3;
+   */
+  time?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message lotsman.v1.Speed.
+ * Use `create(SpeedSchema)` to create a new message.
+ */
+export const SpeedSchema: GenMessage<Speed> = /*@__PURE__*/
+  messageDesc(file_lotsman_v1_status, 3);
 
 /**
  * @generated from message lotsman.v1.PeerStatus
@@ -197,7 +242,7 @@ export type PeerStatus = Message<"lotsman.v1.PeerStatus"> & {
  * Use `create(PeerStatusSchema)` to create a new message.
  */
 export const PeerStatusSchema: GenMessage<PeerStatus> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_status, 3);
+  messageDesc(file_lotsman_v1_status, 4);
 
 /**
  * Directions are from the user's side: down = towards the client. A peer
@@ -237,7 +282,7 @@ export type Traffic = Message<"lotsman.v1.Traffic"> & {
  * Use `create(TrafficSchema)` to create a new message.
  */
 export const TrafficSchema: GenMessage<Traffic> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_status, 4);
+  messageDesc(file_lotsman_v1_status, 5);
 
 /**
  * @generated from enum lotsman.v1.UpstreamState

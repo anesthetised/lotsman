@@ -6,6 +6,16 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- Exit checks and an incident log (#167). An optional upload probe (`health.transfer.upload_url`,
+  `upload_bytes`) runs beside the download probe and, failing, makes the upstream degraded the
+  same way; optional speed tests (`health.speed`) record each upstream's throughput both ways in
+  its status and history; AmneziaWG send errors are counted per upstream
+  (`lotsman_upstream_send_errors_total`). Down, download, upload and send-error trouble opens an
+  incident per upstream and kind, closed when it clears and kept as long as the hourly history:
+  `lotsman incidents`, `IncidentService.List`, and in the console an Incidents page with the open
+  count in the nav, incident badges on the overview, and the speed, a speed chart and the
+  incidents on each upstream's page. The transfer probe metrics gain a `probe` label
+  (`download`, `upload`).
 - `lotsman profile rename OLD NEW`: renames a profile and moves its peers with it in one
   transaction; their keys, addresses and history stay, so their configs keep working. Profile names
   may now be capitalized (`Netherlands`) and are unique ignoring case; tags stay lowercase. The

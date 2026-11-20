@@ -1,5 +1,6 @@
-// One upstream: its live state and rate, its history (traffic, latency and
-// availability over a chosen range) and the peers routed through it.
+// One upstream: its live state, rate and latest speed test, its history
+// (traffic, latency, speed tests and availability over a chosen range), its
+// incidents and the peers routed through it.
 
 import { durationFromMs, durationMs, timestampDate, timestampFromMs, timestampMs } from "@bufbuild/protobuf/wkt";
 import { useParams } from "@solidjs/router";
@@ -16,7 +17,8 @@ import { LineChart } from "../../ui/LineChart";
 import { StateBadge } from "../../ui/StateBadge";
 import { LiveError } from "../LiveError";
 import { kindLabel, stateLabel, stateLevel } from "../upstream";
-import { historyRanges, type RangeKey, rateSeries } from "./history";
+import { historyRanges, meanOf, type RangeKey, rateSeries, speedSeries } from "./history";
+import { IncidentBadge, IncidentLog } from "./IncidentList";
 
 export default function UpstreamDetail() {
   const { t } = useI18n();
@@ -64,29 +66,39 @@ function Upstream(props: { upstream: UpstreamStatus; snapshot: StatusSnapshot })
     return appendRow(prev, [time, num(u().traffic?.downRate), num(u().traffic?.upRate)], 5 * 60);
   });
   const peers = createMemo(() => props.snapshot.peers.filter((p) => p.upstream === u().name));
-  const fact = (label: string, value: string) => (
+  const fact = (label: string, value: string, detail?: string) => (
     <div>
       <dt class="text-xs text-muted">{label}</dt>
       <dd class="font-medium tabular-nums">{value}</dd>
+      <Show when={detail}>
+        <dd class="text-xs text-muted">{detail}</dd>
+      </Show>
     </div>
   );
+  const speed = () => u().speed;
   return (
     <>
       <div class="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <h1 class="text-lg font-semibold">{c.upstream.title(u().name)}</h1>
         <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />
+        <IncidentBadge upstream={u().name} kinds={u().incidents} />
         <span class="text-muted">
           {[kindLabel(u().kind), u().geo, u().provider].filter(Boolean).join(" · ")}
         </span>
       </div>
 
-      <dl class="grid grid-cols-2 gap-3 rounded-lg border border-line bg-surface p-3 sm:grid-cols-3 lg:grid-cols-6">
+      <dl class="grid grid-cols-2 gap-3 rounded-lg border border-line bg-surface p-3 sm:grid-cols-4 lg:grid-cols-7">
         {fact(t.admin.latency, u().latency ? fmt.milliseconds(durationMs(u().latency!)) : "—")}
         {fact(c.upstream.handshake, u().lastHandshake ? fmt.ago(timestampDate(u().lastHandshake!), now()) : "—")}
         {fact(t.admin.peers, t.admin.activePeers(u().active, u().routed))}
         {fact(c.upstream.downNow, fmt.rate(num(u().traffic?.downRate)))}
         {fact(c.upstream.upNow, fmt.rate(num(u().traffic?.upRate)))}
         {fact(c.upstream.sinceStart, `${fmt.bytes(num(u().traffic?.downBytes))} / ${fmt.bytes(num(u().traffic?.upBytes))}`)}
+        {fact(
+          c.upstream.speed,
+          speed() ? `${fmt.rate(num(speed()!.downRate))} / ${fmt.rate(num(speed()!.upRate))}` : "—",
+          speed()?.time ? fmt.ago(timestampDate(speed()!.time!), now()) : c.upstream.speedNone,
+        )}
       </dl>
 
       <section class="rounded-lg border border-line bg-surface p-3">
@@ -109,6 +121,13 @@ function Upstream(props: { upstream: UpstreamStatus; snapshot: StatusSnapshot })
       </section>
 
       <History name={u().name} />
+
+      <section aria-labelledby="incidents" class="space-y-2">
+        <h2 id="incidents" class="font-semibold">
+          {c.upstream.incidents}
+        </h2>
+        <IncidentLog upstream={u().name} openKey={u().incidents.join(" ")} now={now()} />
+      </section>
 
       <section aria-labelledby="routed" class="space-y-2">
         <h2 id="routed" class="font-semibold">
@@ -179,6 +198,11 @@ function HistoryCharts(props: { name: string; range: RangeKey }) {
   const ratios = createMemo(() => history().samples.map((s) => s.upRatio));
   const availability = () => ratios().reduce((a, b) => a + b, 0) / Math.max(ratios().length, 1);
   const total = (i: 1 | 2) => history().samples.reduce((sum, s) => sum + num(i === 1 ? s.downBytes : s.upBytes), 0);
+  const speed = createMemo(() => speedSeries(history().samples));
+  const meanSpeed = (i: 1 | 2) => {
+    const mean = meanOf(speed()[i]!);
+    return mean === undefined ? "—" : c.upstream.mean(fmt.rate(mean));
+  };
   const latencies = () => latency()[1]!.filter((v): v is number => v !== null);
   const meanLatency = () => latencies().reduce((a, b) => a + b, 0) / Math.max(latencies().length, 1);
   const rangeLabel = () => c.upstream.ranges[props.range];
@@ -220,6 +244,25 @@ function HistoryCharts(props: { name: string; range: RangeKey }) {
               </span>
             }
           />
+          <LineChart
+            data={speed()}
+            axis="date"
+            series={[
+              { label: t.traffic.down, color: "--color-chart-down", sparse: true },
+              { label: t.traffic.up, color: "--color-chart-up", sparse: true },
+            ]}
+            format={fmt.rate}
+            height={180}
+            caption={
+              <span class="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <span class="font-medium">{c.upstream.speedChart}</span>
+                <Show when={meanOf(speed()[1]!) !== undefined} fallback={<span class="text-muted">{c.upstream.noSpeedTests}</span>}>
+                  <Legend color="bg-chart-down" text={`${t.traffic.down}: ${meanSpeed(1)}`} />
+                  <Legend color="bg-chart-up" text={`${t.traffic.up}: ${meanSpeed(2)}`} />
+                </Show>
+              </span>
+            }
+          />
         </div>
       </Show>
     </div>
@@ -230,7 +273,8 @@ function PeerTable(props: { peers: readonly PeerStatus[]; now: Date }) {
   const { t, fmt, c } = useConsoleI18n();
   return (
     <Show when={props.peers.length > 0} fallback={<p class="rounded-lg border border-line bg-surface p-4 text-muted">{t.admin.noPeers}</p>}>
-      <div class="overflow-x-auto rounded-lg border border-line bg-surface">
+      {/* relative: the rows' sr-only labels are positioned, and would widen the page from outside the scroll box. */}
+      <div class="relative overflow-x-auto rounded-lg border border-line bg-surface">
         <table class="w-full min-w-[52rem]">
           <thead class="text-left text-xs text-muted">
             <tr>

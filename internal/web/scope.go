@@ -45,6 +45,8 @@ var Scopes = map[string]Scope{
 
 	lotsmanv1connect.ConnectionServiceWatchProcedure: Operator,
 
+	lotsmanv1connect.IncidentServiceListProcedure: Operator,
+
 	lotsmanv1connect.UserServiceListProcedure:         Operator,
 	lotsmanv1connect.UserServiceAddUserProcedure:      Operator,
 	lotsmanv1connect.UserServiceSetRightsProcedure:    Operator,

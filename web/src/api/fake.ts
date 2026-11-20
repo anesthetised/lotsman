@@ -7,6 +7,7 @@ import { type Duration, durationMs, timestampMs } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, createRouterTransport, type Interceptor, type Transport } from "@connectrpc/connect";
 import { type ConnectionSnapshot, ConnectionService } from "../gen/lotsman/v1/connection_pb";
 import { type HistoryRequest, HistoryService } from "../gen/lotsman/v1/history_pb";
+import { IncidentService } from "../gen/lotsman/v1/incident_pb";
 import { StatusService, TrafficSchema } from "../gen/lotsman/v1/status_pb";
 import { UserService } from "../gen/lotsman/v1/user_pb";
 import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
@@ -82,6 +83,9 @@ export function createFakeTransport(options: FakeOptions = {}): Transport {
     service(HistoryService, {
       upstream: (req) => (operator(), history("upstream", req)),
       peer: (req) => (operator(), history("peer", req)),
+    });
+    service(IncidentService, {
+      list: (req) => (operator(), { incidents: sim.listIncidents(req.upstream, req.limit) }),
     });
   }, { transport: { interceptors: options.interceptors } });
 }

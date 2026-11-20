@@ -1,0 +1,43 @@
+// The lotsman.v1 control API: incidents (#167).
+// See status.proto for where it is served.
+syntax = "proto3";
+
+package lotsman.v1;
+
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1";
+
+service IncidentService {
+  // Newest first, open ones before closed ones.
+  rpc List(ListIncidentsRequest) returns (ListIncidentsResponse);
+}
+
+// What went wrong with an upstream.
+enum IncidentKind {
+  INCIDENT_KIND_UNSPECIFIED = 0;
+  INCIDENT_KIND_DOWN = 1; // the reachability probes fail
+  INCIDENT_KIND_DOWNLOAD = 2; // the download probe fails: degraded, out of routes
+  INCIDENT_KIND_UPLOAD = 3; // the upload probe fails: degraded, out of routes
+  INCIDENT_KIND_SEND_ERRORS = 4; // AmneziaWG send errors above the threshold; routes unchanged
+}
+
+// One stretch of one kind of trouble with one upstream. At most one of each
+// kind is open per upstream at a time.
+message Incident {
+  string id = 1;
+  string upstream = 2;
+  IncidentKind kind = 3;
+  google.protobuf.Timestamp started = 4;
+  google.protobuf.Timestamp ended = 5; // unset while open
+  string detail = 6; // the latest error, in the daemon's words
+  uint32 devices = 7; // devices routed through the upstream when it started
+}
+
+message ListIncidentsRequest {
+  string upstream = 1; // empty: every upstream
+  uint32 limit = 2; // 0: 200
+}
+message ListIncidentsResponse {
+  repeated Incident incidents = 1;
+}

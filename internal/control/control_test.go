@@ -23,6 +23,7 @@ import (
 	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/health"
+	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/traffic"
 )
 
@@ -30,8 +31,9 @@ import (
 // The connection service has its own fake; here it is never called.
 type fakeSource struct {
 	ConnectionSource
-	HistorySource // none unless a test sets one
-	Users         // none unless a test sets one
+	HistorySource  // none unless a test sets one
+	IncidentSource // none unless a test sets one
+	Users          // none unless a test sets one
 
 	ready chan struct{}
 	st    daemon.Status
@@ -69,7 +71,9 @@ func TestSnapshot(t *testing.T) {
 	st := daemon.Status{
 		Upstreams: []daemon.UpstreamStatus{
 			{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme", State: health.Up,
-				Latency: 25 * time.Millisecond, LastHandshake: handshake, Routed: 2, Active: 1},
+				Latency: 25 * time.Millisecond, LastHandshake: handshake, Routed: 2, Active: 1,
+				Speed:     health.Speed{Down: 13, Up: 14, Time: handshake},
+				Incidents: []store.IncidentKind{store.IncidentDownload, store.IncidentSendErrors}},
 			{Name: "de", Kind: "outline", State: health.Up, Degraded: true, Latency: time.Second},
 			{Name: "fi", Kind: "vless", State: health.Down},
 			{Name: "se", Kind: "awg", State: health.Unknown},
@@ -97,7 +101,9 @@ func TestSnapshot(t *testing.T) {
 			{Name: "nl", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "NL", Provider: "acme",
 				State: lotsmanv1.UpstreamState_UPSTREAM_STATE_UP, Latency: durationpb.New(25 * time.Millisecond),
 				LastHandshake: timestamppb.New(handshake), Routed: 2, Active: 1,
-				Traffic: &lotsmanv1.Traffic{DownBytes: 5, UpBytes: 6, DownRate: 7, UpRate: 8}},
+				Traffic:   &lotsmanv1.Traffic{DownBytes: 5, UpBytes: 6, DownRate: 7, UpRate: 8},
+				Speed:     &lotsmanv1.Speed{DownRate: 13, UpRate: 14, Time: timestamppb.New(handshake)},
+				Incidents: []lotsmanv1.IncidentKind{lotsmanv1.IncidentKind_INCIDENT_KIND_DOWNLOAD, lotsmanv1.IncidentKind_INCIDENT_KIND_SEND_ERRORS}},
 			{Name: "de", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_OUTLINE, State: lotsmanv1.UpstreamState_UPSTREAM_STATE_DEGRADED,
 				Latency: durationpb.New(time.Second)},
 			{Name: "fi", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_VLESS, State: lotsmanv1.UpstreamState_UPSTREAM_STATE_DOWN},
@@ -280,6 +286,7 @@ func TestUnimplemented(t *testing.T) {
 		lotsmanv1connect.UserSelfServiceGetConfigProcedure,
 		lotsmanv1connect.UserSelfServiceUpstreamHistoryProcedure,
 		lotsmanv1connect.UserSelfServicePeerHistoryProcedure,
+		lotsmanv1connect.IncidentServiceListProcedure,
 	}
 	s := NewServer(newFakeSource(daemon.Status{}))
 	var registered []string

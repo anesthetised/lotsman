@@ -142,7 +142,7 @@ metrics: {listen: 127.0.0.1:19100}
 	passed := func(name string) func() bool {
 		return func() bool {
 			body, _, err := scrape()
-			v, ok := metricValue(body, `lotsman_upstream_transfer_probes_total{upstream="`+name+`",result="ok"}`)
+			v, ok := metricValue(body, `lotsman_upstream_transfer_probes_total{upstream="`+name+`",probe="download",result="ok"}`)
 			return err == nil && ok && v > 0
 		}
 	}

@@ -8,9 +8,12 @@ import { durationFromMs, timestampFromMs } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError } from "@connectrpc/connect";
 import { type Connection, ConnectionSchema, type ConnectionSnapshot, ConnectionSnapshotSchema, Protocol } from "../gen/lotsman/v1/connection_pb";
 import { type HistoryResponse, HistoryResponseSchema, SampleSchema } from "../gen/lotsman/v1/history_pb";
+import { type Incident, IncidentKind, IncidentSchema } from "../gen/lotsman/v1/incident_pb";
 import {
   type PeerStatus,
   PeerStatusSchema,
+  type Speed,
+  SpeedSchema,
   type StatusSnapshot,
   StatusSnapshotSchema,
   type Traffic,
@@ -26,6 +29,10 @@ const HOUR = 3_600_000;
 const DAY = 86_400_000;
 const MAX_SAMPLES = 2000;
 const MAX_RATE = 6_000_000; // bytes per second, about 48 Mbit/s
+/** Speed tests run every half hour, on the half hour (the daemon: health.speed.interval with jitter). */
+const SPEED_EVERY = 30 * MINUTE;
+/** How long de-1 has been down; its availability, speed tests and incident agree. */
+const DOWN_FOR = 6 * HOUR;
 /** The fake's cap on connections per update; the daemon's is 500. Low, so the full list shows `truncated`. */
 export const CONNECTION_CAP = 25;
 
@@ -36,6 +43,19 @@ interface Upstream {
   provider: string;
   state: UpstreamState;
   latencyMs: number;
+  /** What its speed tests measure, about: bytes per second each way. */
+  speed: { down: number; up: number };
+}
+
+/** An incident as the daemon's store keeps it (see Incident in incident.proto). */
+interface IncidentRecord {
+  id: string;
+  upstream: string;
+  kind: IncidentKind;
+  started: number; // ms since the epoch
+  ended: number; // ms since the epoch, 0 = open
+  detail: string;
+  devices: number;
 }
 
 interface Peer {
@@ -98,11 +118,61 @@ const defaultRights = (): RightsValue => ({ editRoutes: true, showProviders: tru
 // The tables below are pure IIFEs: a production build drops the fake, and
 // without the annotation it would keep their enum reads and calls.
 const upstreams: readonly Upstream[] = /* @__PURE__ */ (() => [
-  { name: "lv-1", kind: UpstreamKind.AWG, geo: "LV", provider: "provider-a", state: UpstreamState.UP, latencyMs: 38 },
-  { name: "lv-2", kind: UpstreamKind.OUTLINE, geo: "LV", provider: "provider-b", state: UpstreamState.UP, latencyMs: 52 },
-  { name: "al-1", kind: UpstreamKind.OUTLINE, geo: "AL", provider: "provider-b", state: UpstreamState.UP, latencyMs: 61 },
-  { name: "nl-1", kind: UpstreamKind.VLESS, geo: "NL", provider: "provider-c", state: UpstreamState.DEGRADED, latencyMs: 140 },
-  { name: "de-1", kind: UpstreamKind.AWG, geo: "DE", provider: "provider-a", state: UpstreamState.DOWN, latencyMs: 45 },
+  { name: "lv-1", kind: UpstreamKind.AWG, geo: "LV", provider: "provider-a", state: UpstreamState.UP, latencyMs: 38, speed: { down: 11e6, up: 5e6 } },
+  { name: "lv-2", kind: UpstreamKind.OUTLINE, geo: "LV", provider: "provider-b", state: UpstreamState.UP, latencyMs: 52, speed: { down: 8e6, up: 3e6 } },
+  { name: "al-1", kind: UpstreamKind.OUTLINE, geo: "AL", provider: "provider-b", state: UpstreamState.UP, latencyMs: 61, speed: { down: 6e6, up: 2.5e6 } },
+  // Degraded by an open upload incident: its uploads crawl.
+  { name: "nl-1", kind: UpstreamKind.VLESS, geo: "NL", provider: "provider-c", state: UpstreamState.DEGRADED, latencyMs: 140, speed: { down: 3e6, up: 0.1e6 } },
+  { name: "de-1", kind: UpstreamKind.AWG, geo: "DE", provider: "provider-a", state: UpstreamState.DOWN, latencyMs: 45, speed: { down: 9e6, up: 4e6 } },
+])();
+
+/**
+ * The incident log, relative to the simulation's start: nl-1's upload and
+ * de-1's outage are open (they are why one is degraded and the other down),
+ * and a few closed ones lie in the past.
+ */
+const incidentSeeds: readonly Omit<IncidentRecord, "id">[] = /* @__PURE__ */ (() => [
+  {
+    upstream: "nl-1",
+    kind: IncidentKind.UPLOAD,
+    started: -(2 * HOUR + 14 * MINUTE),
+    ended: 0,
+    detail: 'upload probe: Post "https://speed.cloudflare.com/__up": context deadline exceeded',
+    devices: 1,
+  },
+  { upstream: "de-1", kind: IncidentKind.DOWN, started: -DOWN_FOR, ended: 0, detail: "probe 192.0.2.1:443: dial tcp 192.0.2.1:443: i/o timeout", devices: 1 },
+  {
+    upstream: "lv-1",
+    kind: IncidentKind.SEND_ERRORS,
+    started: -(DAY + 3 * HOUR),
+    ended: -(DAY + 3 * HOUR - 7 * MINUTE),
+    detail: "Failed to send data packets: write udp4 0.0.0.0:51820->203.0.113.7:51820: sendmmsg: message too long",
+    devices: 2,
+  },
+  {
+    upstream: "lv-2",
+    kind: IncidentKind.DOWN,
+    started: -(2 * DAY + HOUR),
+    ended: -(2 * DAY + HOUR - 4 * MINUTE),
+    detail: "probe 192.0.2.1:443: dial tcp 192.0.2.1:443: connect: network is unreachable",
+    devices: 2,
+  },
+  {
+    upstream: "nl-1",
+    kind: IncidentKind.DOWNLOAD,
+    started: -(3 * DAY + 5 * HOUR),
+    ended: -(3 * DAY + 4 * HOUR + 18 * MINUTE),
+    detail: 'download probe: Get "https://speed.cloudflare.com/__down?bytes=65536": unexpected EOF',
+    devices: 1,
+  },
+  {
+    upstream: "de-1",
+    kind: IncidentKind.UPLOAD,
+    started: -5 * DAY,
+    ended: -(5 * DAY - HOUR - 20 * MINUTE),
+    detail: 'upload probe: Post "https://speed.cloudflare.com/__up": read: connection reset by peer',
+    devices: 1,
+  },
 ])();
 
 // alice may do everything; the operator sets bob's routes and lets him use
@@ -170,6 +240,7 @@ export class Simulation {
   private readonly peers: Peer[];
   private readonly users = new Map<string, UserRecord>();
   private flows: Flow[] = [];
+  private readonly incidents: IncidentRecord[];
   private nextPeer: number;
   private time: number;
 
@@ -181,6 +252,12 @@ export class Simulation {
     this.flowRand = random(seed ^ 0x5bd1e995);
     this.secretRand = random(seed ^ 0x27d4eb2f);
     this.time = clock();
+    this.incidents = incidentSeeds.map((s, i) => ({
+      ...s,
+      id: `inc-${i + 1}`,
+      started: this.time + s.started,
+      ended: s.ended ? this.time + s.ended : 0,
+    }));
     for (const [i, [name, rights]] of userSeeds.entries()) {
       const first = peerSeeds.findIndex(([user]) => user === name);
       this.users.set(name, { name, created: this.time - (41 - first * 5) * DAY, hasLink: i === 0, rights: copyRights(rights) });
@@ -304,6 +381,9 @@ export class Simulation {
             routed: all ? routed.length : 0,
             active: all ? routed.filter((p) => this.isActive(p)).length : 0,
             traffic: all ? traffic(t.down, t.up, t.downRate, t.upRate) : undefined,
+            // Operator views only, like the daemon's incidents; the user page does not show speed.
+            speed: all ? this.latestSpeed(u) : undefined,
+            incidents: all ? this.incidents.filter((i) => i.upstream === u.name && !i.ended).map((i) => i.kind) : [],
           });
         }),
       peers: peers.map((p) => this.peerStatus(p)),
@@ -326,6 +406,37 @@ export class Simulation {
       connections: flows.slice(0, CONNECTION_CAP).map((f) => connection(f)),
       truncated: flows.length > CONNECTION_CAP,
     });
+  }
+
+  /**
+   * The incident log, of one upstream or (empty) of all: open ones first,
+   * then newest, at most `limit` (0: 200), as IncidentService.List answers.
+   */
+  listIncidents(upstream = "", limit = 0): Incident[] {
+    return this.incidents
+      .filter((i) => !upstream || i.upstream === upstream)
+      .sort((a, b) => Number(!b.ended) - Number(!a.ended) || b.started - a.started)
+      .slice(0, limit || 200)
+      .map((i) =>
+        create(IncidentSchema, {
+          id: i.id,
+          upstream: i.upstream,
+          kind: i.kind,
+          started: timestampFromMs(i.started),
+          ended: i.ended ? timestampFromMs(i.ended) : undefined,
+          detail: i.detail,
+          devices: i.devices,
+        }),
+      );
+  }
+
+  /** The upstream's latest speed test that got through, if any. */
+  private latestSpeed(u: Upstream): Speed | undefined {
+    for (let t = Math.floor(this.time / SPEED_EVERY) * SPEED_EVERY; t > this.time - 7 * DAY; t -= SPEED_EVERY) {
+      const s = speedTest(u, t, this.time);
+      if (s) return create(SpeedSchema, { downRate: BigInt(s.down), upRate: BigInt(s.up), time: timestampFromMs(t) });
+    }
+    return undefined;
   }
 
   /** The user with their rights and devices. */
@@ -493,7 +604,8 @@ export class Simulation {
     const peer = kind === "peer" ? this.peers.find((p) => p.id === name) : undefined;
     if (!upstream && !peer) return undefined;
 
-    const step = historyStep(from, to, this.clock(), wanted);
+    const now = this.clock();
+    const step = historyStep(from, to, now, wanted);
     const routed = upstream ? this.peers.filter((p) => p.upstream === upstream.name).length : 1;
     const samples = [];
     for (let t = Math.ceil(from / step) * step; t <= to; t += step) {
@@ -501,6 +613,7 @@ export class Simulation {
       const ratio = upstream ? availability(upstream, t, to) : 0;
       // Bytes moved during the step: about a fifth of the peak rate per peer while up.
       const down = peer && !peer.connected ? 0 : (h * MAX_RATE * 0.4 * routed * (upstream ? ratio : 1) * step) / 1000;
+      const speed = upstream ? speedInStep(upstream, t, step, now) : { down: 0, up: 0 };
       samples.push(
         create(SampleSchema, {
           time: timestampFromMs(t),
@@ -508,6 +621,8 @@ export class Simulation {
           latency: upstream && ratio > 0 ? durationFromMs(Math.round(upstream.latencyMs * (0.9 + h * 0.2))) : undefined,
           downBytes: BigInt(Math.round(down)),
           upBytes: BigInt(Math.round(down * 0.15)),
+          downRate: BigInt(Math.round(speed.down)),
+          upRate: BigInt(Math.round(speed.up)),
         }),
       );
     }
@@ -647,6 +762,28 @@ function availability(u: Upstream, t: number, now: number): number {
   const h = random(Math.floor(t / HOUR) * 31 + u.name.charCodeAt(0))();
   if (u.state === UpstreamState.DEGRADED) return h < 0.3 ? 0.7 + h : 1;
   return h < 0.04 ? 0.5 + h * 10 : 1;
+}
+
+/**
+ * The speed test that ran through `u` at `t` (on the half hour), as of `now`:
+ * none in the future or while the upstream was down; else near its usual speed.
+ */
+function speedTest(u: Upstream, t: number, now: number): { down: number; up: number } | undefined {
+  if (t % SPEED_EVERY !== 0 || t > now) return undefined;
+  if (u.state === UpstreamState.DOWN && now - t < DOWN_FOR) return undefined;
+  const h = random(Math.floor(t / MINUTE) * 13 + u.name.charCodeAt(0) + u.name.charCodeAt(3))();
+  return { down: Math.round(u.speed.down * (0.8 + h * 0.4)), up: Math.round(u.speed.up * (0.75 + h * 0.5)) };
+}
+
+/** The average of the speed tests in the step that starts at `t`, as the daemon samples them; 0 for none. */
+function speedInStep(u: Upstream, t: number, step: number, now: number): { down: number; up: number } {
+  const tests: { down: number; up: number }[] = [];
+  for (let s = Math.ceil(t / SPEED_EVERY) * SPEED_EVERY; s < t + step; s += SPEED_EVERY) {
+    const test = speedTest(u, s, now);
+    if (test) tests.push(test);
+  }
+  const mean = (pick: (x: { down: number; up: number }) => number) => tests.reduce((sum, x) => sum + pick(x), 0) / Math.max(tests.length, 1);
+  return { down: mean((x) => x.down), up: mean((x) => x.up) };
 }
 
 /** A made-up 32-byte key in base64, stable for a seed. Not a real key. */

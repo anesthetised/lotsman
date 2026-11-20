@@ -29,6 +29,7 @@ import (
 type fakeSource struct {
 	control.ConnectionSource
 	control.HistorySource
+	control.IncidentSource
 	*controltest.Users
 }
 

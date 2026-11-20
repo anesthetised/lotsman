@@ -55,7 +55,7 @@ func newProvider(t *testing.T, name string, tunnelNet netip.Prefix, port uint16)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dev := tunnel.New("provider-"+name, tn, quiet)
+	dev := tunnel.New("provider-"+name, tn, quiet, nil)
 	server := awgconf.Config{
 		Interface: awgconf.Interface{PrivateKey: serverKey, ListenPort: port, Params: params},
 		Peers:     []awgconf.Peer{{PublicKey: clientKey.Public(), AllowedIPs: []netip.Prefix{netip.PrefixFrom(clientAddr, 32)}}},
@@ -134,7 +134,7 @@ func newClient(t *testing.T, conf string) *client {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dev := tunnel.New("client", tn, quiet)
+	dev := tunnel.New("client", tn, quiet, nil)
 	if err := dev.Configure(cfg.UAPI()); err != nil {
 		t.Fatal(err)
 	}
@@ -315,7 +315,8 @@ metrics: {listen: 127.0.0.1:19100}
 	eventually(t, "active client on nl in status", 10*time.Second, func() bool {
 		status, _ := capture(t, "-config", cfgPath, "upstream", "status")
 		f := tableRow(status, "nl")
-		return strings.Contains(status, "ROUTED  ACTIVE") && len(f) > 2 && f[len(f)-2] == "1" && f[len(f)-1] == "1"
+		// ROUTED and ACTIVE come before SPEED MBIT/S and INCIDENTS.
+		return strings.Contains(status, "ROUTED  ACTIVE") && len(f) > 4 && f[len(f)-4] == "1" && f[len(f)-3] == "1"
 	})
 	eventually(t, "live upstream nl and handshake in user list", 5*time.Second, func() bool {
 		list, _ := capture(t, "-config", cfgPath, "user", "list")
@@ -455,7 +456,8 @@ metrics: {listen: 127.0.0.1:19100}
 	de.dev.Close()
 	eventually(t, "remaining upstream down", 15*time.Second, func() bool {
 		status, _ := capture(t, "-config", cfgPath, "upstream", "status")
-		return strings.Count(status, "down") == 1 && !strings.Contains(status, "up ")
+		f := tableRow(status, "de")
+		return len(f) > 3 && f[3] == "down" && f[len(f)-1] == "down" // the state, and the open incident
 	})
 	eventually(t, "peer rule removed", 5*time.Second, func() bool {
 		rules, err := netlink.RuleList(netlink.FAMILY_V4)

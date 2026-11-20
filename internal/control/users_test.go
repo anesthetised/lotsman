@@ -540,7 +540,8 @@ func TestUserSnapshot(t *testing.T) {
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
 	st := daemon.Status{
 		Upstreams: []daemon.UpstreamStatus{
-			{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme", State: health.Up, Routed: 2, Active: 2, Latency: time.Millisecond},
+			{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme", State: health.Up, Routed: 2, Active: 2, Latency: time.Millisecond,
+				Speed: health.Speed{Down: 7, Up: 8, Time: now}, Incidents: []store.IncidentKind{store.IncidentSendErrors}},
 			{Name: "de", Kind: "awg", Geo: "DE", Provider: "acme", State: health.Up, Routed: 1, Active: 1},
 			{Name: "us", Kind: "awg", Geo: "US", Provider: "beta", State: health.Up, Routed: 1},
 			{Name: "fi", Kind: "awg", Geo: "FI", Provider: "beta", State: health.Up},
@@ -559,8 +560,10 @@ func TestUserSnapshot(t *testing.T) {
 		Time: got.Time, ClientMtu: 1280,
 		Total: &lotsmanv1.Traffic{DownBytes: 30, UpBytes: 30, DownRate: 30, UpRate: 30},
 		Upstreams: []*lotsmanv1.UpstreamStatus{
+			// The exit's speed is hers to see; its incidents are the operator's.
 			{Name: "nl", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "NL", Provider: "acme",
-				State: lotsmanv1.UpstreamState_UPSTREAM_STATE_UP, Latency: got.Upstreams[0].Latency},
+				State: lotsmanv1.UpstreamState_UPSTREAM_STATE_UP, Latency: got.Upstreams[0].Latency,
+				Speed: &lotsmanv1.Speed{DownRate: 7, UpRate: 8, Time: timestamppb.New(now)}},
 			// Routed through, though not among her exits.
 			{Name: "fi", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "FI", Provider: "beta", State: lotsmanv1.UpstreamState_UPSTREAM_STATE_UP},
 		},
@@ -662,7 +665,7 @@ func TestUserSelfHistory(t *testing.T) {
 		},
 	})
 	f := &fakeHistory{res: history.Result{Step: time.Minute, Samples: []store.Sample{
-		{Time: t0, UpRatio: 0.5, Latency: 20 * time.Millisecond, Down: 1000, Up: 100},
+		{Time: t0, UpRatio: 0.5, Latency: 20 * time.Millisecond, Down: 1000, Up: 100, DownRate: 300, UpRate: 30},
 	}}}
 	src.HistorySource = f
 	_, self := userClients(src)
@@ -674,7 +677,7 @@ func TestUserSelfHistory(t *testing.T) {
 	for _, name := range []string{"nl", "de"} {
 		got, err := self.UpstreamHistory(alice, req(name))
 		want := &lotsmanv1.HistoryResponse{Step: durationpb.New(time.Minute), Samples: []*lotsmanv1.Sample{
-			{Time: timestamppb.New(t0), UpRatio: 0.5, Latency: durationpb.New(20 * time.Millisecond)},
+			{Time: timestamppb.New(t0), UpRatio: 0.5, Latency: durationpb.New(20 * time.Millisecond), DownRate: 300, UpRate: 30},
 		}}
 		if err != nil || f.name != name || !cmp.Equal(want, got, protocmp.Transform()) {
 			t.Errorf("UpstreamHistory(%s) asked %q: %v, %v", name, f.name, got, err)

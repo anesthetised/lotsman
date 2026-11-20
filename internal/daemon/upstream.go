@@ -42,6 +42,10 @@ type Upstream struct {
 	link    link // set by open
 	// exits counts the times link stopped on its own; d.mu guards it.
 	exits uint64
+	// errs counts what an AWG link's device logs as errors, and sendErrors
+	// judges that a minute at a time; d.mu guards sendErrors.
+	errs       deviceErrors
+	sendErrors sendErrorWindow
 	// serverMu keeps the server changes of a running upstream in order
 	// while its link is told without d.mu (Daemon.applyServer).
 	serverMu sync.Mutex
@@ -282,7 +286,7 @@ func (u *Upstream) setResolved(resolved string) {
 // through run; exited is called if it stops on its own.
 func (u *Upstream) open(t tun.Device, log *slog.Logger, run proxy.Runner, exited func(error)) error {
 	if u.Key == nil {
-		dev := tunnel.New(u.InterfaceName(), t, log)
+		dev := tunnel.New(u.InterfaceName(), t, log, u.errs.add)
 		if err := dev.Configure(u.Conf.UAPI()); err != nil {
 			dev.Close()
 			return err

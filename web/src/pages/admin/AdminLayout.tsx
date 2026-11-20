@@ -5,11 +5,13 @@ import { useLocation, useNavigate } from "@solidjs/router";
 import type { JSX } from "@solidjs/web";
 import { createMemo, Errored, Loading, onSettled, Show } from "solid-js";
 import { redirectToSignIn } from "../../api/auth";
-import { auth } from "../../api/client";
+import { api, auth } from "../../api/client";
+import { createLive } from "../../api/live";
 import { useI18n } from "../../i18n";
 import { buttonClass } from "../../ui/button";
 import { LiveError } from "../LiveError";
 import { SkipLink } from "../SkipLink";
+import { openCount } from "./incidentLog";
 
 export function AdminLayout(props: { children?: JSX.Element }) {
   const { t } = useI18n();
@@ -22,6 +24,35 @@ export function AdminLayout(props: { children?: JSX.Element }) {
         </Show>
       </Loading>
     </Errored>
+  );
+}
+
+/**
+ * How many incidents are open, live: a count beside the nav item, nothing
+ * while none is open, before the first snapshot or when the stream fails
+ * (the page itself says why).
+ */
+function OpenIncidents() {
+  return (
+    <Errored fallback={null}>
+      <Loading fallback={null}>
+        <OpenCount />
+      </Loading>
+    </Errored>
+  );
+}
+
+function OpenCount() {
+  const { t } = useI18n();
+  const snapshot = createLive((signal) => api.status.watch({}, { signal }));
+  const count = createMemo(() => openCount(snapshot().upstreams));
+  return (
+    <Show when={count() > 0}>
+      <span aria-hidden="true" class="ml-1.5 rounded-full bg-bad px-1.5 py-px text-xs font-medium text-accent-fg tabular-nums">
+        {count()}
+      </span>
+      <span class="sr-only"> ({t.admin.openIncidents(count())})</span>
+    </Show>
   );
 }
 
@@ -40,7 +71,7 @@ function Shell(props: { name: string; children?: JSX.Element }) {
   };
   // A section's link is current on its own page and on the pages under it
   // (an upstream's page belongs to the overview, a user's to the users).
-  const link = (href: string, label: string, under?: string) => {
+  const link = (href: string, label: string, under?: string, extra?: JSX.Element) => {
     const current = () => location.pathname === href || (under !== undefined && location.pathname.startsWith(under));
     return (
       <a
@@ -49,6 +80,7 @@ function Shell(props: { name: string; children?: JSX.Element }) {
         class="rounded px-2 py-1 whitespace-nowrap text-muted hover:text-fg aria-[current]:font-medium aria-[current]:text-fg"
       >
         {label}
+        {extra}
       </a>
     );
   };
@@ -62,6 +94,7 @@ function Shell(props: { name: string; children?: JSX.Element }) {
             {link("/admin", t.admin.upstreams, "/admin/upstreams/")}
             {link("/admin/users", t.admin.users, "/admin/users/")}
             {link("/admin/connections", t.admin.connections)}
+            {link("/admin/incidents", t.admin.incidents, undefined, <OpenIncidents />)}
             {link("/admin/passkeys", t.admin.passkeys)}
           </nav>
           <div class="ml-auto flex items-center gap-6">

@@ -100,7 +100,7 @@ func historyResponse(res history.Result, err error) (*lotsmanv1.HistoryResponse,
 	for i, s := range res.Samples {
 		out.Samples[i] = &lotsmanv1.Sample{
 			Time: timestamppb.New(s.Time), UpRatio: float32(s.UpRatio), Latency: duration(s.Latency),
-			DownBytes: s.Down, UpBytes: s.Up,
+			DownBytes: s.Down, UpBytes: s.Up, DownRate: s.DownRate, UpRate: s.UpRate,
 		}
 	}
 	return out, nil

@@ -97,10 +97,10 @@ func TestUpstreamStatusShowsKind(t *testing.T) {
 	if !strings.Contains(out, "UPSTREAM  KIND     INTERFACE") {
 		t.Errorf("no KIND column:\n%s", out)
 	}
-	if f := tableFields(out, "ol"); len(f) != 8 || f[1] != "outline" || f[5] != "-" || f[6] != "2" {
+	if f := tableFields(out, "ol"); len(f) != 10 || f[1] != "outline" || f[5] != "-" || f[6] != "2" {
 		t.Errorf("ol row = %q:\n%s", f, out)
 	}
-	if f := tableFields(out, "nl"); len(f) != 9 || f[1] != "awg" || f[6] != "ago" {
+	if f := tableFields(out, "nl"); len(f) != 11 || f[1] != "awg" || f[6] != "ago" {
 		t.Errorf("nl row = %q:\n%s", f, out)
 	}
 }

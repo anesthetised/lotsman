@@ -20,6 +20,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/flows"
 	"github.com/anesthetised/lotsman/internal/health"
+	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/traffic"
 )
 
@@ -34,6 +35,7 @@ type Source interface {
 	Traffic() traffic.Snapshot
 	ConnectionSource
 	HistorySource
+	IncidentSource
 	Users
 }
 
@@ -43,6 +45,7 @@ func NewServer(src Source) *connect.Server {
 	s := connect.NewServer()
 	lotsmanv1connect.RegisterStatusServiceHandler(s, statusService{src})
 	lotsmanv1connect.RegisterHistoryServiceHandler(s, historyService{src})
+	lotsmanv1connect.RegisterIncidentServiceHandler(s, incidentService{src})
 	lotsmanv1connect.RegisterConnectionServiceHandler(s, connectionService{src, flows.Conntrack{}})
 	lotsmanv1connect.RegisterUserServiceHandler(s, userService{src})
 	lotsmanv1connect.RegisterUserSelfServiceHandler(s, newUserSelfService(src))
@@ -115,7 +118,8 @@ func snapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Snapsho
 		s.Upstreams = append(s.Upstreams, &lotsmanv1.UpstreamStatus{
 			Name: u.Name, Kind: upstreamKind(u.Kind), Geo: u.Geo, Provider: u.Provider,
 			State: upstreamState(u), Latency: duration(u.Latency), LastHandshake: timestamp(u.LastHandshake),
-			Routed: uint32(u.Routed), Active: uint32(u.Active), Traffic: trafficOf(t, ok),
+			Routed: uint32(u.Routed), Active: uint32(u.Active), Traffic: trafficOf(t, ok), Speed: speed(u.Speed),
+			Incidents: incidentKinds(u.Incidents),
 		})
 	}
 	for _, p := range st.Peers {
@@ -130,6 +134,22 @@ func snapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Snapsho
 		s.Peers = append(s.Peers, ps)
 	}
 	return s
+}
+
+// speed is unset before the first speed test.
+func speed(s health.Speed) *lotsmanv1.Speed {
+	if s.Time.IsZero() {
+		return nil
+	}
+	return &lotsmanv1.Speed{DownRate: s.Down, UpRate: s.Up, Time: timestamppb.New(s.Time)}
+}
+
+func incidentKinds(kinds []store.IncidentKind) []lotsmanv1.IncidentKind {
+	var out []lotsmanv1.IncidentKind
+	for _, k := range kinds {
+		out = append(out, incidentKind(k))
+	}
+	return out
 }
 
 func trafficOf(t traffic.Traffic, ok bool) *lotsmanv1.Traffic {

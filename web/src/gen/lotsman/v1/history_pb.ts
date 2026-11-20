@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file lotsman/v1/history.proto.
  */
 export const file_lotsman_v1_history: GenFile = /*@__PURE__*/
-  fileDesc("Chhsb3RzbWFuL3YxL2hpc3RvcnkucHJvdG8SCmxvdHNtYW4udjEimQEKDkhpc3RvcnlSZXF1ZXN0EgwKBG5hbWUYASABKAkSKAoEZnJvbRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASJgoCdG8YAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEicKBHN0ZXAYBCABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iXwoPSGlzdG9yeVJlc3BvbnNlEicKBHN0ZXAYASABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SIwoHc2FtcGxlcxgCIAMoCzISLmxvdHNtYW4udjEuU2FtcGxlIpYBCgZTYW1wbGUSKAoEdGltZRgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEAoIdXBfcmF0aW8YAiABKAISKgoHbGF0ZW5jeRgDIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbhISCgpkb3duX2J5dGVzGAQgASgEEhAKCHVwX2J5dGVzGAUgASgEMpYBCg5IaXN0b3J5U2VydmljZRJDCghVcHN0cmVhbRIaLmxvdHNtYW4udjEuSGlzdG9yeVJlcXVlc3QaGy5sb3RzbWFuLnYxLkhpc3RvcnlSZXNwb25zZRI/CgRQZWVyEhoubG90c21hbi52MS5IaXN0b3J5UmVxdWVzdBobLmxvdHNtYW4udjEuSGlzdG9yeVJlc3BvbnNlQjpaOGdpdGh1Yi5jb20vYW5lc3RoZXRpc2VkL2xvdHNtYW4vYXBpL2xvdHNtYW4vdjE7bG90c21hbnYxYgZwcm90bzM", [file_google_protobuf_duration, file_google_protobuf_timestamp]);
+  fileDesc("Chhsb3RzbWFuL3YxL2hpc3RvcnkucHJvdG8SCmxvdHNtYW4udjEimQEKDkhpc3RvcnlSZXF1ZXN0EgwKBG5hbWUYASABKAkSKAoEZnJvbRgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASJgoCdG8YAyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEicKBHN0ZXAYBCABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iXwoPSGlzdG9yeVJlc3BvbnNlEicKBHN0ZXAYASABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SIwoHc2FtcGxlcxgCIAMoCzISLmxvdHNtYW4udjEuU2FtcGxlIroBCgZTYW1wbGUSKAoEdGltZRgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEAoIdXBfcmF0aW8YAiABKAISKgoHbGF0ZW5jeRgDIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbhISCgpkb3duX2J5dGVzGAQgASgEEhAKCHVwX2J5dGVzGAUgASgEEhEKCWRvd25fcmF0ZRgGIAEoBBIPCgd1cF9yYXRlGAcgASgEMpYBCg5IaXN0b3J5U2VydmljZRJDCghVcHN0cmVhbRIaLmxvdHNtYW4udjEuSGlzdG9yeVJlcXVlc3QaGy5sb3RzbWFuLnYxLkhpc3RvcnlSZXNwb25zZRI/CgRQZWVyEhoubG90c21hbi52MS5IaXN0b3J5UmVxdWVzdBobLmxvdHNtYW4udjEuSGlzdG9yeVJlc3BvbnNlQjpaOGdpdGh1Yi5jb20vYW5lc3RoZXRpc2VkL2xvdHNtYW4vYXBpL2xvdHNtYW4vdjE7bG90c21hbnYxYgZwcm90bzM", [file_google_protobuf_duration, file_google_protobuf_timestamp]);
 
 /**
  * @generated from message lotsman.v1.HistoryRequest
@@ -107,6 +107,19 @@ export type Sample = Message<"lotsman.v1.Sample"> & {
    * @generated from field: uint64 up_bytes = 5;
    */
   upBytes: bigint;
+
+  /**
+   * Upstream only: the speed tests in the step, averaged, bytes per second;
+   * 0 when none ran.
+   *
+   * @generated from field: uint64 down_rate = 6;
+   */
+  downRate: bigint;
+
+  /**
+   * @generated from field: uint64 up_rate = 7;
+   */
+  upRate: bigint;
 };
 
 /**

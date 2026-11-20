@@ -53,7 +53,8 @@ type Deps struct {
 	NewTUN    TUNFunc
 	Probe     ProbeFunc    // AWG upstreams
 	ProbeDNS  DNSProbeFunc // proxy upstreams
-	Transfer  TransferFunc // every upstream, when health.transfer is set
+	Transfer  TransferFunc // every upstream, when health.transfer or health.speed is set
+	Upload    UploadFunc   // every upstream, when health.transfer.upload_url or health.speed is set
 	Counters  CountersFunc // upstream interfaces' byte counters; none when nil
 	// Proxy runs proxy upstreams' stacks: proxy.InProcess when nil, as in
 	// tests on netstack TUNs, which have no descriptor to hand to a helper
@@ -71,13 +72,14 @@ type Daemon struct {
 	probe    ProbeFunc
 	probeDNS DNSProbeFunc
 	transfer TransferFunc
+	upload   UploadFunc
 	runProxy proxy.Runner
 	log      *slog.Logger
 
 	interfaceCounters CountersFunc
 	sampler           traffic.Sampler // the traffic of peers and upstreams; Run starts it
 
-	transferRuns sync.WaitGroup // transfer probes in flight; Run waits for them
+	transferRuns sync.WaitGroup // transfer probes and speed tests in flight; Run waits for them
 
 	// applyMu serializes the changes to d.ups that open, close or bring up
 	// links: Reload, reopenMissing and stop. They release d.mu while a link
@@ -106,6 +108,8 @@ type Daemon struct {
 	rounds         chan struct{}              // one pending token once a round has finished since Rounds was last read
 
 	transfers map[*Upstream]*transferState // throughput health while health.transfer is set
+	speeds    map[*Upstream]*speedState    // speed tests while health.speed is set
+	incidents map[incidentKey]*openIncident
 
 	// Monotonic counters for metrics.
 	probes   map[string]*[2]uint64 // upstream → {ok, fail}
@@ -114,7 +118,7 @@ type Daemon struct {
 	repairs  uint64                // firewall reinstalls after another tool removed it
 	restarts map[string]uint64     // proxy upstream → links that stopped on their own
 
-	transferCounts map[string]*[2]uint64 // upstream → transfer probes {ok, fail}
+	transferCounts map[transferCount]*[2]uint64 // upstream and direction → transfer probes {ok, fail}
 }
 
 func New(d Deps) *Daemon {
@@ -124,7 +128,7 @@ func New(d Deps) *Daemon {
 	}
 	return &Daemon{
 		version: d.Version, cfg: d.Config, id: d.Identity, store: d.Store, dp: d.Dataplane, newTUN: d.NewTUN,
-		probe: d.Probe, probeDNS: d.ProbeDNS, transfer: d.Transfer, runProxy: runProxy, log: d.Log,
+		probe: d.Probe, probeDNS: d.ProbeDNS, transfer: d.Transfer, upload: d.Upload, runProxy: runProxy, log: d.Log,
 		interfaceCounters: d.Counters,
 
 		assignments:    map[netip.Addr]string{},
@@ -135,11 +139,13 @@ func New(d Deps) *Daemon {
 		failures:       map[failure]string{},
 		fetched:        map[string]time.Time{},
 		transfers:      map[*Upstream]*transferState{},
+		speeds:         map[*Upstream]*speedState{},
+		incidents:      map[incidentKey]*openIncident{},
 		wake:           make(chan struct{}, 1),
 		ready:          make(chan struct{}),
 		rounds:         make(chan struct{}, 1),
 		probes:         map[string]*[2]uint64{},
-		transferCounts: map[string]*[2]uint64{},
+		transferCounts: map[transferCount]*[2]uint64{},
 		reroutes:       map[string]uint64{},
 		restarts:       map[string]uint64{},
 	}
@@ -181,8 +187,10 @@ func (d *Daemon) Run(ctx context.Context) error {
 		return err
 	}
 	defer d.stop()
-	// Transfer probes end once ctx is done; none may outlive the devices.
+	// Transfer probes and speed tests end once ctx is done; none may outlive
+	// the devices.
 	defer d.transferRuns.Wait()
+	defer d.watchSendErrors(ctx)()
 	defer d.sampleTraffic(ctx)() // stopped before d.stop closes the devices
 	defer d.recordHistory(ctx)() // reads the sampler and the trackers, so it stops first too
 	// Stopped before d.stop, so no repair races the teardown.
@@ -225,6 +233,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 }
 
 func (d *Daemon) start(ctx context.Context) error {
+	d.closeLeftoverIncidents(time.Now())
 	d.mu.Lock()
 	cfg := d.cfg
 	d.mu.Unlock()
@@ -329,6 +338,7 @@ func (d *Daemon) linkExited(u *Upstream, err error) {
 	if u.Tracker.Fail() {
 		d.log.Info("upstream health changed", "upstream", u.Name, "from", before, "to", u.Tracker.State(), "err", err)
 	}
+	d.setIncident(u.Name, store.IncidentDown, true, errText(err), time.Now())
 	_ = d.applyAlive(u) // drops pins to it; a failure is logged and retried next round
 	if err := d.reconcile(); err != nil {
 		d.log.Error("reconcile after upstream exit", "err", err)
@@ -521,8 +531,9 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 	// are not up yet; routes and labels already match.
 	d.ups = kept
 	d.cfg = cfg
-	if cfg.Health.Transfer == nil {
-		d.stopTransfers()
+	d.trimTransfers()
+	if cfg.Health.Speed == nil {
+		clear(d.speeds)
 	}
 	d.mu.Unlock()
 
@@ -601,6 +612,8 @@ func (d *Daemon) dropUpstream(u *Upstream) link {
 	delete(d.notUp, u)
 	delete(d.failures, failure{"up", u.Name})
 	delete(d.transfers, u)
+	delete(d.speeds, u)
+	d.closeIncidents(u.Name, time.Now())
 	return u.link
 }
 
@@ -1018,6 +1031,9 @@ func (d *Daemon) probeAll(ctx context.Context) {
 			if changed {
 				d.log.Info("upstream health changed", "upstream", u.Name, "from", before, "to", u.Tracker.State(), "err", err)
 			}
+			if slices.Contains(d.ups, u) { // not removed by a reload meanwhile
+				d.setIncident(u.Name, store.IncidentDown, u.Tracker.State() == health.Down, errText(err), time.Now())
+			}
 			if _, stale := d.aliveFailed[u.Name]; changed || stale {
 				_ = d.applyAlive(u) // failure is logged and retried next round
 			}
@@ -1033,6 +1049,7 @@ func (d *Daemon) probeAll(ctx context.Context) {
 	wg.Wait()
 	// After the round, so an upstream that just came up is measured at once.
 	d.startTransfers(ctx)
+	d.startSpeedTests(ctx)
 }
 
 // verifyFirewall repairs the firewall if another tool removed it, such as by
@@ -1283,12 +1300,13 @@ func (d *Daemon) unroute(ip netip.Addr) error {
 	return nil
 }
 
-// countResult counts one probe result in m, upstream → {ok, fail}.
-func countResult(m map[string]*[2]uint64, upstream string, ok bool) {
-	c := m[upstream]
+// countResult counts one probe result in m, upstream (or what else keys
+// it) → {ok, fail}.
+func countResult[K comparable](m map[K]*[2]uint64, key K, ok bool) {
+	c := m[key]
 	if c == nil {
 		c = new([2]uint64)
-		m[upstream] = c
+		m[key] = c
 	}
 	if ok {
 		c[0]++
@@ -1332,9 +1350,11 @@ type UpstreamStatus struct {
 	State         health.State
 	Degraded      bool // reachable, but failing its transfer probes
 	Latency       time.Duration
-	LastHandshake time.Time // with the provider; zero if never, and for proxy upstreams
-	Routed        int       // clients whose traffic is directed through this upstream
-	Active        int       // of those, clients with a handshake inside ActiveWindow
+	LastHandshake time.Time            // with the provider; zero if never, and for proxy upstreams
+	Routed        int                  // clients whose traffic is directed through this upstream
+	Active        int                  // of those, clients with a handshake inside ActiveWindow
+	Speed         health.Speed         // the latest speed test; zero before one or with health.speed off
+	Incidents     []store.IncidentKind // the kinds open now, in the order of store.IncidentKinds
 }
 
 type PeerStatus struct {
@@ -1373,7 +1393,7 @@ func (d *Daemon) Status() Status {
 	})
 	for _, u := range d.ups {
 		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Geo: u.Geo, Provider: u.Provider, Interface: u.InterfaceName(), State: u.Tracker.State(), Degraded: d.degraded(u),
-			Latency: u.Tracker.Latency(), Routed: routed[u.Name], Active: active[u.Name]}
+			Latency: u.Tracker.Latency(), Routed: routed[u.Name], Active: active[u.Name], Speed: d.speedOf(u), Incidents: d.openKinds(u.Name)}
 		if peer := u.link.Stats().Peer; peer != nil {
 			s.LastHandshake = peer.LastHandshake
 		}

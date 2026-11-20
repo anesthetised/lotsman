@@ -30,6 +30,8 @@ export const ru: Dict = {
     upstreams: "Выходы",
     users: "Пользователи",
     connections: "Соединения",
+    incidents: "Инциденты",
+    openIncidents: (n: number) => `открытых: ${n}`,
     name: "Имя",
     kind: "Тип",
     location: "Страна",

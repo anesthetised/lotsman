@@ -162,7 +162,7 @@ metrics: {listen: 127.0.0.1:19100}
 		status, _ := capture(t, "-config", cfgPath, "upstream", "status")
 		body, _, err := scrape()
 		f := tableRow(status, "ol")
-		return err == nil && len(f) == 8 && f[1] == "outline" && f[3] == "up" &&
+		return err == nil && len(f) == 10 && f[1] == "outline" && f[3] == "up" &&
 			strings.Contains(body, `lotsman_upstream_info{upstream="ol",kind="outline",interface="lm-up-ol"} 1`) &&
 			strings.Contains(body, `lotsman_upstream_flows{upstream="ol"}`)
 	})

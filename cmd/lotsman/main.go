@@ -44,6 +44,9 @@ Commands:
                               print the config again
   device rm USER/DEVICE       remove the device
   upstream status             show upstream health as last written by the daemon
+  incidents [-upstream NAME] [-n N]
+                              list the latest N (50) incidents with upstreams, of every upstream
+                              or of NAME: the open ones first, then the newest
   web                         run the web panel (as the lotsman-web user)
   web enroll                  print a one-time link that enrolls an operator's passkey
 
@@ -130,6 +133,8 @@ func run(args []string) error {
 		return deviceRemove(*configPath, rest)
 	case "upstream status":
 		return upstreamStatus(*configPath)
+	case "incidents":
+		return incidents(*configPath, rest)
 	case "web", "web enroll":
 		// The panel has its own config: lotsman.yaml is root's alone.
 		path := defaultWebConfigPath()

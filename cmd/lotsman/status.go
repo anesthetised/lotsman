@@ -4,10 +4,13 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"text/tabwriter"
 	"time"
 
@@ -15,6 +18,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/daemon"
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/proxy"
+	"github.com/anesthetised/lotsman/internal/store"
 )
 
 func pidPath(stateDir string) string    { return filepath.Join(stateDir, "lotsman.pid") }
@@ -58,7 +62,7 @@ func upstreamStatus(configPath string) error {
 	}
 	fmt.Printf("updated %s ago, client MTU %d\n", time.Since(s.UpdatedAt).Round(time.Second), s.ClientMTU)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "UPSTREAM\tKIND\tINTERFACE\tSTATE\tLATENCY\tLAST HANDSHAKE\tROUTED\tACTIVE")
+	fmt.Fprintln(w, "UPSTREAM\tKIND\tINTERFACE\tSTATE\tLATENCY\tLAST HANDSHAKE\tROUTED\tACTIVE\tSPEED MBIT/S\tINCIDENTS")
 	for _, u := range s.Upstreams {
 		handshake := ago(u.LastHandshake)
 		if (config.Upstream{Kind: u.Kind}).Proxy() {
@@ -68,7 +72,74 @@ func upstreamStatus(configPath string) error {
 		if u.Degraded && u.State == health.Up {
 			state = "degraded" // reachable, but failing its transfer probes
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\n", u.Name, u.Kind, u.Interface, state, u.Latency.Round(time.Millisecond), handshake, u.Routed, u.Active)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%d\t%d\t%s\t%s\n", u.Name, u.Kind, u.Interface, state, u.Latency.Round(time.Millisecond), handshake,
+			u.Routed, u.Active, speedText(u.Speed), incidentsText(u.Incidents))
+	}
+	return w.Flush()
+}
+
+// speedText is a speed test's rates as down/up in megabits per second, or
+// "-" before the first test.
+func speedText(s health.Speed) string {
+	if s.Time.IsZero() {
+		return "-"
+	}
+	mbits := func(rate uint64) string { return strconv.FormatFloat(float64(rate)*8/1e6, 'f', 1, 64) }
+	return mbits(s.Down) + "/" + mbits(s.Up)
+}
+
+// incidentsText lists the kinds of open incidents, or "-" for none.
+func incidentsText(kinds []store.IncidentKind) string {
+	if len(kinds) == 0 {
+		return "-"
+	}
+	s := make([]string, len(kinds))
+	for i, k := range kinds {
+		s[i] = string(k)
+	}
+	return strings.Join(s, ",")
+}
+
+// DefaultIncidents is how many incidents `lotsman incidents` lists without -n.
+const DefaultIncidents = 50
+
+// incidents lists incidents from the store, which the daemon writes as they
+// open and close.
+func incidents(configPath string, args []string) error {
+	fs := flag.NewFlagSet("incidents", flag.ContinueOnError)
+	upstream := fs.String("upstream", "", "only this upstream's incidents")
+	n := fs.Int("n", DefaultIncidents, "how many to list")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("incidents: unexpected argument %q", fs.Arg(0))
+	}
+	if *n < 1 {
+		return fmt.Errorf("incidents: -n must be at least 1")
+	}
+	cfg, err := config.Load(configPath)
+	if err != nil {
+		return err
+	}
+	st, err := store.Open(dbPath(cfg.StateDir))
+	if err != nil {
+		return err
+	}
+	defer st.Close()
+	list, err := st.Incidents(*upstream, *n)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	// The detail goes last: it has spaces.
+	fmt.Fprintln(w, "UPSTREAM\tKIND\tSTARTED\tDURATION\tDEVICES\tDETAIL")
+	for _, in := range list {
+		duration := "ongoing"
+		if !in.Open() {
+			duration = in.Ended.Sub(in.Started).String()
+		}
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n", in.Upstream, in.Kind, in.Started.Local().Format("2006-01-02T15:04:05"), duration, in.Devices, in.Detail)
 	}
 	return w.Flush()
 }
@@ -123,8 +194,16 @@ func checkConfig(configPath string) error {
 	}
 	fmt.Println(health)
 	if t := cfg.Health.Transfer; t != nil {
-		fmt.Printf("transfer url %s  min_bytes %d  timeout %s  interval %s ±20%%\n", t.URL, t.MinBytes, t.Timeout, t.Interval)
+		upload := ""
+		if t.UploadURL != "" {
+			upload = fmt.Sprintf("  upload_url %s  upload_bytes %d", t.UploadURL, t.UploadBytes)
+		}
+		fmt.Printf("transfer url %s  min_bytes %d%s  timeout %s  interval %s ±20%%\n", t.URL, t.MinBytes, upload, t.Timeout, t.Interval)
 	}
+	if s := cfg.Health.Speed; s != nil {
+		fmt.Printf("speed    down_url %s  up_url %s  bytes %d  timeout %s  interval %s ±20%%\n", s.DownURL, s.UpURL, s.Bytes, s.Timeout, s.Interval)
+	}
+	fmt.Printf("incidents send_errors_per_minute %d\n", cfg.Incidents.SendErrorsPerMinute)
 	for _, w := range warnings {
 		fmt.Println("warning:", w)
 	}
