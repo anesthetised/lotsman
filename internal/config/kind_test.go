@@ -8,7 +8,7 @@ import (
 )
 
 const withOutline = `
-endpoint: vpn.example.org:51820
+endpoint: 203.0.113.10:51820
 upstreams:
   - {name: nl, conf: /etc/lotsman/upstreams/nl.conf, geo: NL, provider: acme}
   - {name: ol, kind: outline, conf: /etc/lotsman/upstreams/ol.key, geo: NL, provider: beta, max_flows: 100}

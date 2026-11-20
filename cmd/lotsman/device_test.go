@@ -22,7 +22,7 @@ func routesConfig(t *testing.T) string {
 	}
 	path := filepath.Join(dir, "lotsman.yaml")
 	if err := os.WriteFile(path, []byte(`
-endpoint: vpn.example.org:51820
+endpoint: 203.0.113.10:51820
 state_dir: `+filepath.Join(dir, "state")+`
 upstreams: [`+strings.Join(ups, ", ")+`]
 `), 0o600); err != nil {

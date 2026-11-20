@@ -1,8 +1,10 @@
 # Lotsman configuration. Copy to /etc/lotsman/lotsman.yaml.
 
-# Where the AmneziaWG listener binds and what clients connect to.
+# Where the AmneziaWG listener binds and what clients connect to: endpoint is
+# the public IP and port, never a hostname (clients would resolve it outside
+# the tunnel).
 listen: 0.0.0.0:51820
-endpoint: vpn.example.org:51820
+endpoint: 203.0.113.10:51820
 # The AmneziaWG generation the listener speaks, for every client: 3 (header
 # protection and random trailers; Amnezia client 5.0.1.5 or later) or 2 (older
 # clients). Changing it needs a restart and new client configs.

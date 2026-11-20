@@ -90,7 +90,7 @@ func testConfig(t *testing.T) string {
 	up := writeProviderConf(t, dir, "nl")
 	path := filepath.Join(dir, "lotsman.yaml")
 	os.WriteFile(path, []byte(`
-endpoint: vpn.example.org:51820
+endpoint: 203.0.113.10:51820
 state_dir: `+filepath.Join(dir, "state")+`
 upstreams: [{name: nl, conf: `+up+`, geo: NL, provider: acme}]
 `), 0o600)
@@ -148,7 +148,7 @@ func TestCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("device add output is not a config: %v\n%s", err, out)
 	}
-	if client.Interface.MTU != 1392 || client.Interface.Addresses[0].String() != "10.77.0.2/32" || client.Peers[0].Endpoint != "vpn.example.org:51820" {
+	if client.Interface.MTU != 1392 || client.Interface.Addresses[0].String() != "10.77.0.2/32" || client.Peers[0].Endpoint != "203.0.113.10:51820" {
 		t.Errorf("client config = %+v", client)
 	}
 	if _, err := capture(t, "-config", cfg, "device", "add", "alice/laptop"); err == nil {
@@ -372,9 +372,9 @@ func TestCLIRejectsInvalidEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, endpoint := range []string{":51820", "vpn.example.org:banana", "vpn.example.org:0", "vpn.example.org:65536"} {
+	for _, endpoint := range []string{":51820", "vpn.example.org:51820", "203.0.113.10:banana", "203.0.113.10:0", "203.0.113.10:65536"} {
 		t.Run(endpoint, func(t *testing.T) {
-			invalid := strings.Replace(string(original), "endpoint: vpn.example.org:51820", "endpoint: '"+endpoint+"'", 1)
+			invalid := strings.Replace(string(original), "endpoint: 203.0.113.10:51820", "endpoint: '"+endpoint+"'", 1)
 			if err := os.WriteFile(path, []byte(invalid), 0o600); err != nil {
 				t.Fatal(err)
 			}
