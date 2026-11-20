@@ -173,7 +173,7 @@ func TestDownstreamHandshakePerLevel(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			client := tunnel.New("client", tn, quiet)
+			client := tunnel.New("client", tn, quiet, nil)
 			defer client.Close()
 			if err := client.Configure(conf.UAPI()); err != nil {
 				t.Fatal(err)

@@ -166,6 +166,27 @@ var migrations = []string{
 	ALTER TABLE users ADD COLUMN edit_routes INTEGER NOT NULL DEFAULT 1;
 	ALTER TABLE users ADD COLUMN show_providers INTEGER NOT NULL DEFAULT 1;
 	ALTER TABLE users ADD COLUMN exits TEXT NOT NULL DEFAULT '[]';`,
+	// Speed tests and incidents (#167). A history row keeps the sum of the
+	// rates its speed tests measured and their count, so rows add up when
+	// they fold and a step averages over the tests, not over the rows. An
+	// incident is one stretch of one kind of trouble with one upstream; the
+	// partial index keeps one of a kind open per upstream.
+	`ALTER TABLE upstream_samples ADD COLUMN speed_tests INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE upstream_samples ADD COLUMN down_rate_sum INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE upstream_samples ADD COLUMN up_rate_sum INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE upstream_hour_samples ADD COLUMN speed_tests INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE upstream_hour_samples ADD COLUMN down_rate_sum INTEGER NOT NULL DEFAULT 0;
+	ALTER TABLE upstream_hour_samples ADD COLUMN up_rate_sum INTEGER NOT NULL DEFAULT 0;
+	CREATE TABLE incidents (
+		id       INTEGER PRIMARY KEY,
+		upstream TEXT NOT NULL,
+		kind     TEXT NOT NULL,
+		started  INTEGER NOT NULL,
+		ended    INTEGER,
+		detail   TEXT NOT NULL,
+		devices  INTEGER NOT NULL
+	);
+	CREATE UNIQUE INDEX incidents_open ON incidents (upstream, kind) WHERE ended IS NULL;`,
 }
 
 type User struct {

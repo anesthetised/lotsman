@@ -7,11 +7,17 @@ import type { JSX } from "@solidjs/web";
 import { createEffect, onSettled, untrack } from "solid-js";
 import uPlot from "uplot";
 import { useI18n } from "../i18n";
+import { loneValues } from "./loneValues";
 
 export interface ChartSeries {
   label: string;
   /** A colour token from styles.css, such as "--color-chart-down". */
   color: string;
+  /**
+   * Whether the series is sparse, with gaps (null) between values: a line
+   * needs two values in a row, so a value alone between gaps gets a dot.
+   */
+  sparse?: boolean;
 }
 
 export interface LineChartProps {
@@ -67,7 +73,19 @@ export function LineChart(props: LineChartProps) {
         { ...axis, ...timeAxis },
         { ...axis, size: 96, values: (_u, ticks) => ticks.map(props.format) },
       ],
-      series: [{}, ...props.series.map((s) => ({ label: s.label, stroke: token(s.color), width: 1.5, points: { show: false } }))],
+      series: [
+        {},
+        ...props.series.map(
+          (s): uPlot.Series => ({
+            label: s.label,
+            stroke: token(s.color),
+            width: 1.5,
+            points: s.sparse
+              ? { show: true, size: 5, width: 0, fill: token(s.color), filter: (u, i) => loneValues(u.data[i] ?? []) }
+              : { show: false },
+          }),
+        ),
+      ],
     };
   };
 

@@ -16,6 +16,7 @@ import { StateBadge } from "../../ui/StateBadge";
 import { Availability } from "../Availability";
 import { LiveError } from "../LiveError";
 import { kindLabel, stateLabel, stateLevel } from "../upstream";
+import { IncidentBadge } from "./IncidentList";
 
 const windows = ["1", "5", "15"] as const;
 type Window = (typeof windows)[number];
@@ -159,7 +160,10 @@ function UpstreamRow(props: { upstream: UpstreamStatus; trend: readonly number[]
         </div>
       </th>
       <td class="px-3 py-1.5">
-        <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />
+        <div class="flex flex-col items-start gap-1">
+          <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />
+          <IncidentBadge upstream={u().name} kinds={u().incidents} />
+        </div>
       </td>
       <td class="px-3 py-1.5 text-right tabular-nums">
         <Show when={u().latency} fallback="—">

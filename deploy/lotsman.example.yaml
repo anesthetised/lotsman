@@ -77,11 +77,31 @@ health:
   # degraded (used only when a route has nothing better), up_after passes
   # clear it; while failing it probes every interval/5. About 18 MiB a day per
   # upstream at these values. The host's resolver looks up the URL's host.
+  # With upload_url it also uploads upload_bytes of random data right after,
+  # which catches a path that loses outgoing packets (72 MiB a day more).
   # transfer:
   #   url: https://speed.cloudflare.com/__down?bytes=65536   # or a list
   #   min_bytes: 65536
+  #   upload_url: https://speed.cloudflare.com/__up          # optional
+  #   upload_bytes: 262144
   #   timeout: 10s
   #   interval: 5m
+  # Off unless set: measures each upstream's speed for the charts and
+  # `lotsman upstream status`, one upstream at a time. Every interval (±20%)
+  # it downloads bytes from down_url and uploads as many to up_url. Only
+  # informs: a failed test changes nothing. About 180 MiB a day per upstream.
+  # speed:
+  #   down_url: https://speed.cloudflare.com/__down?bytes=2000000
+  #   up_url: https://speed.cloudflare.com/__up
+  #   bytes: 2000000
+  #   interval: 30m
+  #   timeout: 30s
+
+# An AmneziaWG upstream whose device logs more errors (failed sends) than this
+# in a minute gets a send_errors incident until 5 quiet minutes in a row; see
+# `lotsman incidents`. Down and degraded upstreams get incidents too.
+# incidents:
+#   send_errors_per_minute: 5
 
 # How long the availability and traffic history behind the web panel's charts
 # is kept: samples of a minute for minute_retention, then samples of an hour

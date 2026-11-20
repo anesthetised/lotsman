@@ -11,14 +11,14 @@ import (
 	"github.com/anesthetised/lotsman/internal/store"
 )
 
-// UpstreamHealth is each upstream's availability right now, for the history
-// writer. It implements history.Source with Traffic and Retention.
+// UpstreamHealth is each upstream's availability and latest speed test right
+// now, for the history writer. It implements history.Source with Traffic and Retention.
 func (d *Daemon) UpstreamHealth() map[string]history.UpstreamHealth {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	out := make(map[string]history.UpstreamHealth, len(d.ups))
 	for _, u := range d.ups {
-		out[u.Name] = history.UpstreamHealth{Up: u.Tracker.State() == health.Up && !d.degraded(u), Latency: u.Tracker.Latency()}
+		out[u.Name] = history.UpstreamHealth{Up: u.Tracker.State() == health.Up && !d.degraded(u), Latency: u.Tracker.Latency(), Speed: d.speedOf(u)}
 	}
 	return out
 }

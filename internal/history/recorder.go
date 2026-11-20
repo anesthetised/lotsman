@@ -11,6 +11,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/traffic"
 )
@@ -26,6 +27,7 @@ type UpstreamHealth struct {
 	// transfer probe exists to catch exactly that.
 	Up      bool
 	Latency time.Duration // the latest successful probe's time
+	Speed   health.Speed  // the latest speed test; zero before the first
 }
 
 // Batch is one finished minute, ready to be stored.
@@ -48,6 +50,9 @@ type Recorder struct {
 	// against zero.
 	peerTotals     map[int64]traffic.Counter
 	upstreamTotals map[string]traffic.Counter
+	// The time of each upstream's latest speed test, kept so a test counts
+	// in the minute that first sees it and in no other.
+	speeds map[string]time.Time
 
 	peers     map[int64]*traffic.Counter
 	upstreams map[string]*upstreamMinute
@@ -58,6 +63,9 @@ type upstreamMinute struct {
 	ticks, up int // readings, and those that found it up
 	rttSum    time.Duration
 	traffic   traffic.Counter
+	// Speed tests that finished in the minute, and their rates' sums.
+	speedTests             int
+	downRateSum, upRateSum uint64
 }
 
 // Observe folds one reading in. health is every upstream the daemon runs and
@@ -72,6 +80,9 @@ type upstreamMinute struct {
 // show a spike for them. A series that appears later counts in full, as the
 // sampler does, a total that went back counts as restarted, and one that is
 // missing from a sample keeps its baseline.
+//
+// An upstream's speed test counts in the minute of the first reading that
+// shows it.
 func (r *Recorder) Observe(now time.Time, health map[string]UpstreamHealth, tr traffic.Snapshot) (Batch, bool) {
 	minute := now.Truncate(Resolution)
 	var done Batch
@@ -82,6 +93,7 @@ func (r *Recorder) Observe(now time.Time, health map[string]UpstreamHealth, tr t
 	if r.peers == nil {
 		r.peerTotals, r.upstreamTotals = map[int64]traffic.Counter{}, map[string]traffic.Counter{}
 		r.peers, r.upstreams = map[int64]*traffic.Counter{}, map[string]*upstreamMinute{}
+		r.speeds = map[string]time.Time{}
 	}
 	r.minute = minute
 
@@ -91,6 +103,12 @@ func (r *Recorder) Observe(now time.Time, health map[string]UpstreamHealth, tr t
 		if h.Up {
 			u.up++
 			u.rttSum += h.Latency
+		}
+		if sp := h.Speed; !sp.Time.IsZero() && !sp.Time.Equal(r.speeds[name]) {
+			r.speeds[name] = sp.Time
+			u.speedTests++
+			u.downRateSum += sp.Down
+			u.upRateSum += sp.Up
 		}
 	}
 	if !tr.Time.IsZero() {
@@ -135,7 +153,8 @@ func (r *Recorder) finish() Batch {
 		if u.ticks == 0 {
 			continue
 		}
-		s := store.UpstreamSample{Name: name, UpRatio: float64(u.up) / float64(u.ticks), Down: u.traffic.Down, Up: u.traffic.Up}
+		s := store.UpstreamSample{Name: name, UpRatio: float64(u.up) / float64(u.ticks), Down: u.traffic.Down, Up: u.traffic.Up,
+			SpeedTests: u.speedTests, DownRateSum: u.downRateSum, UpRateSum: u.upRateSum}
 		if u.up > 0 {
 			s.RTT = u.rttSum / time.Duration(u.up)
 		}

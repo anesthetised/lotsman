@@ -21,6 +21,8 @@ export interface Formatters {
   milliseconds(ms: number): string;
   /** A ratio in [0, 1] as a percentage. */
   percent(ratio: number): string;
+  /** A length of time in its two largest units, rounded down: "45 sec", "12 min", "2 hr 5 min", "3 days 4 hr". */
+  duration(ms: number): string;
   /** How long ago `date` was, relative to `now`: "5 seconds ago". */
   ago(date: Date, now: Date): string;
   /** A date and time of day: "Nov 19, 2026, 12:15 PM". */
@@ -62,6 +64,18 @@ export function formatters(locale: string): Formatters {
     },
     percent(ratio) {
       return percent.format(ratio);
+    },
+    duration(ms) {
+      const seconds = Math.max(0, Math.floor(ms / 1000));
+      const [m, h, d] = [Math.floor(seconds / 60), Math.floor(seconds / 3600), Math.floor(seconds / 86400)];
+      // Whole units: no rounding to significant digits as for rates.
+      const whole = (value: number, name: string) => new Intl.NumberFormat(locale, { style: "unit", unit: name, unitDisplay: "short" }).format(value);
+      const pair = (big: number, bigUnit: string, small: number, smallUnit: string) =>
+        small > 0 ? `${whole(big, bigUnit)} ${whole(small, smallUnit)}` : whole(big, bigUnit);
+      if (seconds < 60) return whole(seconds, "second");
+      if (seconds < 3600) return whole(m, "minute");
+      if (seconds < 86400) return pair(h, "hour", m % 60, "minute");
+      return pair(d, "day", h % 24, "hour");
     },
     ago(date, now) {
       const seconds = Math.round((date.getTime() - now.getTime()) / 1000);

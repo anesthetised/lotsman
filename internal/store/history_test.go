@@ -311,6 +311,53 @@ func TestStepAcrossHourAndMinuteRows(t *testing.T) {
 	}
 }
 
+// A step's rates are the mean over its speed tests, wherever they are
+// stored: minutes with none do not drag it down, and folding into hours,
+// or writing a minute twice, keeps every test.
+func TestSpeedTestsAverageOverTests(t *testing.T) {
+	s := open(t)
+	speed := func(tests int, down, up uint64) []UpstreamSample {
+		return []UpstreamSample{{Name: "nl", UpRatio: 1, SpeedTests: tests, DownRateSum: down, UpRateSum: up}}
+	}
+	mustAdd(t, s, at(0, 10), speed(1, 1000, 100), nil)
+	mustAdd(t, s, at(0, 11), speed(0, 0, 0), nil)
+	mustAdd(t, s, at(0, 40), speed(1, 3000, 300), nil)
+	mustAdd(t, s, at(1, 10), speed(1, 5000, 500), nil)
+	mustAdd(t, s, at(1, 10), speed(1, 7000, 700), nil) // the same minute again
+	mustAdd(t, s, at(1, 20), speed(0, 0, 0), nil)
+
+	rates := func(step time.Duration) [][2]uint64 {
+		t.Helper()
+		got, err := s.UpstreamSamples("nl", at(0, 0), at(2, 0), step)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out [][2]uint64
+		for _, x := range got {
+			out = append(out, [2]uint64{x.DownRate, x.UpRate})
+		}
+		return out
+	}
+	want := [][2]uint64{{1000, 100}, {0, 0}, {3000, 300}, {6000, 600}, {0, 0}}
+	if diff := cmp.Diff(want, rates(time.Minute)); diff != "" {
+		t.Errorf("by the minute (-want +got):\n%s", diff)
+	}
+	hours := [][2]uint64{{2000, 200}, {6000, 600}}
+	if diff := cmp.Diff(hours, rates(time.Hour)); diff != "" {
+		t.Errorf("by the hour (-want +got):\n%s", diff)
+	}
+	// Hour 0 folds; over both hours, the four tests average to 4000.
+	if err := s.Compact(at(2, 0), time.Hour, 100*time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if diff := cmp.Diff(hours, rates(time.Hour)); diff != "" {
+		t.Errorf("by the hour, hour 0 folded (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff([][2]uint64{{4000, 400}}, rates(2*time.Hour)); diff != "" {
+		t.Errorf("both hours (-want +got):\n%s", diff)
+	}
+}
+
 func TestHasPeer(t *testing.T) {
 	s := open(t)
 	p, err := s.AddUserPeer("alice", "phone", nl, subnet)

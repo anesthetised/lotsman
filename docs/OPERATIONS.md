@@ -144,8 +144,9 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
 | `state_dir` | Server identity, SQLite database, pid, status and `serve.lock` files, cached dynamic Outline keys. |
 | `upstreams[]` | `name` (≤ 9 chars, becomes `lm-up-<name>`), `kind` (`awg`, the default, `outline` or `vless`), `conf` path (the provider's AmneziaWG config, for `outline` a file with the access key or its `ssconf://` URL, for `vless` a file with the `vless://` link), the required labels routes select by, `geo` (the exit's country, ISO 3166-1 alpha-2 in capitals, such as `NL`) and `provider` (lowercase letters, digits and `-`, up to 32 characters), and for the proxy kinds `outline` and `vless` `max_flows` (default 4096; see [Outline upstreams](#outline-upstreams) and [VLESS upstreams](#vless-upstreams)). |
-| `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline and VLESS upstream; default `1.1.1.1:53`), `down_after`, `up_after`, and the optional `transfer` block (off when absent; see [Throttled upstreams](#throttled-upstreams-transfer-probe)). |
+| `health` | `interval`, `probe` (an `ip:port` reachable through every AWG upstream, or a list of them), `dns` (a resolver `ip:port`, or a list, queried through every Outline and VLESS upstream; default `1.1.1.1:53`), `down_after`, `up_after`, and the optional `transfer` and `speed` blocks (off when absent; see [Throttled upstreams](#throttled-upstreams-transfer-probe) and [Speed tests](#speed-tests)). |
 | `history` | `minute_retention` (default `168h`, 7 days; at least `1h`) and `hour_retention` (default `2160h`, 90 days; not shorter than `minute_retention`): how long the [history](#history) keeps samples of a minute and of an hour. Go durations, so hours (`168h`), not days. Applies on reload. |
+| `incidents` | `send_errors_per_minute` (default 5): how many errors an AWG upstream's device may log in a minute before a `send_errors` [incident](#incidents) opens. Applies on reload. |
 | `users` | `max_devices`: how many devices a user may have when adding one on their [page](#user-links), default 5. `0` turns adding off. The operator's commands are not limited. |
 
 `listen` binds exactly the configured numeric address; hostnames and an omitted
@@ -631,6 +632,7 @@ token to the panel in a header, which proxies do not log by default. A link cut 
 
 ```bash
 lotsman upstream status
+lotsman incidents       # see Incidents
 journalctl -u lotsman -f
 ip rule show            # one "from <client>/32 lookup 100x" per routed client
 nft list table inet lotsman
@@ -652,7 +654,9 @@ a proxy upstream has none and shows `-`. `ROUTED` counts clients whose traffic i
 database is routed somewhere whether or not it is connected. `ACTIVE` counts those with a
 WireGuard handshake in the last three minutes, which is what "connected" means for WireGuard;
 `user list` shows each client's last handshake and current upstream (`blocked` when no healthy
-upstream matches its route, `-` when the daemon is not running).
+upstream matches its route, `-` when the daemon is not running). `SPEED MBIT/S` is the latest
+[speed test](#speed-tests), down/up, and `-` before one or with `health.speed` off. `INCIDENTS`
+lists the kinds of [incident](#incidents) open for the upstream, `-` for none.
 
 ### Control socket
 
@@ -954,8 +958,9 @@ the host can. Changing `metrics.listen` needs a restart.
 | `lotsman_upstream_probe_latency_seconds` | `upstream` | last successful probe |
 | `lotsman_upstream_probes_total` | `upstream`, `result` | `ok` / `fail` |
 | `lotsman_upstream_degraded` | `upstream` | 1 while it is reachable but fails its transfer probes; always 0 with `health.transfer` off |
-| `lotsman_upstream_transfer_seconds` | `upstream` | duration of the last transfer probe, a failed one included (then about `timeout`) |
-| `lotsman_upstream_transfer_probes_total` | `upstream`, `result` | transfer probes, `ok` / `fail` |
+| `lotsman_upstream_transfer_seconds` | `upstream`, `probe` | duration of the last transfer probe, `download` or `upload`, a failed one included (then about `timeout`) |
+| `lotsman_upstream_transfer_probes_total` | `upstream`, `probe`, `result` | transfer probes, `download` / `upload`, `ok` / `fail` |
+| `lotsman_upstream_send_errors_total` | `upstream` | AWG only: errors its device logged, such as failed sends (see [Incidents](#incidents)) |
 | `lotsman_upstream_last_handshake_timestamp_seconds` | `upstream` | AWG only; 0 if never |
 | `lotsman_upstream_clients` | `upstream` | clients routed through it, connected or not |
 | `lotsman_upstream_active_clients` | `upstream` | of those, with a handshake in the last 3 minutes |
@@ -980,8 +985,9 @@ scrape_configs:
 
 ## History
 
-The daemon records each upstream's availability and latency and each upstream's and peer's traffic
-a minute at a time in `lotsman.db`, for the web panel's charts (`HistoryService`). Nothing to enable.
+The daemon records each upstream's availability, latency and [speed tests](#speed-tests) and each
+upstream's and peer's traffic a minute at a time in `lotsman.db`, for the web panel's charts
+(`HistoryService`). Nothing to enable.
 
 ```yaml
 history:
@@ -1003,6 +1009,9 @@ except the pre-migration backups; lengthening it does not bring back what was dr
   degraded upstream (reachable, failing its transfer probes) counts as not up, as does one not yet
   probed; latency is the mean over the time it was up. This is not `lotsman_upstream_up`, which
   stays 1 while degraded.
+- An upstream's `down_rate` and `up_rate` are the mean of the speed tests that finished in the
+  step, bytes per second, and 0 in a step without one. Folding into hours keeps every test, so a
+  coarse step averages the same tests a fine one shows.
 - A peer has a sample for every minute the daemon ran, idle or not; a gap is a time the daemon
   was not running (a restart loses its last, unfinished minute). The current minute shows up in
   the charts after it ends.
@@ -1097,14 +1106,16 @@ it stops while preserving the firewall and routing state.
 Reachability probes catch an upstream that is cut off. They miss one that is throttled or whose
 TCP flows freeze after the first 15–20 KB, a common way of blocking traffic to foreign hosting:
 the handshake and the small DNS answer pass, real traffic does not. The transfer probe, off unless
-configured, downloads through each upstream every few minutes:
+configured, downloads through each upstream every few minutes, and with `upload_url` also uploads:
 
 ```yaml
 health:
   transfer:
     url: https://speed.cloudflare.com/__down?bytes=65536   # or a list, tried in random order until one passes
     min_bytes: 65536   # default
-    timeout: 10s       # default; covers lookup, connect, TLS, request and body
+    upload_url: https://speed.cloudflare.com/__up          # optional: no upload probe without it
+    upload_bytes: 262144   # default, 256 KiB
+    timeout: 10s       # default, each way; covers lookup, connect, TLS, request and body
     interval: 5m       # default; each upstream draws its own ±20% per probe
 ```
 
@@ -1113,6 +1124,12 @@ health:
   Redirects are followed through the same upstream. Lotsman ships no default URL: pick one that
   serves at least `min_bytes` without compression and does not mind the traffic, such as
   Cloudflare's speed test endpoint above.
+- The upload probe POSTs `upload_bytes` of random data, which no compression on the path can
+  shrink, to `upload_url` and passes when the server answers 2xx within `timeout`. It runs right
+  after the download, on the same schedule, and catches a path that loses outgoing packets while
+  incoming ones pass, which a download alone misses. Each direction keeps its own count of
+  failures; either one failing `down_after` times marks the upstream degraded, and it stays so
+  until both pass again. Each opens its own [incident](#incidents), `download` or `upload`.
 - The connection is bound to the upstream's interface and source address, like the reachability
   probes, for AWG and Outline upstreams alike. The URL's host is resolved by the host's own
   resolver at probe time, outside the upstream.
@@ -1146,8 +1163,76 @@ health:
   minutes. The lookup of the URL's host leaves through the host's own uplink, so whoever watches
   that uplink sees the name every interval; an `http://` URL with an IP address, or a resolver you
   trust, avoids that.
-- `health.transfer` applies on reload; removing it clears every degraded mark at once. A new
-  `interval` takes effect after each upstream's next probe.
+- The upload probe costs `upload_bytes` × 86400 / `interval` on top: 72 MiB a day per upstream at
+  the defaults, sent through the upstream.
+- `health.transfer` applies on reload; removing it clears every degraded mark at once, and
+  removing `upload_url` the upload's. A new `interval` takes effect after each upstream's next
+  probe.
+
+### Speed tests
+
+The speed test, off unless configured, measures how fast each upstream moves a download and an
+upload, for the panel's charts and `upstream status`:
+
+```yaml
+health:
+  speed:
+    down_url: https://speed.cloudflare.com/__down?bytes=2000000
+    up_url: https://speed.cloudflare.com/__up
+    bytes: 2000000     # default; read from down_url, sent to up_url
+    interval: 30m      # default; each upstream draws its own ±20% per test
+    timeout: 30s       # default, each way
+```
+
+- A test downloads `bytes` of `down_url` (which must serve at least that many) and then uploads
+  `bytes` of random data to `up_url`, bound to the upstream like the probes, and records bytes per
+  second each way. A rate counts the whole exchange, connecting and TLS included, as a client
+  fetching that much sees it; on a long path a small `bytes` reads low, so compare upstreams with
+  each other rather than with a speed test site.
+- One test runs at a time across the gateway, since tests through several upstreams at once would
+  share the host's own link, and never beside the same upstream's transfer probe. Tests run only
+  through upstreams that are up.
+- It only informs: a failed test is logged (`speed test failed`) and changes no state, route or
+  incident; the upstream keeps its last result.
+- Cost: 2 × `bytes` per upstream per test, about 180 MiB a day per upstream at the defaults.
+- Applies on reload; removing the block drops the latest results.
+
+### Incidents
+
+The daemon keeps a log of trouble with each upstream, for the operator: the panel's Incidents page,
+`lotsman incidents` and `IncidentService.List`. An incident is one stretch of one kind of trouble
+with one upstream; it opens when the trouble starts and closes when it ends, and at most one of a
+kind is open per upstream.
+
+| Kind | Opens | Closes | Effect on routes |
+|---|---|---|---|
+| `down` | `down_after` failed reachability probes in a row, or a proxy helper that exits | `up_after` passing probes | out of routes |
+| `download` | `down_after` failed download probes in a row | `up_after` passing ones | degraded: a last resort |
+| `upload` | `down_after` failed upload probes in a row | `up_after` passing ones | degraded: a last resort |
+| `send_errors` | more than `incidents.send_errors_per_minute` errors logged by an AWG upstream's device in a minute | 5 minutes in a row at or below it | none |
+
+- `send_errors` counts what amneziawg-go logs as errors on the upstream's device, such as
+  `Failed to send data packets: ... sendmmsg: message too long` when packets exceed what the path
+  takes. It catches trouble the probes' small exchanges do not: the device still handshakes, but
+  some of what clients send is lost. `lotsman_upstream_send_errors_total` counts every one.
+- `detail` keeps the latest error. `devices` is how many devices were routed through the upstream
+  when the incident opened.
+- Incidents are kept in `lotsman.db` for `history.hour_retention`, counted from their end; open
+  ones are kept however old. When the daemon starts it closes what an earlier run left open at the
+  start time and notes that in the detail; trouble that is still there opens a new incident. An
+  upstream removed from the config, or replaced on reload, closes its incidents.
+- The status (`UpstreamStatus.incidents` in the API, `INCIDENTS` in `upstream status`) lists the
+  kinds open now. A user's page never shows incidents.
+
+```console
+$ lotsman incidents -upstream nl -n 20
+UPSTREAM  KIND         STARTED              DURATION  DEVICES  DETAIL
+nl        send_errors  2026-11-20T14:02:00  ongoing   3        12 errors in a minute, the latest: ...
+nl        download     2026-11-20T09:41:13  6m12s     3        transfer from speed.example: 16384 of 65536 bytes in 10s: ...
+```
+
+Open incidents come first, then the newest; `-n` (default 50) caps the list and `-upstream`
+narrows it to one upstream. Times are the host's local time.
 
 ## Memory limit
 
@@ -1231,9 +1316,16 @@ the helper stopped answering for 2 s (logged just before). `operation not permit
 means the unit lacks `CAP_SETUID`/`CAP_SETGID` (see [Helper processes](#helper-processes)).
 
 **An upstream shows `degraded`.** Its transfer probes fail while it stays reachable. The
-`upstream degraded` log line carries the last error: `16384 of 65536 bytes in 10s` is a path that
-freezes or crawls; an error status, `the body ended` or a lookup failure point at the URL, and
-then every upstream degrades at once. Run with `-log-level debug` to see each failed probe.
+`upstream degraded` log line carries the last error and which probe failed, as does the open
+`download` or `upload` incident: `16384 of 65536 bytes in 10s` is a path that freezes or crawls,
+`… of 262144 bytes sent` an upload that stalls; an error status, `the body ended` or a lookup
+failure point at the URL, and then every upstream degrades at once. Run with `-log-level debug` to
+see each failed probe.
+
+**A `send_errors` incident.** Its detail quotes the device's latest error. `message too long`
+usually means packets larger than the host's path to the provider takes; a lower `MTU` in that
+provider's config is the first thing to try. Errors on every upstream at once point at the host's
+own uplink.
 
 **Sites open, large downloads or video hang.** MTU. `config check` prints the client MTU; make
 sure clients actually imported the config with that `MTU` line. Try a lower value in a provider

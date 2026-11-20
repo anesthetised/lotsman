@@ -54,7 +54,7 @@ func serve(ctx context.Context, configPath string, level slog.Level) error {
 	d := daemon.New(daemon.Deps{
 		Version: version, Config: e.cfg, Identity: e.id, Store: e.store,
 		Dataplane: linux.New(), NewTUN: tunnel.CreateTUN, Probe: health.ProbeOnInterface, ProbeDNS: health.DNSOnInterface,
-		Transfer: health.TransferOnInterface, Counters: traffic.InterfaceCounters, Proxy: helpers.Start, Log: log,
+		Transfer: health.TransferOnInterface, Upload: health.UploadOnInterface, Counters: traffic.InterfaceCounters, Proxy: helpers.Start, Log: log,
 	})
 	// Subscribe before the pid file appears: SIGUSR1 kills a process that has
 	// not subscribed yet, and `user add` signals as soon as it finds the file.

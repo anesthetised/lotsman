@@ -26,7 +26,7 @@ func newDevice(t *testing.T, name string, addr netip.Addr) (*Device, *netstack.N
 	if err != nil {
 		t.Fatal(err)
 	}
-	d := New(name, tn, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	d := New(name, tn, slog.New(slog.NewTextHandler(io.Discard, nil)), nil)
 	t.Cleanup(d.Close)
 	return d, tnet
 }

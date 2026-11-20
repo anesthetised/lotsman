@@ -66,6 +66,23 @@ describe("formatters", () => {
     expect(ruf.ago(new Date("2026-11-17T12:00:00Z"), now)).toBe("позавчера");
   });
 
+  test("durations in their two largest units, rounded down", () => {
+    const s = 1000;
+    const [m, h, d] = [60 * s, 3600 * s, 86400 * s];
+    expect([0, 45 * s, 12 * m + 59 * s, 2 * h, 2 * h + 5 * m, d, 3 * d + 4 * h + 30 * m, 400 * d].map(enf.duration)).toEqual([
+      "0 sec",
+      "45 sec",
+      "12 min",
+      "2 hr",
+      "2 hr 5 min",
+      "1 day",
+      "3 days 4 hr",
+      "400 days",
+    ]);
+    expect(ruf.duration(2 * h + 5 * m)).toBe("2 ч 5 мин");
+    expect(enf.duration(-5 * s)).toBe("0 sec");
+  });
+
   test("milliseconds and percent", () => {
     expect(enf.milliseconds(41.6)).toBe("42 ms");
     expect(ruf.percent(0.993)).toBe("99,3 %");

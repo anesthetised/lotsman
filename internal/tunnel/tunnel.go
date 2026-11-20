@@ -22,23 +22,31 @@ type Device struct {
 }
 
 // New starts a device on t. The caller owns t's creation (a real TUN on Linux,
-// a netstack one in tests) so this package stays portable.
-func New(name string, t tun.Device, log *slog.Logger) *Device {
-	return newWithBind(name, t, conn.NewDefaultBind(), log)
+// a netstack one in tests) so this package stays portable. onError, when
+// set, is called with every error the device logs, such as a failed send,
+// from the device's own goroutines.
+func New(name string, t tun.Device, log *slog.Logger, onError func(msg string)) *Device {
+	return newWithBind(name, t, conn.NewDefaultBind(), log, onError)
 }
 
 // NewBound creates a downstream device bound to one numeric local address and
 // its family. Unspecified addresses are family-specific; mapped IPv6 uses IPv4.
 // Socket binding happens during Up, which reports binding errors.
 func NewBound(name string, t tun.Device, addr netip.Addr, log *slog.Logger) *Device {
-	return newWithBind(name, t, newAddressBind(addr), log)
+	return newWithBind(name, t, newAddressBind(addr), log, nil)
 }
 
-func newWithBind(name string, t tun.Device, bind conn.Bind, log *slog.Logger) *Device {
+func newWithBind(name string, t tun.Device, bind conn.Bind, log *slog.Logger, onError func(string)) *Device {
 	log = log.With("device", name)
 	logger := &device.Logger{
 		Verbosef: func(format string, args ...any) { log.Debug(fmt.Sprintf(format, args...)) },
-		Errorf:   func(format string, args ...any) { log.Error(fmt.Sprintf(format, args...)) },
+		Errorf: func(format string, args ...any) {
+			msg := fmt.Sprintf(format, args...)
+			log.Error(msg)
+			if onError != nil {
+				onError(msg)
+			}
+		},
 	}
 	return &Device{name: name, dev: device.NewDevice(t, bind, logger)}
 }

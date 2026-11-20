@@ -284,7 +284,8 @@ func unauthenticated(err error) error {
 // userSnapshot is the status as one user may see it: their own peers, and
 // the upstreams of userUpstreams. Other users' peers make up an upstream's
 // routed, active and traffic, so those stay unset; the total is the user's
-// own peers' sum. Without show_providers no upstream has a provider.
+// own peers' sum. Incidents are the operator's. Without show_providers no
+// upstream has a provider.
 func userSnapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Snapshot, u store.User) *lotsmanv1.StatusSnapshot {
 	var own daemon.Status
 	var total traffic.Traffic
@@ -302,7 +303,7 @@ func userSnapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Sna
 	visible := userUpstreams(st, u)
 	for _, up := range st.Upstreams {
 		if visible[up.Name] {
-			up.Routed, up.Active = 0, 0
+			up.Routed, up.Active, up.Incidents = 0, 0, nil
 			if !u.Rights.ShowProviders {
 				up.Provider = ""
 			}

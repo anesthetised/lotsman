@@ -28,8 +28,8 @@ test("the gateway totals and an upstream's page", async ({ page }) => {
   await expect(page).toHaveURL("/admin/upstreams/lv-1");
   await expect(page.getByRole("heading", { name: "Upstream lv-1" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Upstreams", exact: true })).toHaveAttribute("aria-current", "page");
-  // The live chart and the two history charts.
-  await expect(page.locator("figure canvas")).toHaveCount(3);
+  // The live chart and the three history charts.
+  await expect(page.locator("figure canvas")).toHaveCount(4);
   await expect(page.getByRole("img", { name: /^Availability over 24 hours: \d/ })).toBeVisible();
 
   const peers = page.getByRole("region", { name: "Routed peers" });

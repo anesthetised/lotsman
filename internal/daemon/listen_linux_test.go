@@ -111,7 +111,7 @@ func TestDaemonListenAddress(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					client := tunnel.New("listen-client", tn, quiet)
+					client := tunnel.New("listen-client", tn, quiet, nil)
 					defer client.Close()
 					conf := ClientConfig(h.cfg, h.d.id, attempt.peer, h.d.ClientMTU())
 					conf.Peers[0].Endpoint = netip.AddrPortFrom(netip.MustParseAddr(attempt.endpoint), port).String()

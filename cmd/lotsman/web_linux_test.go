@@ -45,6 +45,7 @@ func (everyoneOperator) User(*http.Request) (string, error) { return "", nil }
 // unless a test sets them; their peers are in the status, routed nowhere.
 type panelSource struct {
 	control.ConnectionSource
+	control.IncidentSource
 	*controltest.Users
 }
 

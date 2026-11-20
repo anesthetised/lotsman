@@ -51,14 +51,14 @@ var (
 
 func TestHistoryMapsTheRequestAndTheResponse(t *testing.T) {
 	f := &fakeHistory{res: history.Result{Step: 2 * time.Minute, Samples: []store.Sample{
-		{Time: t0, UpRatio: 0.75, Latency: 25 * time.Millisecond, Down: 1000, Up: 100},
+		{Time: t0, UpRatio: 0.75, Latency: 25 * time.Millisecond, Down: 1000, Up: 100, DownRate: 300, UpRate: 30},
 		// An upstream that was never up has no latency, not a zero one.
 		{Time: t0.Add(2 * time.Minute), UpRatio: 0, Down: 7, Up: 3},
 	}}}
 	client := historyClient(f)
 	req := &lotsmanv1.HistoryRequest{Name: "nl", From: timestamppb.New(t0), To: timestamppb.New(t1), Step: durationpb.New(90 * time.Second)}
 	want := &lotsmanv1.HistoryResponse{Step: durationpb.New(2 * time.Minute), Samples: []*lotsmanv1.Sample{
-		{Time: timestamppb.New(t0), UpRatio: 0.75, Latency: durationpb.New(25 * time.Millisecond), DownBytes: 1000, UpBytes: 100},
+		{Time: timestamppb.New(t0), UpRatio: 0.75, Latency: durationpb.New(25 * time.Millisecond), DownBytes: 1000, UpBytes: 100, DownRate: 300, UpRate: 30},
 		{Time: timestamppb.New(t0.Add(2 * time.Minute)), DownBytes: 7, UpBytes: 3},
 	}}
 

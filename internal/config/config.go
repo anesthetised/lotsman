@@ -28,8 +28,22 @@ type Config struct {
 	Health    Health       `yaml:"health"`
 	Metrics   Metrics      `yaml:"metrics"`
 	History   History      `yaml:"history"`
+	Incidents Incidents    `yaml:"incidents"`
 	Users     Users        `yaml:"users"`
 }
+
+// Incidents tunes when trouble with an upstream is logged as an incident.
+// The probes' own thresholds (health.down_after and the transfer probe's)
+// decide the others.
+type Incidents struct {
+	// SendErrorsPerMinute is how many errors an AWG upstream's device may
+	// log in a minute before a send_errors incident opens.
+	SendErrorsPerMinute int `yaml:"send_errors_per_minute"`
+}
+
+// DefaultSendErrorsPerMinute is incidents.send_errors_per_minute when the
+// config does not set it.
+const DefaultSendErrorsPerMinute = 5
 
 // History is how long the availability and traffic history is kept: samples
 // of a minute for MinuteRetention, then samples of an hour until HourRetention
@@ -93,26 +107,52 @@ type Health struct {
 	DNS       DNSTargets    `yaml:"dns"`
 	DownAfter int           `yaml:"down_after"`
 	UpAfter   int           `yaml:"up_after"`
-	// Transfer, when set, also downloads through every upstream now and
-	// then; nil (the block is absent) turns it off.
+	// Transfer, when set, also downloads (and uploads) through every
+	// upstream now and then; nil (the block is absent) turns it off.
 	Transfer *Transfer `yaml:"transfer"`
+	// Speed, when set, measures every upstream's speed now and then; nil
+	// turns it off.
+	Speed *Speed `yaml:"speed"`
 }
 
 // Transfer is the throughput probe: an upstream that passes its
-// reachability probes but cannot move MinBytes of a download within Timeout
-// is degraded. It runs every Interval, give or take 20%, per upstream.
+// reachability probes but cannot move MinBytes of a download within
+// Timeout, or, with UploadURL set, cannot upload UploadBytes within it, is
+// degraded. It runs every Interval, give or take 20%, per upstream.
 type Transfer struct {
-	URL      TransferURLs  `yaml:"url"`
-	MinBytes int64         `yaml:"min_bytes"`
-	Timeout  time.Duration `yaml:"timeout"`
-	Interval time.Duration `yaml:"interval"`
+	URL         TransferURLs  `yaml:"url"`
+	MinBytes    int64         `yaml:"min_bytes"`
+	UploadURL   string        `yaml:"upload_url"` // "": no upload probe
+	UploadBytes int64         `yaml:"upload_bytes"`
+	Timeout     time.Duration `yaml:"timeout"`
+	Interval    time.Duration `yaml:"interval"`
 }
 
 // Transfer defaults, applied by Parse to fields left out or zero.
 const (
-	DefaultTransferMinBytes = 64 << 10
-	DefaultTransferTimeout  = 10 * time.Second
-	DefaultTransferInterval = 5 * time.Minute
+	DefaultTransferMinBytes    = 64 << 10
+	DefaultTransferUploadBytes = 256 << 10
+	DefaultTransferTimeout     = 10 * time.Second
+	DefaultTransferInterval    = 5 * time.Minute
+)
+
+// Speed is the speed test: every Interval, give or take 20%, it downloads
+// Bytes of DownURL and uploads Bytes to UpURL through each upstream, each
+// within Timeout, and records the rates. It only informs: a failed test
+// changes no state.
+type Speed struct {
+	DownURL  string        `yaml:"down_url"`
+	UpURL    string        `yaml:"up_url"`
+	Bytes    int64         `yaml:"bytes"`
+	Interval time.Duration `yaml:"interval"`
+	Timeout  time.Duration `yaml:"timeout"`
+}
+
+// Speed defaults, applied by Parse to fields left out or zero.
+const (
+	DefaultSpeedBytes    = 2_000_000
+	DefaultSpeedInterval = 30 * time.Minute
+	DefaultSpeedTimeout  = 30 * time.Second
 )
 
 // TransferURLs are the http:// or https:// URLs a transfer probe downloads;
@@ -201,8 +241,9 @@ func Default() Config {
 		StateDir: "/var/lib/lotsman",
 		Health: Health{Interval: 15 * time.Second, Probe: ProbeTargets{netip.MustParseAddrPort("1.1.1.1:443")},
 			DNS: DNSTargets{netip.MustParseAddrPort("1.1.1.1:53")}, DownAfter: 3, UpAfter: 2},
-		History: History{MinuteRetention: 7 * 24 * time.Hour, HourRetention: 90 * 24 * time.Hour},
-		Users:   Users{MaxDevices: DefaultMaxDevices},
+		History:   History{MinuteRetention: 7 * 24 * time.Hour, HourRetention: 90 * 24 * time.Hour},
+		Incidents: Incidents{SendErrorsPerMinute: DefaultSendErrorsPerMinute},
+		Users:     Users{MaxDevices: DefaultMaxDevices},
 	}
 }
 
@@ -228,8 +269,14 @@ func Parse(data []byte) (*Config, error) {
 	}
 	if t := cfg.Health.Transfer; t != nil {
 		t.MinBytes = cmp.Or(t.MinBytes, DefaultTransferMinBytes)
+		t.UploadBytes = cmp.Or(t.UploadBytes, DefaultTransferUploadBytes)
 		t.Timeout = cmp.Or(t.Timeout, DefaultTransferTimeout)
 		t.Interval = cmp.Or(t.Interval, DefaultTransferInterval)
+	}
+	if s := cfg.Health.Speed; s != nil {
+		s.Bytes = cmp.Or(s.Bytes, DefaultSpeedBytes)
+		s.Interval = cmp.Or(s.Interval, DefaultSpeedInterval)
+		s.Timeout = cmp.Or(s.Timeout, DefaultSpeedTimeout)
 	}
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -354,6 +401,14 @@ func (c *Config) Validate() error {
 			return err
 		}
 	}
+	if s := h.Speed; s != nil {
+		if err := s.validate(); err != nil {
+			return err
+		}
+	}
+	if c.Incidents.SendErrorsPerMinute < 0 {
+		return fmt.Errorf("incidents.send_errors_per_minute: must not be negative")
+	}
 	if c.Users.MaxDevices < 0 {
 		return fmt.Errorf("users.max_devices: must not be negative")
 	}
@@ -374,16 +429,40 @@ func (t *Transfer) validate() error {
 		return fmt.Errorf("health.transfer.url: at least one URL is required")
 	}
 	for i, raw := range t.URL {
-		u, err := url.Parse(raw)
-		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		if !httpURL(raw) {
 			return fmt.Errorf("health.transfer.url[%d]: want an http:// or https:// URL with a host, got %q", i, raw)
 		}
 	}
-	if t.MinBytes <= 0 {
-		return fmt.Errorf("health.transfer.min_bytes: must be positive")
+	if t.UploadURL != "" && !httpURL(t.UploadURL) {
+		return fmt.Errorf("health.transfer.upload_url: want an http:// or https:// URL with a host, got %q", t.UploadURL)
+	}
+	if t.MinBytes <= 0 || t.UploadBytes <= 0 {
+		return fmt.Errorf("health.transfer.min_bytes and health.transfer.upload_bytes: must be positive")
 	}
 	if t.Timeout <= 0 || t.Interval <= 0 {
 		return fmt.Errorf("health.transfer.timeout and health.transfer.interval: must be positive")
 	}
 	return nil
+}
+
+func (s *Speed) validate() error {
+	if !httpURL(s.DownURL) {
+		return fmt.Errorf("health.speed.down_url: want an http:// or https:// URL with a host, got %q", s.DownURL)
+	}
+	if !httpURL(s.UpURL) {
+		return fmt.Errorf("health.speed.up_url: want an http:// or https:// URL with a host, got %q", s.UpURL)
+	}
+	if s.Bytes <= 0 {
+		return fmt.Errorf("health.speed.bytes: must be positive")
+	}
+	if s.Timeout <= 0 || s.Interval <= 0 {
+		return fmt.Errorf("health.speed.timeout and health.speed.interval: must be positive")
+	}
+	return nil
+}
+
+// httpURL reports whether raw is an http:// or https:// URL with a host.
+func httpURL(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != ""
 }

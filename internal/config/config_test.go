@@ -287,9 +287,9 @@ func TestTransfer(t *testing.T) {
 		want   Transfer
 	}{
 		"one url, defaults": {"health: {transfer: {url: 'https://speed.example/down?bytes=65536'}}\n",
-			Transfer{URL: TransferURLs{"https://speed.example/down?bytes=65536"}, MinBytes: 65536, Timeout: 10 * time.Second, Interval: 5 * time.Minute}},
-		"list and overrides": {"health:\n  transfer:\n    url: ['http://a.example/x', 'https://b.example:8443/y']\n    min_bytes: 1000\n    timeout: 3s\n    interval: 1m\n",
-			Transfer{URL: TransferURLs{"http://a.example/x", "https://b.example:8443/y"}, MinBytes: 1000, Timeout: 3 * time.Second, Interval: time.Minute}},
+			Transfer{URL: TransferURLs{"https://speed.example/down?bytes=65536"}, MinBytes: 65536, UploadBytes: 256 << 10, Timeout: 10 * time.Second, Interval: 5 * time.Minute}},
+		"list and overrides": {"health:\n  transfer:\n    url: ['http://a.example/x', 'https://b.example:8443/y']\n    min_bytes: 1000\n    upload_url: https://speed.example/up\n    upload_bytes: 2000\n    timeout: 3s\n    interval: 1m\n",
+			Transfer{URL: TransferURLs{"http://a.example/x", "https://b.example:8443/y"}, MinBytes: 1000, UploadURL: "https://speed.example/up", UploadBytes: 2000, Timeout: 3 * time.Second, Interval: time.Minute}},
 		"null block is off": {"health: {transfer: null}\n", Transfer{}},
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -301,7 +301,8 @@ func TestTransfer(t *testing.T) {
 			if cfg.Health.Transfer != nil {
 				got = *cfg.Health.Transfer
 			}
-			if !slices.Equal(got.URL, tc.want.URL) || got.MinBytes != tc.want.MinBytes || got.Timeout != tc.want.Timeout || got.Interval != tc.want.Interval {
+			if !slices.Equal(got.URL, tc.want.URL) || got.MinBytes != tc.want.MinBytes || got.UploadURL != tc.want.UploadURL ||
+				got.UploadBytes != tc.want.UploadBytes || got.Timeout != tc.want.Timeout || got.Interval != tc.want.Interval {
 				t.Errorf("transfer = %+v, want %+v", got, tc.want)
 			}
 		})
@@ -316,12 +317,62 @@ func TestTransfer(t *testing.T) {
 		"negative bytes":   {"health: {transfer: {url: 'http://a.example/', min_bytes: -1}}\n", "health.transfer.min_bytes"},
 		"negative timeout": {"health: {transfer: {url: 'http://a.example/', timeout: -1s}}\n", "health.transfer.timeout"},
 		"unknown key":      {"health: {transfer: {url: 'http://a.example/', bytes: 1}}\n", "field bytes not found"},
+		"bad upload url":   {"health: {transfer: {url: 'http://a.example/', upload_url: 'ftp://a.example/'}}\n", "health.transfer.upload_url:"},
+		"negative upload":  {"health: {transfer: {url: 'http://a.example/', upload_bytes: -1}}\n", "health.transfer.upload_bytes"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if _, err := Parse([]byte(minimal + tc.health)); err == nil || !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("err = %v, want %q", err, tc.want)
 			}
 		})
+	}
+}
+
+func TestSpeed(t *testing.T) {
+	cfg, err := Parse([]byte(minimal))
+	if err != nil || cfg.Health.Speed != nil {
+		t.Fatalf("speed tests are off unless configured: %+v, %v", cfg.Health.Speed, err)
+	}
+	urls := "health: {speed: {down_url: 'https://speed.example/down?bytes=2000000', up_url: 'https://speed.example/up'"
+	cfg, err = Parse([]byte(minimal + urls + "}}\n"))
+	want := Speed{DownURL: "https://speed.example/down?bytes=2000000", UpURL: "https://speed.example/up",
+		Bytes: 2_000_000, Interval: 30 * time.Minute, Timeout: 30 * time.Second}
+	if err != nil || *cfg.Health.Speed != want {
+		t.Errorf("defaults: %+v, %v; want %+v", cfg.Health.Speed, err, want)
+	}
+	cfg, err = Parse([]byte(minimal + urls + ", bytes: 1000, interval: 1h, timeout: 5s}}\n"))
+	want.Bytes, want.Interval, want.Timeout = 1000, time.Hour, 5*time.Second
+	if err != nil || *cfg.Health.Speed != want {
+		t.Errorf("overrides: %+v, %v; want %+v", cfg.Health.Speed, err, want)
+	}
+	for name, tc := range map[string]struct{ health, want string }{
+		"no down url":      {"health: {speed: {up_url: 'https://a.example/'}}\n", "health.speed.down_url"},
+		"no up url":        {"health: {speed: {down_url: 'https://a.example/'}}\n", "health.speed.up_url"},
+		"other scheme":     {"health: {speed: {down_url: 'ftp://a.example/', up_url: 'https://a.example/'}}\n", "health.speed.down_url"},
+		"negative bytes":   {urls + ", bytes: -1}}\n", "health.speed.bytes"},
+		"negative timeout": {urls + ", timeout: -1s}}\n", "health.speed.timeout"},
+		"unknown key":      {urls + ", url: 'https://a.example/'}}\n", "field url not found"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := Parse([]byte(minimal + tc.health)); err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("err = %v, want %q", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestIncidents(t *testing.T) {
+	cfg, err := Parse([]byte(minimal))
+	if err != nil || cfg.Incidents.SendErrorsPerMinute != 5 {
+		t.Fatalf("default = %+v, %v", cfg.Incidents, err)
+	}
+	// Zero is a threshold too: any error opens an incident.
+	cfg, err = Parse([]byte(minimal + "incidents: {send_errors_per_minute: 0}\n"))
+	if err != nil || cfg.Incidents.SendErrorsPerMinute != 0 {
+		t.Errorf("zero = %+v, %v", cfg.Incidents, err)
+	}
+	if _, err := Parse([]byte(minimal + "incidents: {send_errors_per_minute: -1}\n")); err == nil || !strings.Contains(err.Error(), "incidents.send_errors_per_minute") {
+		t.Errorf("negative: %v", err)
 	}
 }
 

@@ -5,6 +5,7 @@ import { i18n, I18nContext } from "../i18n";
 import { AvailabilityBar, availabilityLevel } from "./AvailabilityBar";
 import { ChoiceMenu } from "./ChoiceMenu";
 import { Dialog } from "./Dialog";
+import { loneValues } from "./loneValues";
 import { QrCode, qrCode } from "./QrCode";
 import { sparklinePath } from "./Sparkline";
 
@@ -67,6 +68,13 @@ describe("ChoiceMenu", () => {
 test("sparklinePath scales values into the box", () => {
   expect(sparklinePath([])).toBe("");
   expect(sparklinePath([0, 5, 10], 100, 20)).toBe("M0.0,20.0L50.0,10.0L100.0,0.0");
+});
+
+test("a sparse series marks the values that no line reaches", () => {
+  expect(loneValues([1, null, 2, 3, null, null, 4])).toEqual([0, 6]);
+  expect(loneValues([null, 5, null])).toEqual([1]);
+  expect(loneValues([1, 2])).toEqual([]);
+  expect(loneValues([])).toEqual([]);
 });
 
 test("availability levels and segments", () => {

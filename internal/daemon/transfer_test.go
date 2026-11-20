@@ -56,6 +56,11 @@ func (f *fakeTransfer) probe(ctx context.Context, iface string, _ netip.Addr, ur
 	return 20 * time.Millisecond, nil
 }
 
+// upload is the upload probe: it counts and fails under iface+" up".
+func (f *fakeTransfer) upload(ctx context.Context, iface string, source netip.Addr, url string, size int64, timeout time.Duration) (time.Duration, error) {
+	return f.probe(ctx, iface+" up", source, url, size, timeout)
+}
+
 func (f *fakeTransfer) set(iface string, failing bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -74,7 +79,7 @@ func transferHarness(t *testing.T, upAfter int) (h *harness, f *fakeTransfer, ro
 	t.Helper()
 	h = newHarness(t)
 	f = newFakeTransfer()
-	h.d.transfer = f.probe
+	h.d.transfer, h.d.upload = f.probe, f.upload
 	h.cfg.Health.UpAfter = upAfter
 	h.cfg.Health.Transfer = &config.Transfer{URL: config.TransferURLs{"https://a.test/down", "https://b.test/down"},
 		MinBytes: 65536, Timeout: time.Second, Interval: time.Nanosecond}

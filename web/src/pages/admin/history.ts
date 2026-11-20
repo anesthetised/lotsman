@@ -22,6 +22,21 @@ export const historyRanges = [
 
 export type RangeKey = (typeof historyRanges)[number]["key"];
 
+/**
+ * uPlot columns of the speed tests' down and up rates (bytes per second),
+ * with a gap (null) for a step in which none ran.
+ */
+export function speedSeries(samples: readonly Sample[]): (number | null)[][] {
+  const rate = (v: bigint) => (v > 0n ? Number(v) : null);
+  return [samples.map((s) => (s.time ? timestampMs(s.time) / 1000 : 0)), samples.map((s) => rate(s.downRate)), samples.map((s) => rate(s.upRate))];
+}
+
+/** The mean of the values present, or undefined when there are none. */
+export function meanOf(values: readonly (number | null)[]): number | undefined {
+  const present = values.filter((v): v is number => v !== null);
+  return present.length > 0 ? present.reduce((a, b) => a + b, 0) / present.length : undefined;
+}
+
 /** uPlot columns of the average down and up rates (bytes per second) over each step. */
 export function rateSeries(samples: readonly Sample[], stepMs: number): number[][] {
   const seconds = stepMs / 1000;

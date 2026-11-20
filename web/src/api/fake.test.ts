@@ -1,8 +1,9 @@
-import { durationFromMs, durationMs, timestampFromMs } from "@bufbuild/protobuf/wkt";
+import { durationFromMs, durationMs, timestampFromMs, timestampMs } from "@bufbuild/protobuf/wkt";
 import { Code, ConnectError, createClient } from "@connectrpc/connect";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ConnectionService } from "../gen/lotsman/v1/connection_pb";
 import { HistoryService } from "../gen/lotsman/v1/history_pb";
+import { IncidentKind, IncidentService } from "../gen/lotsman/v1/incident_pb";
 import { StatusService } from "../gen/lotsman/v1/status_pb";
 import { UserService } from "../gen/lotsman/v1/user_pb";
 import { UserSelfService } from "../gen/lotsman/v1/user_self_pb";
@@ -137,6 +138,7 @@ test("operator services answer Unauthenticated while signed out", async () => {
   const transport = createFakeTransport({ signedIn: () => false });
   await expect(createClient(UserService, transport).addUser({ user: "eve" })).rejects.toSatisfy(code(Code.Unauthenticated));
   await expect(createClient(UserService, transport).list({})).rejects.toSatisfy(code(Code.Unauthenticated));
+  await expect(createClient(IncidentService, transport).list({})).rejects.toSatisfy(code(Code.Unauthenticated));
   const stream = createClient(ConnectionService, transport).watch({})[Symbol.asyncIterator]();
   await expect(stream.next()).rejects.toSatisfy(code(Code.Unauthenticated));
 });
@@ -296,4 +298,68 @@ test("ConnectionService.Watch filters by peer and refuses an unknown one", async
   }
   const stream = connections.watch({ peerId: "peer-99" })[Symbol.asyncIterator]();
   await expect(stream.next()).rejects.toSatisfy(notFound);
+});
+
+test("IncidentService.List: open ones first, then newest; by upstream and limit", async () => {
+  const incidents = createClient(IncidentService, createFakeTransport());
+  const all = (await incidents.list({})).incidents;
+  const now = Date.now();
+  expect(all.map((i) => [i.upstream, i.kind, i.ended === undefined])).toEqual([
+    ["nl-1", IncidentKind.UPLOAD, true],
+    ["de-1", IncidentKind.DOWN, true],
+    ["lv-1", IncidentKind.SEND_ERRORS, false],
+    ["lv-2", IncidentKind.DOWN, false],
+    ["nl-1", IncidentKind.DOWNLOAD, false],
+    ["de-1", IncidentKind.UPLOAD, false],
+  ]);
+  expect(timestampMs(all[0]!.started!)).toBe(now - 2 * HOUR - 14 * MINUTE);
+  expect(new Set(all.map((i) => i.id)).size).toBe(all.length);
+  for (const i of all.filter((i) => i.ended)) expect(timestampMs(i.ended!)).toBeGreaterThan(timestampMs(i.started!));
+
+  const nl = (await incidents.list({ upstream: "nl-1" })).incidents;
+  expect(nl.map((i) => i.kind)).toEqual([IncidentKind.UPLOAD, IncidentKind.DOWNLOAD]);
+  expect((await incidents.list({ limit: 3 })).incidents).toHaveLength(3);
+  expect((await incidents.list({ upstream: "xx-1" })).incidents).toEqual([]);
+});
+
+test("StatusService.Watch carries the open incident kinds and the latest speed; the user's Watch neither", async () => {
+  const transport = createFakeTransport();
+  for await (const s of createClient(StatusService, transport).watch({})) {
+    expect(Object.fromEntries(s.upstreams.map((u) => [u.name, u.incidents]))).toEqual({
+      "lv-1": [],
+      "lv-2": [],
+      "al-1": [],
+      "nl-1": [IncidentKind.UPLOAD],
+      "de-1": [IncidentKind.DOWN],
+    });
+    // On the half hour; de-1's last one got through before it went down 6 hours ago.
+    const lv = s.upstreams[0]!.speed!;
+    expect(lv.downRate).toBeGreaterThan(0n);
+    expect(lv.upRate).toBeGreaterThan(0n);
+    expect(timestampMs(lv.time!)).toBe(Math.floor(Date.now() / (30 * MINUTE)) * 30 * MINUTE);
+    expect(timestampMs(s.upstreams[4]!.speed!.time!)).toBeLessThanOrEqual(Date.now() - 6 * HOUR);
+    break;
+  }
+  for await (const s of createClient(UserSelfService, transport).watch({})) {
+    expect(s.upstreams.every((u) => u.incidents.length === 0 && u.speed === undefined)).toBe(true);
+    break;
+  }
+});
+
+test("HistoryService.Upstream averages the speed tests per step, 0 where none ran", async () => {
+  const history = createClient(HistoryService, createFakeTransport());
+  // Tests run on the half hour: one in six 5-minute steps, every hourly one.
+  const fine = await history.upstream(range("lv-1", 1, 5 * MINUTE));
+  const tested = fine.samples.filter((s) => s.downRate > 0n);
+  expect(tested.length).toBe(49); // 12:00 the day before to 12:00 now, both included
+  expect(tested.every((s) => timestampMs(s.time!) % (30 * MINUTE) === 0 && s.upRate > 0n)).toBe(true);
+  const hourly = await history.upstream(range("lv-1", 7, HOUR));
+  expect(hourly.samples.slice(0, -1).every((s) => s.downRate > 0n)).toBe(true);
+  // de-1 has been down for 6 hours: no test got through.
+  const de = await history.upstream(range("de-1", 1, HOUR));
+  expect(de.samples.slice(-6).every((s) => s.downRate === 0n)).toBe(true);
+  // A peer's history and the user's carry no speed.
+  expect((await history.peer(range("peer-1", 1, HOUR))).samples.every((s) => s.downRate === 0n)).toBe(true);
+  const self = await createClient(UserSelfService, createFakeTransport()).upstreamHistory(range("lv-1", 1, HOUR));
+  expect(self.samples.every((s) => s.downRate === 0n && s.upRate === 0n)).toBe(true);
 });

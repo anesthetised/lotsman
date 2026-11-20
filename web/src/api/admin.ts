@@ -3,10 +3,12 @@
 
 import { createClient } from "@connectrpc/connect";
 import { ConnectionService } from "../gen/lotsman/v1/connection_pb";
+import { IncidentService } from "../gen/lotsman/v1/incident_pb";
 import { UserService } from "../gen/lotsman/v1/user_pb";
 import { transport } from "./client";
 
 export const admin = {
   users: createClient(UserService, transport),
   connections: createClient(ConnectionService, transport),
+  incidents: createClient(IncidentService, transport),
 };

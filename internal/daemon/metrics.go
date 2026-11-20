@@ -7,6 +7,7 @@ import (
 
 	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/metrics"
+	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/tunnel"
 )
 
@@ -22,8 +23,9 @@ var Families = []metrics.Family{
 	{Name: "lotsman_upstream_probe_latency_seconds", Type: "gauge", Help: "Latency of the last successful probe."},
 	{Name: "lotsman_upstream_probes_total", Type: "counter", Help: "Probes by result."},
 	{Name: "lotsman_upstream_degraded", Type: "gauge", Help: "1 while the upstream is reachable but fails its transfer probes."},
-	{Name: "lotsman_upstream_transfer_seconds", Type: "gauge", Help: "Duration of the last transfer probe, a failed one included."},
-	{Name: "lotsman_upstream_transfer_probes_total", Type: "counter", Help: "Transfer probes by result."},
+	{Name: "lotsman_upstream_transfer_seconds", Type: "gauge", Help: "Duration of the last transfer probe each way, a failed one included."},
+	{Name: "lotsman_upstream_transfer_probes_total", Type: "counter", Help: "Transfer probes by direction and result."},
+	{Name: "lotsman_upstream_send_errors_total", Type: "counter", Help: "Errors an AWG upstream's device logged, such as failed sends."},
 	{Name: "lotsman_upstream_last_handshake_timestamp_seconds", Type: "gauge", Help: "Unix time of the last handshake with the provider; 0 if none yet."},
 	{Name: "lotsman_upstream_clients", Type: "gauge", Help: "Clients whose traffic is routed through the upstream, connected or not."},
 	{Name: "lotsman_upstream_active_clients", Type: "gauge", Help: "Routed clients with a handshake in the last 3 minutes."},
@@ -84,14 +86,21 @@ func (d *Daemon) Metrics() []metrics.Sample {
 				sample("lotsman_upstream_probes_total", float64(c[1]), up, metrics.Label{Name: "result", Value: "fail"}),
 			)
 		}
-		if c := d.transferCounts[u.Name]; c != nil {
-			out = append(out,
-				sample("lotsman_upstream_transfer_probes_total", float64(c[0]), up, metrics.Label{Name: "result", Value: "ok"}),
-				sample("lotsman_upstream_transfer_probes_total", float64(c[1]), up, metrics.Label{Name: "result", Value: "fail"}),
-			)
+		for _, kind := range []store.IncidentKind{probeDownload, probeUpload} {
+			probe := metrics.Label{Name: "probe", Value: string(kind)}
+			if c := d.transferCounts[transferCount{u.Name, kind}]; c != nil {
+				out = append(out,
+					sample("lotsman_upstream_transfer_probes_total", float64(c[0]), up, probe, metrics.Label{Name: "result", Value: "ok"}),
+					sample("lotsman_upstream_transfer_probes_total", float64(c[1]), up, probe, metrics.Label{Name: "result", Value: "fail"}),
+				)
+			}
+			if t := d.transfers[u]; t != nil && t.probes[kind] != nil {
+				out = append(out, sample("lotsman_upstream_transfer_seconds", t.probes[kind].last.Seconds(), up, probe))
+			}
 		}
-		if t := d.transfers[u]; t != nil && t.ran {
-			out = append(out, sample("lotsman_upstream_transfer_seconds", t.last.Seconds(), up))
+		if u.Key == nil {
+			count, _ := u.errs.read()
+			out = append(out, sample("lotsman_upstream_send_errors_total", float64(count), up))
 		}
 		st := u.link.Stats() // a proxy link's counters are the health round's: no helper request under d.mu
 		if p := st.Peer; p != nil {

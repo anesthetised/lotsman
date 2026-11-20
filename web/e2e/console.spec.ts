@@ -13,6 +13,7 @@ test("every page is reachable from the navigation", async ({ page }) => {
   for (const [name, path, heading] of [
     ["Users", "/admin/users", "Users"],
     ["Connections", "/admin/connections", "Connections"],
+    ["Incidents", "/admin/incidents", "Incidents"],
     ["Passkeys", "/admin/passkeys", "Passkeys"],
     ["Upstreams", "/admin", "Upstreams"],
   ] as const) {
@@ -230,4 +231,83 @@ test("a device's connections open from its user's page", async ({ page }) => {
   await expect(page.getByRole("alert")).toContainText("peer peer-99 not found");
   await page.getByLabel("Peer").selectOption({ label: "All peers" });
   await expect(page.getByRole("table", { name: "Open connections" })).toBeVisible();
+});
+
+test("the incident log: the count in the navigation, open ones first, a filter by upstream", async ({ page }) => {
+  await page.goto("/admin");
+  const nav = page.getByRole("navigation", { name: "Operator" });
+  // nl-1's upload and de-1's outage are open.
+  await expect(nav.getByRole("link", { name: "Incidents (2 open)" })).toBeVisible();
+  await nav.getByRole("link", { name: "Incidents" }).click();
+  await expect(page).toHaveURL("/admin/incidents");
+
+  const table = page.getByRole("table", { name: "Incidents, open first, then newest" });
+  const rows = table.getByRole("row");
+  await expect(rows).toHaveCount(7); // header + 2 open + 4 closed
+  await expect(rows.nth(1)).toContainText("nl-1");
+  await expect(rows.nth(1)).toContainText("Upload fails");
+  await expect(rows.nth(1)).toContainText("The upload probe fails");
+  await expect(rows.nth(1)).toContainText("Ongoing");
+  await expect(rows.nth(2)).toContainText("de-1");
+  await expect(rows.nth(3)).toContainText("Send errors");
+  await expect(rows.nth(3)).toContainText("7 min");
+  await expect(rows.nth(3)).toContainText("sendmmsg: message too long");
+  await expect(page.getByText("2 open · 6 in the log")).toBeVisible();
+
+  // Refresh fetches it again.
+  const updated = page.getByText(/^updated /);
+  const before = await updated.textContent();
+  await expect(async () => {
+    await page.getByRole("button", { name: "Refresh" }).click();
+    await expect(updated).not.toHaveText(before!, { timeout: 500 });
+  }).toPass();
+
+  await page.getByLabel("Upstream").selectOption("nl-1");
+  await expect(page).toHaveURL("/admin/incidents?upstream=nl-1");
+  await expect(rows).toHaveCount(3);
+  await expect(rows.nth(2)).toContainText("Download fails");
+  await page.getByLabel("Upstream").selectOption("al-1");
+  await expect(page.getByText("No incidents for al-1.")).toBeVisible();
+  await expect(table).toBeHidden();
+  await page.getByLabel("Upstream").selectOption({ label: "All upstreams" });
+  await expect(page).toHaveURL("/admin/incidents");
+  await expect(rows).toHaveCount(7);
+
+  // An upstream's name leads to its page.
+  await rows.nth(1).getByRole("link", { name: "nl-1" }).click();
+  await expect(page).toHaveURL("/admin/upstreams/nl-1");
+  await noSidewaysScroll(page);
+});
+
+test("the overview marks upstreams with open incidents and leads to them", async ({ page }) => {
+  await page.goto("/admin");
+  const upstreams = page.getByRole("table").first();
+  await expect(upstreams.getByRole("row", { name: /^nl-1/ }).getByRole("link", { name: "Incident: Upload fails" })).toBeVisible();
+  await expect(upstreams.getByRole("row", { name: /^de-1/ }).getByRole("link", { name: "Incident: Down" })).toBeVisible();
+  await expect(upstreams.getByRole("row", { name: /^lv-1/ }).getByRole("link", { name: /^Incident/ })).toHaveCount(0);
+  await upstreams.getByRole("link", { name: "Incident: Upload fails" }).click();
+  await expect(page).toHaveURL("/admin/incidents?upstream=nl-1");
+  await expect(page.getByLabel("Upstream")).toHaveValue("nl-1");
+  await expect(page.getByRole("table", { name: "Incidents, open first, then newest" }).getByRole("row")).toHaveCount(3);
+  await noSidewaysScroll(page);
+});
+
+test("an upstream's page: its latest speed, the speed chart and its incidents", async ({ page }) => {
+  await page.goto("/admin/upstreams/nl-1");
+  await expect(page.getByRole("heading", { name: "Upstream nl-1" })).toBeVisible();
+  const speed = page.locator("dl > div", { hasText: "Speed test, down / up" });
+  await expect(speed).toContainText(/\d[\d.]* Mb\/s \/ \d[\d.]* kb\/s/);
+  await expect(speed).toContainText(/ago|now/);
+  await expect(page.locator("figcaption", { hasText: "Speed tests" })).toContainText(/Down: mean \d/);
+  await expect(page.locator("figure canvas")).toHaveCount(4); // live, traffic, latency, speed
+
+  const incidents = page.getByRole("region", { name: "Incidents" });
+  await expect(incidents.getByRole("row")).toHaveCount(3); // header + upload (open) + download
+  await expect(incidents.getByRole("row").nth(1)).toContainText("Ongoing");
+  await expect(incidents.getByRole("columnheader", { name: "Upstream" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: "Incident: Upload fails" })).toHaveAttribute("href", "/admin/incidents?upstream=nl-1");
+
+  await page.goto("/admin/upstreams/al-1");
+  await expect(page.getByRole("region", { name: "Incidents" })).toContainText("No incidents for al-1.");
+  await noSidewaysScroll(page);
 });

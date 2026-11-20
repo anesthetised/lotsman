@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
+	"github.com/anesthetised/lotsman/internal/health"
 	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/traffic"
 )
@@ -190,5 +191,38 @@ func TestRecorderGap(t *testing.T) {
 	b, ok = r.Observe(start.Add(11*time.Minute), h, snap(start, map[int64][2]uint64{1: {50, 5}}, nil))
 	if !ok || !b.Time.Equal(start.Add(10*time.Minute)) {
 		t.Errorf("next batch = %+v, %v", b, ok)
+	}
+}
+
+// A speed test counts once, in the minute of the first reading that shows
+// it, though every reading after shows it until the next test.
+func TestRecorderSpeedTests(t *testing.T) {
+	var r Recorder
+	first := health.Speed{Down: 1000, Up: 100, Time: start.Add(10 * time.Second)}
+	second := health.Speed{Down: 3000, Up: 300, Time: start.Add(50 * time.Second)}
+	read := func(at time.Duration, sp health.Speed) (Batch, bool) {
+		h := up(time.Millisecond)
+		h.Speed = sp
+		return r.Observe(start.Add(at), map[string]UpstreamHealth{"nl": h, "de": up(time.Millisecond)}, traffic.Snapshot{})
+	}
+	read(0, health.Speed{})
+	read(20*time.Second, first)
+	read(40*time.Second, first)
+	read(55*time.Second, second)
+	b, ok := read(time.Minute, second)
+	if !ok {
+		t.Fatal("no batch after the minute ended")
+	}
+	want := []store.UpstreamSample{
+		{Name: "de", UpRatio: 1, RTT: time.Millisecond},
+		{Name: "nl", UpRatio: 1, RTT: time.Millisecond, SpeedTests: 2, DownRateSum: 4000, UpRateSum: 400},
+	}
+	if diff := cmp.Diff(want, b.Upstreams); diff != "" {
+		t.Errorf("first minute (-want +got):\n%s", diff)
+	}
+	// The next minute still shows the second test, and does not count it again.
+	b, _ = read(2*time.Minute, second)
+	if got := b.Upstreams[1]; got.SpeedTests != 0 || got.DownRateSum != 0 {
+		t.Errorf("second minute = %+v, want no speed test", got)
 	}
 }

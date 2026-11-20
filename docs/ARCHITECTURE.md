@@ -166,6 +166,42 @@ reachability probes, and requires it within `timeout`. Decided 2026-11-16:
   recognisable signature. The URL's host is resolved by the host resolver; only the connection
   goes through the upstream, as for an AWG endpoint lookup.
 
+### Exit checks and incidents (#167)
+
+Decided 2026-11-20; see [Incidents](OPERATIONS.md#incidents) for the operator's view.
+
+- **Upload probe.** With `health.transfer.upload_url` the transfer probe also POSTs
+  `upload_bytes` of random data after the download, on the same schedule. Each direction keeps its
+  own tracker (`transferState.probes`, keyed by the incident kind it opens), and either one down
+  makes the upstream degraded, so selection and pinning above are unchanged. Separate trackers
+  rather than one for both: an incident names the direction that fails, and a path that only
+  loses uploads must not recover by passing downloads.
+- **Speed test** (`health.speed`). `daemon/speed.go` downloads and uploads `bytes` through each
+  upstream every `interval` ±20%, through the same function seams as the probes
+  (`TransferFunc`, `UploadFunc`). Only informational: no state, route or incident. One test at a
+  time across the gateway, since tests in parallel would measure the host's shared link, and none
+  beside the same upstream's transfer probe. The latest result is in `Status` (and so in
+  `UpstreamStatus.speed`); `UpstreamHealth` hands it to the history recorder, which counts a test
+  in the minute that first sees it. History rows keep `speed_tests`, `down_rate_sum` and
+  `up_rate_sum` (migration 8) rather than an average, so rows add up exactly when they fold or a
+  minute is written twice, and a step's rate is the sum over its tests divided by their count.
+- **Send errors.** `tunnel.New` takes a callback for every error amneziawg-go's logger reports;
+  for an AWG upstream it feeds the upstream's `deviceErrors`. Once a minute `checkSendErrors`
+  takes the count's growth to a `sendErrorWindow`: above `incidents.send_errors_per_minute` is
+  trouble, five minutes in a row at or below it ends it. The device log is the only place these
+  errors surface; the probes' small exchanges rarely hit them.
+- **Incidents.** Table `incidents` (migration 8): `upstream`, `kind`, `started`, `ended` (NULL while
+  open; unix seconds), `detail`, `devices`, with a partial unique index that keeps one of a kind
+  open per upstream. The daemon keeps what is open in memory (`d.incidents`) and calls
+  `setIncident` where it already observes each condition: the reachability round and a link's exit
+  (`down`), `finishTransfer` (`download`, `upload`), `checkSendErrors` (`send_errors`). It is
+  level-triggered (the observed state, not a transition flag), so a store write that fails is
+  retried at the next observation. Each change is written at once under `d.mu`, like the key
+  cache: one small local statement. At start the daemon closes whatever an earlier run left open,
+  since it cannot know whether the trouble lasted; `Store.Compact` expires closed incidents with
+  the hour samples. `IncidentService.List` reads the store; `UpstreamStatus.incidents` comes from
+  memory and is cleared in a user's snapshot.
+
 ## Routes and rights (#161)
 
 Decided 2026-11-19; replaces profiles and upstream tags. A device is one tunnel with its own
