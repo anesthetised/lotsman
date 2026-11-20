@@ -4,6 +4,7 @@ package config
 import (
 	"bytes"
 	"cmp"
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -19,8 +20,8 @@ import (
 
 type Config struct {
 	Listen    string       `yaml:"listen"`
-	AWG       int          `yaml:"awg"` // AmneziaWG generation the listener speaks: 2 or 3
-	Endpoint  string       `yaml:"endpoint"`
+	AWG       int          `yaml:"awg"`      // AmneziaWG generation the listener speaks: 2 or 3
+	Endpoint  string       `yaml:"endpoint"` // IP:port that client configs connect to; never a hostname
 	Subnet    netip.Prefix `yaml:"subnet"`
 	DNS       []netip.Addr `yaml:"dns"`
 	StateDir  string       `yaml:"state_dir"`
@@ -302,15 +303,8 @@ func (c *Config) Validate() error {
 	if c.AWG != 2 && c.AWG != 3 {
 		return fmt.Errorf("awg: must be 2 or 3, got %d", c.AWG)
 	}
-	host, port, err := net.SplitHostPort(c.Endpoint)
-	if err != nil {
+	if err := validateEndpoint(c.Endpoint); err != nil {
 		return fmt.Errorf("endpoint: %w", err)
-	}
-	if host == "" {
-		return fmt.Errorf("endpoint: host is required")
-	}
-	if n, err := strconv.ParseUint(port, 10, 16); err != nil || n == 0 {
-		return fmt.Errorf("endpoint: port must be a number from 1 to 65535")
 	}
 	if !c.Subnet.Addr().Is4() || c.Subnet.Bits() > 24 {
 		return fmt.Errorf("subnet: must be an IPv4 prefix of /24 or larger, got %s", c.Subnet)
@@ -465,4 +459,26 @@ func (s *Speed) validate() error {
 func httpURL(raw string) bool {
 	u, err := url.Parse(raw)
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != ""
+}
+
+// validateEndpoint checks the address client configs connect to: an IP and
+// a port, never a hostname. A client resolves a name before its tunnel is up,
+// through whatever DNS it has, which may be blocked or poisoned; and a name
+// may well point at a proxy that carries HTTP only, such as a CDN in front of
+// the web panel. Either way the config would silently connect elsewhere.
+func validateEndpoint(endpoint string) error {
+	host, port, err := net.SplitHostPort(endpoint)
+	if err != nil {
+		return err
+	}
+	if host == "" {
+		return errors.New("host is required")
+	}
+	if _, err := netip.ParseAddr(host); err != nil {
+		return fmt.Errorf("%q must be an IP address, not a hostname: clients would resolve it outside the tunnel", host)
+	}
+	if n, err := strconv.ParseUint(port, 10, 16); err != nil || n == 0 {
+		return errors.New("port must be a number from 1 to 65535")
+	}
+	return nil
 }

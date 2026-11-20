@@ -9,7 +9,7 @@ import (
 )
 
 const minimal = `
-endpoint: vpn.example.org:51820
+endpoint: 203.0.113.10:51820
 upstreams:
   - name: ac-nl
     conf: /etc/lotsman/upstreams/ac-nl.conf
@@ -135,14 +135,15 @@ func TestValidationErrors(t *testing.T) {
 		"awg four":               {"awg", "awg: 4\n", "awg: must be 2 or 3, got 4"},
 		"awg not a number":       {"awg", "awg: three\n", "cannot unmarshal"},
 		"missing endpoint":       {"endpoint", "endpoint: ''\n", "endpoint:"},
-		"endpoint without port":  {"endpoint", "endpoint: vpn.example.org\n", "endpoint:"},
+		"endpoint without port":  {"endpoint", "endpoint: 203.0.113.10\n", "endpoint:"},
 		"endpoint empty host":    {"endpoint", "endpoint: ':51820'\n", "endpoint: host is required"},
-		"endpoint service port":  {"endpoint", "endpoint: vpn.example.org:banana\n", "endpoint: port must be a number from 1 to 65535"},
-		"endpoint empty port":    {"endpoint", "endpoint: 'vpn.example.org:'\n", "endpoint: port must be a number from 1 to 65535"},
-		"endpoint zero port":     {"endpoint", "endpoint: vpn.example.org:0\n", "endpoint: port must be a number from 1 to 65535"},
-		"endpoint port overflow": {"endpoint", "endpoint: vpn.example.org:65536\n", "endpoint: port must be a number from 1 to 65535"},
-		"endpoint negative port": {"endpoint", "endpoint: vpn.example.org:-1\n", "endpoint: port must be a number from 1 to 65535"},
-		"endpoint signed port":   {"endpoint", "endpoint: vpn.example.org:+1\n", "endpoint: port must be a number from 1 to 65535"},
+		"endpoint hostname":      {"endpoint", "endpoint: vpn.example.org:51820\n", `endpoint: "vpn.example.org" must be an IP address, not a hostname`},
+		"endpoint service port":  {"endpoint", "endpoint: 203.0.113.10:banana\n", "endpoint: port must be a number from 1 to 65535"},
+		"endpoint empty port":    {"endpoint", "endpoint: '203.0.113.10:'\n", "endpoint: port must be a number from 1 to 65535"},
+		"endpoint zero port":     {"endpoint", "endpoint: 203.0.113.10:0\n", "endpoint: port must be a number from 1 to 65535"},
+		"endpoint port overflow": {"endpoint", "endpoint: 203.0.113.10:65536\n", "endpoint: port must be a number from 1 to 65535"},
+		"endpoint negative port": {"endpoint", "endpoint: 203.0.113.10:-1\n", "endpoint: port must be a number from 1 to 65535"},
+		"endpoint signed port":   {"endpoint", "endpoint: 203.0.113.10:+1\n", "endpoint: port must be a number from 1 to 65535"},
 		"ipv6 subnet":            {"subnet", "subnet: fd00::/64\n", "subnet:"},
 		"subnet too small":       {"subnet", "subnet: 10.0.0.0/30\n", "subnet:"},
 		"empty dns":              {"dns", "dns: []\n", "dns:"},
@@ -176,7 +177,7 @@ func TestValidationErrors(t *testing.T) {
 }
 
 func TestEndpointValidForms(t *testing.T) {
-	for _, endpoint := range []string{"vpn.example.org:1", "vpn.example.org:65535", "192.0.2.1:51820", "[2001:db8::1]:51820"} {
+	for _, endpoint := range []string{"192.0.2.1:1", "192.0.2.1:65535", "192.0.2.1:51820", "[2001:db8::1]:51820"} {
 		t.Run(endpoint, func(t *testing.T) {
 			input := replaceTopLevelField(minimal, "endpoint", "endpoint: '"+endpoint+"'\n")
 			cfg, err := Parse([]byte(input))
