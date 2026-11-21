@@ -298,6 +298,8 @@ All notable changes to Lotsman are documented here. The format follows
   load; a 200 MiB limit about halves the peak for at most a 20% loss in the slowest case (#106).
 
 ### Fixed
+- Config downloads in both web panels preserve the `.conf` extension in browsers
+  that append `.txt` to downloads with a plain-text MIME type.
 - AWG upstreams on low-PMTU paths can set `disable_udp_gso: true` to avoid
   `sendmmsg: message too long` when Linux rejects an oversized GSO segment (#165).
   The setting keeps syscall batching and applies to the individual upstream.

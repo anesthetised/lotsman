@@ -70,8 +70,18 @@ test("a device's config shows as a large QR code, a file and text", async ({ pag
   expect(await qr.locator("rect").getAttribute("fill")).toBe("#fff");
   expect(await qr.getAttribute("viewBox")).toMatch(/^-4 -4 (\d+) \1$/);
 
+  // Chromium keeps the suggested name even for text/plain, but some Safari
+  // versions use the MIME type to add .txt to a .conf download.
+  await page.evaluate(() => {
+    const create = URL.createObjectURL;
+    URL.createObjectURL = (object) => {
+      if (object instanceof Blob) document.documentElement.dataset.configDownloadType = object.type;
+      return create.call(URL, object);
+    };
+  });
   const [download] = await Promise.all([page.waitForEvent("download"), page.getByRole("button", { name: "Download .conf" }).click()]);
   expect(download.suggestedFilename()).toBe("phone.conf");
+  await expect(page.locator("html")).toHaveAttribute("data-config-download-type", "application/octet-stream");
   const { createReadStream } = await import("node:fs");
   const chunks: Buffer[] = [];
   for await (const chunk of createReadStream((await download.path())!)) chunks.push(chunk as Buffer);
