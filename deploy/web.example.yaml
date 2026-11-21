@@ -21,3 +21,12 @@ trusted_proxies: [127.0.0.1, "::1"]
 # StateDirectory= creates the default.
 # socket: /run/lotsman/control.sock
 # state_dir: /var/lib/lotsman-web
+
+# Optional quotas from the Outline VPN Telegram bot API. Use the upstream
+# name from lotsman.yaml and the access key name from the provider's account.
+# The token file must be readable by lotsman-web, e.g. 0640 root:lotsman-web.
+# outline_usage:
+#   token_file: /etc/lotsman/outline-api.token
+#   upstreams:
+#     ol-al: "albania-key-name"
+#     ol-lv: "latvia-key-name"

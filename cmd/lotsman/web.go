@@ -58,12 +58,13 @@ func runWeb(ctx context.Context, configPath string, level slog.Level) error {
 		return err
 	}
 	daemon := web.DaemonTransport(cfg.Socket)
-	h := web.New(web.Deps{
-		Config: cfg, Auth: newAuthenticator(operators, daemon), SignIn: operators,
-		Daemon: daemon, UI: web.Dist(), Log: log,
-	})
 	ctx, stop := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	h := web.New(web.Deps{
+		Config: cfg, Auth: newAuthenticator(operators, daemon), SignIn: operators,
+		Daemon: daemon, OutlineUsage: web.StartOutlineUsage(ctx, cfg.OutlineUsage, log),
+		UI: web.Dist(), Log: log,
+	})
 	log.Info("web panel serving", "listen", ln.Addr().String(), "public_url", cfg.Origin(), "socket", cfg.Socket)
 	return web.Serve(ctx, ln, h)
 }

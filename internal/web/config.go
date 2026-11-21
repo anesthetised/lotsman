@@ -31,6 +31,8 @@ type Config struct {
 	Socket string `yaml:"socket"`
 	// StateDir holds web.db.
 	StateDir string `yaml:"state_dir"`
+	// OutlineUsage enables provider quota polling for named upstreams.
+	OutlineUsage *OutlineUsageConfig `yaml:"outline_usage"`
 
 	origin  string
 	rpID    string
@@ -106,6 +108,9 @@ func (c *Config) validate() error {
 	}
 	if c.StateDir == "" {
 		return fmt.Errorf("state_dir: required")
+	}
+	if c.OutlineUsage != nil {
+		return c.OutlineUsage.validate()
 	}
 	return nil
 }

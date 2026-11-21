@@ -22,6 +22,8 @@ type Deps struct {
 	SignIn http.Handler
 	// Daemon carries forwarded calls, normally DaemonTransport.
 	Daemon http.RoundTripper
+	// OutlineUsage serves cached quota data to operators.
+	OutlineUsage http.Handler
 	// UI is the frontend's files, normally Dist.
 	UI  fs.FS
 	Log *slog.Logger
@@ -31,6 +33,18 @@ type Deps struct {
 func New(d Deps) http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle(apiPrefix+"/", newAPI(Scopes, d.Auth, d.Daemon, d.Log))
+	mux.HandleFunc("POST "+outlineUsagePath, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if err := d.Auth.Operator(r); err != nil {
+			fail(w, http.StatusUnauthorized, "not signed in")
+			return
+		}
+		if d.OutlineUsage == nil {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		d.OutlineUsage.ServeHTTP(w, r)
+	})
 	if d.SignIn != nil {
 		mux.Handle(authPrefix+"/", d.SignIn)
 	}

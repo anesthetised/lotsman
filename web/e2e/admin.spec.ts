@@ -14,6 +14,26 @@ test("the operator overview shows live data", async ({ page }) => {
   await expect(page.getByRole("img", { name: /Availability of lv-1 over 7 days: \d/ })).toBeVisible();
 });
 
+test("Outline quotas follow the upstream name and keep the last value on a provider failure", async ({ page }) => {
+  const quota = { limit: 500, remaining: 464.32, unit: "GB", updatedAt: "2026-11-21T15:00:00Z", stale: true };
+  await page.route("**/api/outline-usage", (route) => route.fulfill({
+    json: { "lv-2": quota, "al-1": null, "lv-1": { ...quota, remaining: 123 } },
+  }));
+  await page.goto("/admin");
+  const row = (name: string) => page.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) });
+  await expect(row("lv-2")).toContainText("464.32 of 500 GB left");
+  await expect(row("lv-2")).toContainText("Out of date");
+  await expect(row("al-1")).toContainText("Outline quota unavailable");
+  await expect(row("lv-1")).not.toContainText("123 of 500 GB left");
+
+  await page.getByRole("link", { name: "lv-2", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Upstream lv-2" })).toBeVisible();
+  await expect(page.getByText("464.32 of 500 GB left")).toBeVisible();
+  await page.getByRole("button", { name: "Language" }).click();
+  await page.getByRole("menuitemradio", { name: "Русский" }).click();
+  await expect(page.getByText(/Осталось 464,32 из 500\sГБ/)).toBeVisible();
+});
+
 test("the gateway totals and an upstream's page", async ({ page }) => {
   await page.goto("/admin");
   const totals = page.getByRole("region", { name: "Gateway" });
