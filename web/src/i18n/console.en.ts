@@ -10,6 +10,7 @@ export const consoleEn = {
     blocked: (n: number) => `${n} blocked: no upstream fits`,
   },
   outlineUsage: {
+    title: "Outline quota",
     remaining: (remaining: string, limit: string) => `${remaining} of ${limit} left`,
     unavailable: "Outline quota unavailable",
     stale: "Out of date",

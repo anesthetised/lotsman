@@ -17,6 +17,7 @@ export const consoleRu: ConsoleDict = {
     blocked: (n: number) => `${plural(n, "заблокирован", "заблокированы", "заблокированы")}: нет подходящего выхода`,
   },
   outlineUsage: {
+    title: "Квота Outline",
     remaining: (remaining: string, limit: string) => `Осталось ${remaining} из ${limit}`,
     unavailable: "Квота Outline недоступна",
     stale: "Данные устарели",

@@ -21,16 +21,19 @@ test("Outline quotas follow the upstream name and keep the last value on a provi
   }));
   await page.goto("/admin");
   const row = (name: string) => page.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) });
-  await expect(row("lv-2")).toContainText("464.32 of 500 GB left");
+  await expect(page.getByRole("columnheader", { name: "Outline quota" })).toBeVisible();
+  await expect(row("lv-2").getByRole("cell", { name: /464\.32 of 500 GB left/ })).toBeVisible();
   await expect(row("lv-2")).toContainText("Out of date");
   await expect(row("al-1")).toContainText("Outline quota unavailable");
   await expect(row("lv-1")).not.toContainText("123 of 500 GB left");
 
   await page.getByRole("link", { name: "lv-2", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Upstream lv-2" })).toBeVisible();
+  await expect(page.getByText("Outline quota", { exact: true })).toBeVisible();
   await expect(page.getByText("464.32 of 500 GB left")).toBeVisible();
   await page.getByRole("button", { name: "Language" }).click();
   await page.getByRole("menuitemradio", { name: "Русский" }).click();
+  await expect(page.getByText("Квота Outline", { exact: true })).toBeVisible();
   await expect(page.getByText(/Осталось 464,32 из 500\sГБ/)).toBeVisible();
 });
 

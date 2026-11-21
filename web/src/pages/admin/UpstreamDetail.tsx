@@ -88,7 +88,7 @@ function Upstream(props: { upstream: UpstreamStatus; snapshot: StatusSnapshot })
           {[kindLabel(u().kind), u().geo, u().provider].filter(Boolean).join(" · ")}
         </span>
         <Show when={u().kind === UpstreamKind.OUTLINE}>
-          <OutlineQuota quota={outlineUsage()[u().name]} />
+          <OutlineQuota quota={outlineUsage()[u().name]} labeled />
         </Show>
       </div>
 

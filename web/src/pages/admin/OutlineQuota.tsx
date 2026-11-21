@@ -39,7 +39,7 @@ export function useOutlineUsage() {
   return usage;
 }
 
-export function OutlineQuota(props: { quota?: OutlineQuotaValue | null }) {
+export function OutlineQuota(props: { quota?: OutlineQuotaValue | null; labeled?: boolean }) {
   const i18n = useConsoleI18n();
   const { c, fmt } = i18n;
   const label = (quota: OutlineQuotaValue) => {
@@ -56,13 +56,18 @@ export function OutlineQuota(props: { quota?: OutlineQuotaValue | null }) {
 
   return (
     <Show when={props.quota !== undefined}>
-      <div class="text-xs font-normal text-muted tabular-nums">
-        <Show when={props.quota} fallback={c.outlineUsage.unavailable}>
+      <div class="text-sm tabular-nums">
+        <Show when={props.labeled}>
+          <span class="mr-2 text-muted">{c.outlineUsage.title}</span>
+        </Show>
+        <Show when={props.quota} fallback={<span class="text-muted">{c.outlineUsage.unavailable}</span>}>
           {(quota) => (
             <>
-              <span title={c.outlineUsage.updated(fmt.dateTime(new Date(quota().updatedAt)))}>{label(quota())}</span>
+              <span class="font-medium whitespace-nowrap" title={c.outlineUsage.updated(fmt.dateTime(new Date(quota().updatedAt)))}>
+                {label(quota())}
+              </span>
               <Show when={quota().stale}>
-                <span class="text-warn"> · {c.outlineUsage.stale}</span>
+                <span class="ml-2 text-xs whitespace-nowrap text-warn">{c.outlineUsage.stale}</span>
               </Show>
             </>
           )}
