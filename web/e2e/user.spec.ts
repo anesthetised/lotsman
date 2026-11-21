@@ -1,6 +1,6 @@
 import { FAKE_LINKS } from "../src/api/fakeSelf";
 import type { Page } from "@playwright/test";
-import { expect, test } from "./fixtures";
+import { expect, pressIn, test } from "./fixtures";
 
 // A link as `lotsman user link` prints it; the fake daemon takes any token as
 // the ordinary user and gives a few well-known ones a scenario of their own.
@@ -47,21 +47,25 @@ test("the user page shows live speed, devices, their exits now and the exits in 
 test("every control is a large touch target", async ({ page }) => {
   await page.goto(link);
   await expect(page.getByRole("heading", { name: "Hello, alice" })).toBeVisible();
-  const controls = page.locator("main button, main summary, main input, main select, header select");
+  const controls = page.locator("main button, main summary, main input, main select, header button");
   const heights = await controls.evaluateAll((els) =>
     els.map((el) => [el.getAttribute("aria-label") || el.textContent?.trim() || el.id, el.getBoundingClientRect().height]),
   );
   expect(heights.length).toBeGreaterThan(30); // the route editors' switches, chips and handles among them
   for (const [name, height] of heights) expect(height, String(name)).toBeGreaterThanOrEqual(43.5);
 
-  // Native selects can center the selected text regardless of CSS padding.
-  const preferences = await page.locator("header select").evaluateAll((selects: HTMLSelectElement[]) =>
-    selects.map((select) => {
-      const caption = select.labels?.[0]?.querySelector("span");
-      return Boolean(caption && caption.getBoundingClientRect().bottom <= select.getBoundingClientRect().top);
-    }),
-  );
-  expect(preferences).toEqual([true, true]);
+  const language = page.getByRole("button", { name: "Language" });
+  const theme = page.getByRole("button", { name: "Theme" });
+  const first = (await language.boundingBox())!;
+  const last = (await theme.boundingBox())!;
+  expect(first.width).toBeGreaterThanOrEqual(43.5);
+  expect(last.width).toBeGreaterThanOrEqual(43.5);
+  expect(last.x + last.width - first.x).toBeLessThanOrEqual(96);
+  await language.click();
+  await expect(page.getByRole("menuitemradio", { name: "Auto" })).toHaveAttribute("aria-checked", "true");
+  const options = await page.getByRole("menuitemradio").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height));
+  expect(options).toHaveLength(3);
+  for (const height of options) expect(height).toBeGreaterThanOrEqual(43.5);
 });
 
 test("a device's config shows as a large QR code, a file and text", async ({ page, context }) => {
@@ -300,7 +304,7 @@ test("a revoked link says it no longer works", async ({ page }) => {
   await page.goto(open(FAKE_LINKS.revoked));
   await expect(page.getByRole("alert")).toHaveText("This link no longer works. Ask the operator for a new one.");
   await expect(page.getByRole("heading", { name: /Hello/ })).toHaveCount(0);
-  await expect(page.getByRole("button")).toHaveCount(0);
+  await expect(page.getByRole("main").getByRole("button")).toHaveCount(0);
 });
 
 test("a user without devices is invited to add one", async ({ page }) => {
@@ -389,9 +393,11 @@ test("display preferences preserve a draft and the private link, and carry over 
   await page.getByRole("button", { name: "7 days" }).click();
   await (await addForm(page)).getByLabel("Name").fill("tablet");
 
-  await page.getByRole("combobox", { name: "Theme" }).selectOption("light");
+  await page.getByRole("button", { name: "Theme" }).click();
+  await page.getByRole("menuitemradio", { name: "Light" }).click();
   await expect(page.locator("body")).toHaveCSS("background-color", "rgb(245, 246, 248)");
-  await page.getByRole("combobox", { name: "Language" }).selectOption("ru");
+  await page.getByRole("button", { name: "Language" }).click();
+  await page.getByRole("menuitemradio", { name: "Русский" }).click();
   await expect(page.locator("html")).toHaveAttribute("lang", "ru");
   await expect(page.getByRole("heading", { name: "Привет, alice" })).toBeVisible();
   await expect(phone.getByRole("button", { name: "Самая быстрая" })).toHaveAttribute("aria-pressed", "true");
@@ -405,12 +411,17 @@ test("display preferences preserve a draft and the private link, and carry over 
   await page.reload();
   await expect(page.getByRole("heading", { name: "Привет, alice" })).toBeVisible();
   await expect(page).toHaveURL(link);
-  await expect(page.getByRole("combobox", { name: "Язык" })).toHaveValue("ru");
+  const language = page.getByRole("button", { name: "Язык" });
+  await language.click();
+  await expect(page.getByRole("menuitemradio", { name: "Русский" })).toHaveAttribute("aria-checked", "true");
+  await pressIn(page.getByRole("menu"), "Escape");
+  await expect(language).toBeFocused();
   await page.goto("/admin");
   await expect(page.getByRole("heading", { name: "Выходы" })).toBeVisible();
   await expect(page.locator("body")).toHaveCSS("background-color", "rgb(245, 246, 248)");
-  await expect(page.getByRole("combobox", { name: "Тема" })).toHaveValue("light");
-  await page.getByRole("combobox", { name: "Тема" }).selectOption("system");
+  await page.getByRole("button", { name: "Тема" }).click();
+  await expect(page.getByRole("menuitemradio", { name: "Светлая" })).toHaveAttribute("aria-checked", "true");
+  await page.getByRole("menuitemradio", { name: "Системная" }).click();
   await expect(page.locator("body")).toHaveCSS("background-color", "rgb(11, 15, 23)");
 });
 
@@ -430,8 +441,10 @@ for (const storage of ["invalid", "unavailable"] as const) {
     await page.goto("/u");
     await expect(page.getByRole("alert")).toContainText("link is missing or invalid");
     await expect(page.locator("body")).toHaveCSS("background-color", "rgb(11, 15, 23)");
-    await page.getByRole("combobox", { name: "Language" }).selectOption("ru");
-    await page.getByRole("combobox", { name: "Тема" }).selectOption("light");
+    await page.getByRole("button", { name: "Language" }).click();
+    await page.getByRole("menuitemradio", { name: "Русский" }).click();
+    await page.getByRole("button", { name: "Тема" }).click();
+    await page.getByRole("menuitemradio", { name: "Светлая" }).click();
     await expect(page.locator("html")).toHaveAttribute("lang", "ru");
     await expect(page.locator("body")).toHaveCSS("background-color", "rgb(245, 246, 248)");
   });

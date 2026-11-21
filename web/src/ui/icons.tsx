@@ -17,6 +17,33 @@ export function ChevronDownIcon() {
   );
 }
 
+export function GlobeIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" class="size-5" fill="none" stroke="currentColor" stroke-width="1.25">
+      <circle cx="8" cy="8" r="6" />
+      <ellipse cx="8" cy="8" rx="2.5" ry="6" />
+      <path d="M2 8h12" />
+    </svg>
+  );
+}
+
+export function SunIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" class="size-5" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round">
+      <circle cx="8" cy="8" r="3" />
+      <path d="M8 1.5v1m0 11v1m-6.5-6.5h1m11 0h1M3.4 3.4l.7.7m7.8 7.8.7.7m-9.2 0 .7-.7m7.8-7.8.7-.7" />
+    </svg>
+  );
+}
+
+export function MoonIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 16 16" class="size-5" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linejoin="round">
+      <path d="M7.4 2a6 6 0 1 0 6.6 6.6A5 5 0 0 1 7.4 2Z" />
+    </svg>
+  );
+}
+
 export function CheckIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 16 16" class="size-4" fill="none" stroke="currentColor" stroke-width="1.5">
