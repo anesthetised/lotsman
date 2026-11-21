@@ -53,6 +53,15 @@ test("every control is a large touch target", async ({ page }) => {
   );
   expect(heights.length).toBeGreaterThan(30); // the route editors' switches, chips and handles among them
   for (const [name, height] of heights) expect(height, String(name)).toBeGreaterThanOrEqual(43.5);
+
+  // Native selects can center the selected text regardless of CSS padding.
+  const preferences = await page.locator("header select").evaluateAll((selects: HTMLSelectElement[]) =>
+    selects.map((select) => {
+      const caption = select.labels?.[0]?.querySelector("span");
+      return Boolean(caption && caption.getBoundingClientRect().bottom <= select.getBoundingClientRect().top);
+    }),
+  );
+  expect(preferences).toEqual([true, true]);
 });
 
 test("a device's config shows as a large QR code, a file and text", async ({ page, context }) => {
