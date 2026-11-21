@@ -17,11 +17,11 @@ export const consoleRu: ConsoleDict = {
     blocked: (n: number) => `${plural(n, "заблокирован", "заблокированы", "заблокированы")}: нет подходящего выхода`,
   },
   outlineUsage: {
-    title: "Квота Outline",
-    remaining: (remaining: string, limit: string) => `Осталось ${remaining} из ${limit}`,
-    unavailable: "Квота Outline недоступна",
+    title: "Остаток трафика",
+    remaining: (remaining: string, limit: string) => `${remaining} из ${limit}`,
+    unavailable: "Данные о трафике недоступны",
     stale: "Данные устарели",
-    updated: (time: string) => `Квота Outline обновлена ${time}`,
+    updated: (time: string) => `Данные обновлены ${time}`,
   },
   upstream: {
     title: (name: string) => `Выход ${name}`,
