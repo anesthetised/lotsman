@@ -6,6 +6,9 @@ All notable changes to Lotsman are documented here. The format follows
 ## [Unreleased]
 
 ### Added
+- The web panel has language and light/dark theme controls for operators and users.
+  Choices are saved in the browser and apply immediately, including to charts.
+  Auto and System follow the browser language and system theme.
 - Exit checks and an incident log (#167). An optional upload probe (`health.transfer.upload_url`,
   `upload_bytes`) runs beside the download probe and, failing, makes the upstream degraded the
   same way; optional speed tests (`health.speed`) record each upstream's throughput both ways in

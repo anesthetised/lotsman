@@ -12,7 +12,7 @@ export const locales = Object.keys(dictionaries) as Locale[];
 export function pickLocale(languages: readonly string[]): Locale {
   for (const tag of languages) {
     const primary = tag.toLowerCase().split("-")[0];
-    if (primary && primary in dictionaries) return primary as Locale;
+    if (primary && Object.hasOwn(dictionaries, primary)) return primary as Locale;
   }
   return "en";
 }

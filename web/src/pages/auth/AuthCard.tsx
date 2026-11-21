@@ -3,13 +3,17 @@
 import type { JSX } from "@solidjs/web";
 import { Show } from "solid-js";
 import { failure } from "../../api/auth";
+import { DisplayPreferences } from "../../ui/DisplayPreferences";
 import { useI18n } from "../../i18n";
 
 export function AuthCard(props: { title: string; intro: string; children?: JSX.Element }) {
   const { t } = useI18n();
   return (
     <main id="main" class="mx-auto max-w-md px-4 py-16 text-sm">
-      <p class="mb-6 text-center font-semibold">{t.app.name}</p>
+      <div class="mb-4 flex flex-wrap items-center justify-between gap-2">
+        <p class="font-semibold">{t.app.name}</p>
+        <DisplayPreferences />
+      </div>
       <div class="space-y-4 rounded-lg border border-line bg-surface p-6">
         <h1 class="text-lg font-semibold">{props.title}</h1>
         <p class="text-muted">{props.intro}</p>

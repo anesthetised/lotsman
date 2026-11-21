@@ -47,7 +47,7 @@ test("the user page shows live speed, devices, their exits now and the exits in 
 test("every control is a large touch target", async ({ page }) => {
   await page.goto(link);
   await expect(page.getByRole("heading", { name: "Hello, alice" })).toBeVisible();
-  const controls = page.locator("main").locator("button, summary, input, select");
+  const controls = page.locator("main button, main summary, main input, main select, header select");
   const heights = await controls.evaluateAll((els) =>
     els.map((el) => [el.getAttribute("aria-label") || el.textContent?.trim() || el.id, el.getBoundingClientRect().height]),
   );
@@ -115,6 +115,7 @@ test("a route reorders by dragging its handle", async ({ page }) => {
   await page.goto(link);
   const phone = card(page, "phone");
   const handle = phone.getByRole("button", { name: "Netherlands, 2 of 2" });
+  await handle.scrollIntoViewIfNeeded();
   const target = (await phone.getByRole("button", { name: "Latvia, 1 of 2" }).boundingBox())!;
   const from = (await handle.boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
@@ -358,5 +359,61 @@ for (const [name, path] of [
     await page.goto(path);
     await expect(page.getByRole("alert")).toHaveText(/link is missing or invalid/);
     await expect(page.getByRole("heading", { name: "Hello, alice" })).toHaveCount(0);
+  });
+}
+
+test("display preferences preserve a draft and the private link, and carry over to the console", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto(link);
+  const phone = card(page, "phone");
+  await phone.getByRole("button", { name: "Fastest" }).click();
+  await page.getByRole("button", { name: "7 days" }).click();
+  await (await addForm(page)).getByLabel("Name").fill("tablet");
+
+  await page.getByRole("combobox", { name: "Theme" }).selectOption("light");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(245, 246, 248)");
+  await page.getByRole("combobox", { name: "Language" }).selectOption("ru");
+  await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+  await expect(page.getByRole("heading", { name: "Привет, alice" })).toBeVisible();
+  await expect(phone.getByRole("button", { name: "Самая быстрая" })).toHaveAttribute("aria-pressed", "true");
+  await expect(phone.getByRole("button", { name: "Применить" })).toBeEnabled();
+  await expect(phone).toContainText("Латвия");
+  await expect(page.getByRole("button", { name: "7 дней" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator("#device-name")).toHaveValue("tablet");
+  await expect(page).toHaveURL(link);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Привет, alice" })).toBeVisible();
+  await expect(page).toHaveURL(link);
+  await expect(page.getByRole("combobox", { name: "Язык" })).toHaveValue("ru");
+  await page.goto("/admin");
+  await expect(page.getByRole("heading", { name: "Выходы" })).toBeVisible();
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(245, 246, 248)");
+  await expect(page.getByRole("combobox", { name: "Тема" })).toHaveValue("light");
+  await page.getByRole("combobox", { name: "Тема" }).selectOption("system");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(11, 15, 23)");
+});
+
+for (const storage of ["invalid", "unavailable"] as const) {
+  test(`display settings still work when browser storage is ${storage}`, async ({ page }) => {
+    await page.addInitScript((state) => {
+      if (state === "invalid") {
+        localStorage.setItem("lotsman.language", "constructor");
+        localStorage.setItem("lotsman.theme", "invalid");
+      } else {
+        Object.defineProperty(window, "localStorage", {
+          get() { throw new DOMException("Storage is blocked", "SecurityError"); },
+        });
+      }
+    }, storage);
+    await page.emulateMedia({ colorScheme: "dark" });
+    await page.goto("/u");
+    await expect(page.getByRole("alert")).toContainText("link is missing or invalid");
+    await expect(page.locator("body")).toHaveCSS("background-color", "rgb(11, 15, 23)");
+    await page.getByRole("combobox", { name: "Language" }).selectOption("ru");
+    await page.getByRole("combobox", { name: "Тема" }).selectOption("light");
+    await expect(page.locator("html")).toHaveAttribute("lang", "ru");
+    await expect(page.locator("body")).toHaveCSS("background-color", "rgb(245, 246, 248)");
   });
 }

@@ -66,3 +66,33 @@ test("Russian, dark and strict CSP", async ({ browser, baseURL }) => {
   expect(background).toBe("rgb(11, 15, 23)");
   await context.close();
 });
+
+test("chart and console follow a manual theme and language without losing the chart window", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/admin");
+  await page.getByRole("button", { name: "Window: 1 min" }).click();
+  await page.getByRole("menuitemradio", { name: "5 min", exact: true }).click();
+  const gridPixels = (r: number, g: number, b: number) =>
+    page.locator("figure canvas").evaluate((canvas: HTMLCanvasElement, rgb) => {
+      const { data } = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] === rgb[0] && data[i + 1] === rgb[1] && data[i + 2] === rgb[2]) return true;
+      }
+      return false;
+    }, [r, g, b]);
+  await expect.poll(() => gridPixels(209, 213, 219)).toBe(true);
+  const theme = page.getByRole("combobox", { name: "Theme" });
+  await expect(page.getByRole("button", { name: "Window: 5 min" })).toBeFocused();
+  await theme.focus();
+  await theme.press("d");
+  await expect(theme).toHaveValue("dark");
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(11, 15, 23)");
+  await expect.poll(() => gridPixels(51, 65, 85)).toBe(true);
+  await page.getByRole("combobox", { name: "Language" }).selectOption("ru");
+  await expect(page.getByRole("region", { name: "Шлюз" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Окно: 5 мин" })).toBeVisible();
+  const caption = page.locator("figcaption");
+  await expect(caption).toContainText(/бит/);
+  const before = await caption.innerText();
+  await expect(caption).not.toHaveText(before);
+});

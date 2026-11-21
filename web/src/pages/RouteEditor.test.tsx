@@ -100,7 +100,7 @@ test("in the fastest mode there is no order; a strict route with nothing availab
 
 test("a failure stays in words; a new stored route resets the draft", async () => {
   const [route, setRoute] = createSignal<Route>(ordered);
-  render(() => <RouteEditor route={route()} exits={exits} providers apply={async () => "Not accepted: route: no exit in country FI"} />);
+  render(() => <RouteEditor route={route()} exits={exits} providers apply={async () => () => "Not accepted: route: no exit in country FI"} />);
   fireEvent.click(screen.getByRole("button", { name: "Fastest" }));
   flush();
   fireEvent.click(screen.getByRole("button", { name: "Apply" }));

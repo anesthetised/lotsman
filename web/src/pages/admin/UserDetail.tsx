@@ -163,7 +163,7 @@ function UserView(props: { user: User; snapshot: StatusSnapshot; onChanged: () =
                     props.onChanged();
                     return undefined;
                   } catch (e) {
-                    return c.failed(errorMessage(e));
+                    return () => c.failed(errorMessage(e));
                   }
                 }}
               />

@@ -115,16 +115,17 @@ a build leaves `internal/web/dist` clean in git.
 `Dict` type checks it). The operator console's strings live apart, in
 `console.en.ts` and `console.ru.ts` (`ConsoleDict`, the same rule), so the user
 page never loads them; console pages read them as `c` from `useConsoleI18n()`
-(`console.ts`), next to the shared `t`. The language is the first supported one
-in the browser's preferences, else English. Units come from `Intl`, not the
-dictionaries.
+(`console.ts`), next to the shared `t`. By default the panel uses the first supported browser language,
+falling back to English. Both panels share the language and theme choices in
+local storage. Users can select Auto or System to follow the browser again.
+Units come from `Intl`.
 
 ## Accessibility and security rules
 
 - Keyboard first: every action is reachable and visible on focus; Kobalte
   handles focus traps, Escape and focus return in dialogs and menus.
 - Colour never carries meaning alone (state badges have text); text tokens in
-  `src/styles.css` meet WCAG AA in both themes. The theme follows `prefers-color-scheme`.
+  `src/styles.css` meet WCAG AA in both themes. The default theme follows `prefers-color-scheme`.
 - Charts are canvas: give them a caption with the current values.
 - QR codes are inline SVG paths (`src/ui/QrCode.tsx`), never a canvas or a
   `data:` image: the panel's CSP has no `img-src data:`, and `vite preview`

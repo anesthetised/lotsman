@@ -3,6 +3,12 @@
 export const en = {
   app: {
     name: "Lotsman",
+    language: "Language",
+    auto: "Auto",
+    theme: "Theme",
+    system: "System",
+    light: "Light",
+    dark: "Dark",
     skipToContent: "Skip to content",
   },
   common: {

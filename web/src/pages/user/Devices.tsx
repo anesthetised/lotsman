@@ -77,7 +77,7 @@ function DeviceCard(props: { device: Device }) {
   const exitName = (u: UpstreamStatus) => [fmt.country(u.geo), ctx.rights().showProviders ? u.provider : ""].filter(Boolean).join(" · ");
   const apply = async (route: Route) => {
     const outcome = await ctx.mutate(() => ctx.self.setRoute({ device: props.device.name, route }));
-    return outcome.ok ? undefined : failureText(t, outcome.failure);
+    return outcome.ok ? undefined : () => failureText(t, outcome.failure);
   };
   return (
     <li class="space-y-3 rounded-xl border border-line bg-surface p-4">
