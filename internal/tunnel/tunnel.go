@@ -29,6 +29,11 @@ func New(name string, t tun.Device, log *slog.Logger, onError func(msg string)) 
 	return newWithBind(name, t, conn.NewDefaultBind(), log, onError)
 }
 
+// NewUpstream creates an upstream device with the configured UDP send mode.
+func NewUpstream(name string, t tun.Device, log *slog.Logger, onError func(string), disableUDPGSO bool) *Device {
+	return newWithBind(name, t, newUpstreamBind(disableUDPGSO), log, onError)
+}
+
 // NewBound creates a downstream device bound to one numeric local address and
 // its family. Unspecified addresses are family-specific; mapped IPv6 uses IPv4.
 // Socket binding happens during Up, which reports binding errors.

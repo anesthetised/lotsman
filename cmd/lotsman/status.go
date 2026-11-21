@@ -185,6 +185,9 @@ func checkConfig(configPath string) error {
 			line += fmt.Sprintf("  %s  max_flows %d", up.Key, cmp.Or(u.MaxFlows, proxy.DefaultMaxFlows))
 		} else {
 			line += fmt.Sprintf("  s4 %d", up.Conf.Interface.S4)
+			if u.DisableUDPGSO {
+				line += "  udp_gso off"
+			}
 		}
 		fmt.Println(line)
 	}

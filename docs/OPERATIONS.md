@@ -197,6 +197,14 @@ Host applications using a provider tunnel must also bind its interface; binding
 only the provider source IP no longer selects that provider's route. Provider
 outer UDP transport and endpoint DNS resolution still use ordinary host routing.
 
+On Linux, set `disable_udp_gso: true` on an AWG upstream if it logs
+`sendmmsg: message too long` when the path MTU drops. The upstream sends each UDP
+datagram separately within the system-call batch, so IPv4 can fragment it if
+needed. For that upstream the kernel selects the outer source address on each
+send, which can affect source selection on a host with several uplinks. The
+setting defaults to false. Changing it on reload recreates that upstream link
+and can interrupt flows using it.
+
 Startup cleans both legacy source-only and current interface-qualified probe
 rules when ownership is clear. If a legacy rule's deletion could also remove a
 foreign rule, startup stops with a manual-cleanup error. Uninstall also reports

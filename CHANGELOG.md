@@ -295,6 +295,9 @@ All notable changes to Lotsman are documented here. The format follows
   load; a 200 MiB limit about halves the peak for at most a 20% loss in the slowest case (#106).
 
 ### Fixed
+- AWG upstreams on low-PMTU paths can set `disable_udp_gso: true` to avoid
+  `sendmmsg: message too long` when Linux rejects an oversized GSO segment (#165).
+  The setting keeps syscall batching and applies to the individual upstream.
 - Web panel: live pages reopen their Watch stream when it drops or ends, instead of replacing the
   page with "Load failed". A phone suspending the page in the background (iOS Safari), a network
   switch or a panel restart now only pauses the live numbers; reopening backs off from 1 s to 30 s

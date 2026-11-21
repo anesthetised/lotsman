@@ -40,6 +40,25 @@ func TestParseAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestDisableUDPGSOOnlyForAWG(t *testing.T) {
+	for _, kind := range []string{KindAWG, KindOutline, KindVLESS} {
+		t.Run(kind, func(t *testing.T) {
+			input := replaceTopLevelField(minimal, "upstreams", "upstreams: [{name: a, conf: /x, geo: NL, provider: acme, kind: "+kind+", disable_udp_gso: true}]\n")
+			cfg, err := Parse([]byte(input))
+			if kind == KindAWG {
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !cfg.Upstreams[0].DisableUDPGSO {
+					t.Fatal("AWG upstream did not retain disable_udp_gso")
+				}
+			} else if err == nil || !strings.Contains(err.Error(), "disable_udp_gso applies to AWG upstreams only") {
+				t.Fatalf("Parse error = %v, want AWG-only validation error", err)
+			}
+		})
+	}
+}
+
 func TestParseOverrides(t *testing.T) {
 	cfg, err := Parse([]byte(minimal + `
 listen: 127.0.0.1:1234
