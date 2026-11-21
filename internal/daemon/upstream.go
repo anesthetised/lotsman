@@ -35,6 +35,9 @@ type Upstream struct {
 	Addr     netip.Prefix    // the TUN's IPv4 address, also the probe source
 	MTU      int
 	Tracker  *health.Tracker
+	// Keep an immutable copy of the bind's send mode so reload can compare
+	// it outside d.mu while updating the embedded settings.
+	disableUDPGSO bool
 	// keyText is what the link parses the key from (proxy.ParseConfig): a
 	// static key file's contents, or a dynamic key's response as fetched,
 	// which also detects a changed key.
@@ -91,8 +94,13 @@ func LoadUpstream(u config.Upstream, h config.Health) (*Upstream, error) {
 	}
 	up.Upstream = u
 	up.Source = string(source)
+	up.disableUDPGSO = u.DisableUDPGSO
 	up.Tracker = health.NewTracker(h.DownAfter, h.UpAfter)
 	return up, nil
+}
+
+func (u *Upstream) sameLinkConfig(other *Upstream) bool {
+	return other != nil && u.Source == other.Source && u.disableUDPGSO == other.disableUDPGSO
 }
 
 // loadProxy reads an access key, or the URL of a dynamic one, which Fetch
@@ -286,7 +294,7 @@ func (u *Upstream) setResolved(resolved string) {
 // through run; exited is called if it stops on its own.
 func (u *Upstream) open(t tun.Device, log *slog.Logger, run proxy.Runner, exited func(error)) error {
 	if u.Key == nil {
-		dev := tunnel.New(u.InterfaceName(), t, log, u.errs.add)
+		dev := tunnel.NewUpstream(u.InterfaceName(), t, log, u.errs.add, u.disableUDPGSO)
 		if err := dev.Configure(u.Conf.UAPI()); err != nil {
 			dev.Close()
 			return err

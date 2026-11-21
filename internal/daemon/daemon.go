@@ -400,7 +400,7 @@ func (d *Daemon) teardown() []link {
 }
 
 // Reload applies a new configuration without dropping anyone's tunnel.
-// Upstreams are matched by name; one whose provider config changed is
+// Upstreams are matched by name; one whose link config changed is
 // replaced once the new config loads and resolves, otherwise the running one
 // stays and the error is returned. Health settings are swapped in and every
 // peer is re-evaluated against its route. Settings that need a restart reject
@@ -477,7 +477,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 		old, exists := current[u.Name]
 		delete(current, u.Name)
 		up, err := loads[i].up, loads[i].err
-		unchanged := err == nil && exists && up.Source == old.Source
+		unchanged := err == nil && up.sameLinkConfig(old)
 		if err == nil && !unchanged && loads[i].basis != old {
 			// A concurrent reload added, replaced or removed this upstream
 			// after it was loaded; whatever runs now is kept.
@@ -489,9 +489,10 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 			if err != nil {
 				errs = append(errs, err)
 			}
-			// Labels and limits apply live, but the kind is what runs: a
-			// changed kind only comes with a file that loaded.
+			// Labels and limits apply live. Keep the settings of the
+			// running link when a replacement fails.
 			u.Kind = old.Kind
+			u.DisableUDPGSO = old.disableUDPGSO
 			old.Upstream = u
 			old.Tracker.SetThresholds(cfg.Health.DownAfter, cfg.Health.UpAfter)
 			w := update{u: old, name: u.Name, maxFlows: u.MaxFlows}
@@ -627,7 +628,7 @@ func (d *Daemon) loadResolved(ctx context.Context, u config.Upstream, h config.H
 	if err != nil {
 		return nil, err
 	}
-	unchanged := basis != nil && up.Source == basis.Source
+	unchanged := up.sameLinkConfig(basis)
 	if unchanged && up.Location == nil {
 		return up, nil
 	}

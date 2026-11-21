@@ -4,9 +4,54 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 )
+
+func TestReloadChangesUDPGSOOnlyOnAffectedAWGLink(t *testing.T) {
+	h := newHarness(t)
+	h.run(t)
+	select {
+	case <-h.d.Ready():
+	case <-time.After(5 * time.Second):
+		t.Fatal("daemon did not become ready")
+	}
+
+	links := func() (link, link) {
+		t.Helper()
+		h.d.mu.Lock()
+		defer h.d.mu.Unlock()
+		if len(h.d.ups) != 2 || h.d.ups[0].Name != "nl" || h.d.ups[1].Name != "de" {
+			t.Fatal("expected running nl and de upstreams")
+		}
+		return h.d.ups[0].link, h.d.ups[1].link
+	}
+	reload := func(disabled bool) {
+		t.Helper()
+		cfg := *h.cfg
+		cfg.Upstreams = slices.Clone(cfg.Upstreams)
+		cfg.Upstreams[0].DisableUDPGSO = disabled
+		if err := h.d.Reload(context.Background(), &cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	nl, de := links()
+	for _, disabled := range []bool{true, false} {
+		reload(disabled)
+		nextNL, nextDE := links()
+		if nextNL == nl || nextDE != de {
+			t.Fatalf("disable_udp_gso=%t: changed links nl=%t de=%t, want only nl", disabled, nextNL != nl, nextDE != de)
+		}
+		reload(disabled)
+		if gotNL, gotDE := links(); gotNL != nextNL || gotDE != de {
+			t.Fatal("reloading the same setting replaced a running link")
+		}
+		nl = nextNL
+	}
+}
 
 // A replacement provider config that cannot be read, parsed, validated or
 // resolved is reported, and the running upstream keeps its device and peers.

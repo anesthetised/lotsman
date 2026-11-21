@@ -97,6 +97,8 @@ type Upstream struct {
 	// MaxFlows caps the TCP and UDP flows a proxy upstream carries at once;
 	// 0 is the default.
 	MaxFlows int `yaml:"max_flows"`
+	// DisableUDPGSO sends separate UDP datagrams for this AWG upstream on Linux.
+	DisableUDPGSO bool `yaml:"disable_udp_gso"`
 }
 
 // Proxy reports whether the upstream runs on the userspace proxy stack.
@@ -340,6 +342,9 @@ func (c *Config) Validate() error {
 			proxies = true
 			if u.MaxFlows < 0 {
 				return fmt.Errorf("upstream %q: max_flows must not be negative", u.Name)
+			}
+			if u.DisableUDPGSO {
+				return fmt.Errorf("upstream %q: disable_udp_gso applies to AWG upstreams only", u.Name)
 			}
 		default:
 			return fmt.Errorf("upstream %q: kind must be %s, %s or %s, got %q", u.Name, KindAWG, KindOutline, KindVLESS, u.Kind)
