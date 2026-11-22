@@ -29,13 +29,22 @@ test("the user page shows live speed, devices, their exits now and the exits in 
   await expect(card(page, "phone")).toContainText("Now: Latvia · provider-a");
   await expect(card(page, "tv")).toContainText("Now: Latvia · provider-b");
 
-  // Every allowed exit, by country and provider, each with its 7-day availability, latency and the devices using it.
+  // The routes of all devices keep their exits visible, even when not in use.
   const exits = page.getByRole("region", { name: "Exits" });
-  await expect(exits.getByRole("listitem")).toHaveCount(5);
+  await expect(exits.getByRole("listitem")).toHaveCount(3);
   await expect(exits.getByRole("img", { name: /^Availability of Latvia · provider-a over 7 days: \d/ })).toBeVisible();
   await expect(exits.getByRole("img", { name: /^Availability of Latvia · provider-b over 7 days: \d/ })).toBeVisible();
   await expect(exits).toContainText("Used by phone, laptop");
+  await expect(exits.getByText("Netherlands · provider-c", { exact: true })).toBeVisible();
+  const other = exits.locator("summary").filter({ hasText: "Other exits (2)" });
+  await expect(other).toBeVisible();
+  await expect(exits.getByText("Albania · provider-b", { exact: true })).toBeHidden();
+  await other.focus();
+  await page.keyboard.press("Enter");
+  await expect(exits.getByRole("listitem")).toHaveCount(5);
   await expect(exits.getByRole("listitem").filter({ hasText: "Albania" })).toContainText("No device uses it now");
+  await page.keyboard.press("Space");
+  await expect(exits.getByRole("listitem")).toHaveCount(3);
   await expect(exits).toContainText("Latency:");
   await expect(exits).not.toContainText("lv-1"); // never the upstream's name
 
@@ -112,12 +121,15 @@ test("a device's config shows as a large QR code, a file and text", async ({ pag
 test("a route reorders from the keyboard and applies without a new config", async ({ page }) => {
   await page.goto(link);
   const phone = card(page, "phone");
+  const exits = page.getByRole("region", { name: "Exits" });
+  const albania = exits.getByText("Albania · provider-b", { exact: true });
   const apply = phone.getByRole("button", { name: "Apply" });
   await expect(phone.getByRole("button", { name: "In order" })).toHaveAttribute("aria-pressed", "true");
   await expect(apply).toBeDisabled();
 
   // Albania joins last; two presses of the up arrow make it first, and each move is announced.
   await phone.getByRole("switch", { name: "Use Albania" }).click();
+  await expect(albania).toBeHidden();
   await expect(phone.getByRole("switch", { name: "Use Albania" })).toHaveAttribute("aria-checked", "true");
   await phone.getByRole("button", { name: "Albania, 3 of 3" }).focus();
   await page.keyboard.press("ArrowUp");
@@ -130,6 +142,7 @@ test("a route reorders from the keyboard and applies without a new config", asyn
   page.on("request", (r) => requests.push(r.url()));
   await apply.click();
   await expect(phone).toContainText("Now: Albania · provider-b");
+  await expect(albania).toBeVisible();
   await expect(apply).toBeDisabled(); // stored: nothing left to apply
   expect(requests.some((url) => url.includes("GetConfig"))).toBe(false);
 });

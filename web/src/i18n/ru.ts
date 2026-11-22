@@ -190,6 +190,7 @@ export const ru: Dict = {
     },
     exits: "Выходы",
     exitsIntro: "Выходы, доступные вам, и какие устройства сейчас через них работают.",
+    otherExits: (count: number) => `Другие выходы (${count})`,
     unused: "Сейчас не используется",
     usedBy: (devices: string) => `Используют: ${devices}`,
     latency: "Задержка",
