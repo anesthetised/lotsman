@@ -277,8 +277,10 @@ type harness struct {
 	probed  map[string]int  // "interface tcp-connect" or "interface dns-udp <source> <target>" → calls
 }
 
-const harnessConfig = `
-endpoint: 203.0.113.10:51820
+// Let the kernel assign the test listener a port when it binds.
+const harnessListen = "listen: 127.0.0.1:0\n"
+
+const harnessConfig = harnessListen + `endpoint: 203.0.113.10:51820
 state_dir: %s
 upstreams:
   - {name: nl, conf: %s/nl.conf, geo: NL, provider: acme}
@@ -643,7 +645,7 @@ func TestReload(t *testing.T) {
 	}
 
 	// Settings that need a restart reject the reload as a whole.
-	bad, _ := config.Parse([]byte(strings.Replace(fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir), "endpoint:", "listen: 0.0.0.0:1\nendpoint:", 1)))
+	bad, _ := config.Parse([]byte(strings.Replace(fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir), harnessListen, "listen: 0.0.0.0:1\n", 1)))
 	if err := h.d.Reload(ctx, bad); err == nil || !strings.Contains(err.Error(), "listen") {
 		t.Fatalf("listen change accepted: %v", err)
 	}
@@ -651,8 +653,7 @@ func TestReload(t *testing.T) {
 	// Drop NL from the config: its peers move to DE, its device is gone.
 	providerConf(t, h.dir, "fi", "10.10.0.2/32", 0)
 	h.setHealthy("lm-up-fi", true)
-	cfg2, err := config.Parse([]byte(fmt.Sprintf(`
-endpoint: 203.0.113.10:51820
+	cfg2, err := config.Parse([]byte(fmt.Sprintf(harnessListen+`endpoint: 203.0.113.10:51820
 state_dir: %s
 upstreams:
   - {name: de, conf: %s/de.conf, geo: DE, provider: acme}
@@ -698,7 +699,7 @@ health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 1, up_after: 1}
 
 	// Removing the last upstream a route names is no error: the route
 	// matches less, and a device left without an exit is blocked.
-	cfg3, err := config.Parse([]byte(fmt.Sprintf("endpoint: 203.0.113.10:51820\nstate_dir: %s\nupstreams: [{name: de, conf: %s/de.conf, geo: DE, provider: acme}]\n", h.dir, h.dir)))
+	cfg3, err := config.Parse([]byte(fmt.Sprintf(harnessListen+"endpoint: 203.0.113.10:51820\nstate_dir: %s\nupstreams: [{name: de, conf: %s/de.conf, geo: DE, provider: acme}]\n", h.dir, h.dir)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -774,7 +775,11 @@ func TestRoundsFollowReloadedInterval(t *testing.T) {
 	}
 	h.d.cfg = slow
 	h.run(t)
-	<-h.d.Ready()
+	select {
+	case <-h.d.Ready():
+	case <-time.After(5 * time.Second):
+		t.Fatal("daemon did not become ready")
+	}
 	select {
 	case <-h.d.Rounds():
 		t.Fatal("the first round is reported by Ready, not by Rounds")
