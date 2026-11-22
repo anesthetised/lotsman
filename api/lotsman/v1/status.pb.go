@@ -268,6 +268,7 @@ type UpstreamStatus struct {
 	Traffic       *Traffic               `protobuf:"bytes,10,opt,name=traffic,proto3" json:"traffic,omitempty"`                                          // unset until the daemon has sampled it
 	Speed         *Speed                 `protobuf:"bytes,11,opt,name=speed,proto3" json:"speed,omitempty"`                                              // the latest speed test; unset before the first or with health.speed off
 	Incidents     []IncidentKind         `protobuf:"varint,12,rep,packed,name=incidents,proto3,enum=lotsman.v1.IncidentKind" json:"incidents,omitempty"` // open now; empty for a user session
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`                     // optional subscription metadata; operator only
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -382,6 +383,13 @@ func (x *UpstreamStatus) GetSpeed() *Speed {
 func (x *UpstreamStatus) GetIncidents() []IncidentKind {
 	if x != nil {
 		return x.Incidents
+	}
+	return nil
+}
+
+func (x *UpstreamStatus) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
 	}
 	return nil
 }
@@ -624,7 +632,7 @@ const file_lotsman_v1_status_proto_rawDesc = "" +
 	"client_mtu\x18\x02 \x01(\rR\tclientMtu\x128\n" +
 	"\tupstreams\x18\x03 \x03(\v2\x1a.lotsman.v1.UpstreamStatusR\tupstreams\x12,\n" +
 	"\x05peers\x18\x04 \x03(\v2\x16.lotsman.v1.PeerStatusR\x05peers\x12)\n" +
-	"\x05total\x18\x05 \x01(\v2\x13.lotsman.v1.TrafficR\x05total\"\xe9\x03\n" +
+	"\x05total\x18\x05 \x01(\v2\x13.lotsman.v1.TrafficR\x05total\"\xa4\x04\n" +
 	"\x0eUpstreamStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x18.lotsman.v1.UpstreamKindR\x04kind\x12\x10\n" +
@@ -638,7 +646,9 @@ const file_lotsman_v1_status_proto_rawDesc = "" +
 	"\atraffic\x18\n" +
 	" \x01(\v2\x13.lotsman.v1.TrafficR\atraffic\x12'\n" +
 	"\x05speed\x18\v \x01(\v2\x11.lotsman.v1.SpeedR\x05speed\x126\n" +
-	"\tincidents\x18\f \x03(\x0e2\x18.lotsman.v1.IncidentKindR\tincidents\"m\n" +
+	"\tincidents\x18\f \x03(\x0e2\x18.lotsman.v1.IncidentKindR\tincidents\x129\n" +
+	"\n" +
+	"expires_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"m\n" +
 	"\x05Speed\x12\x1b\n" +
 	"\tdown_rate\x18\x01 \x01(\x04R\bdownRate\x12\x17\n" +
 	"\aup_rate\x18\x02 \x01(\x04R\x06upRate\x12.\n" +
@@ -712,16 +722,17 @@ var file_lotsman_v1_status_proto_depIdxs = []int32{
 	7,  // 9: lotsman.v1.UpstreamStatus.traffic:type_name -> lotsman.v1.Traffic
 	5,  // 10: lotsman.v1.UpstreamStatus.speed:type_name -> lotsman.v1.Speed
 	10, // 11: lotsman.v1.UpstreamStatus.incidents:type_name -> lotsman.v1.IncidentKind
-	9,  // 12: lotsman.v1.Speed.time:type_name -> google.protobuf.Timestamp
-	9,  // 13: lotsman.v1.PeerStatus.last_handshake:type_name -> google.protobuf.Timestamp
-	7,  // 14: lotsman.v1.PeerStatus.traffic:type_name -> lotsman.v1.Traffic
-	2,  // 15: lotsman.v1.StatusService.Watch:input_type -> lotsman.v1.WatchStatusRequest
-	3,  // 16: lotsman.v1.StatusService.Watch:output_type -> lotsman.v1.StatusSnapshot
-	16, // [16:17] is the sub-list for method output_type
-	15, // [15:16] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	9,  // 12: lotsman.v1.UpstreamStatus.expires_at:type_name -> google.protobuf.Timestamp
+	9,  // 13: lotsman.v1.Speed.time:type_name -> google.protobuf.Timestamp
+	9,  // 14: lotsman.v1.PeerStatus.last_handshake:type_name -> google.protobuf.Timestamp
+	7,  // 15: lotsman.v1.PeerStatus.traffic:type_name -> lotsman.v1.Traffic
+	2,  // 16: lotsman.v1.StatusService.Watch:input_type -> lotsman.v1.WatchStatusRequest
+	3,  // 17: lotsman.v1.StatusService.Watch:output_type -> lotsman.v1.StatusSnapshot
+	17, // [17:18] is the sub-list for method output_type
+	16, // [16:17] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_lotsman_v1_status_proto_init() }

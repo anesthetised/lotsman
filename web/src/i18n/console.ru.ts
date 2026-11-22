@@ -34,6 +34,7 @@ export const consoleRu: ConsoleDict = {
     title: (name: string) => `Выход ${name}`,
     missing: "У шлюза нет выхода с таким именем.",
     handshake: "Последнее рукопожатие",
+    expiresAt: "Подписка до",
     downNow: "Приём сейчас",
     upNow: "Отдача сейчас",
     sinceStart: "С запуска, приём / отдача",

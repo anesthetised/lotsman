@@ -127,7 +127,7 @@ func snapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Snapsho
 			Name: u.Name, Kind: upstreamKind(u.Kind), Geo: u.Geo, Provider: u.Provider,
 			State: upstreamState(u), Latency: duration(u.Latency), LastHandshake: timestamp(u.LastHandshake),
 			Routed: uint32(u.Routed), Active: uint32(u.Active), Traffic: trafficOf(t, ok), Speed: speed(u.Speed),
-			Incidents: incidentKinds(u.Incidents),
+			Incidents: incidentKinds(u.Incidents), ExpiresAt: timestamp(u.ExpiresAt),
 		})
 	}
 	for _, p := range st.Peers {

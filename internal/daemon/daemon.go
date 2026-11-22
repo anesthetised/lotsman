@@ -488,6 +488,7 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 			// upstream down.
 			if err != nil {
 				errs = append(errs, err)
+				u.ExpiresAt = old.ExpiresAt
 			}
 			// Labels and limits apply live. Keep the settings of the
 			// running link when a replacement fails.
@@ -1347,6 +1348,7 @@ type UpstreamStatus struct {
 	Kind          string
 	Geo           string
 	Provider      string
+	ExpiresAt     time.Time
 	Interface     string
 	State         health.State
 	Degraded      bool // reachable, but failing its transfer probes
@@ -1393,7 +1395,7 @@ func (d *Daemon) Status() Status {
 		return cmp.Or(strings.Compare(a.User, b.User), strings.Compare(a.Device, b.Device))
 	})
 	for _, u := range d.ups {
-		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Geo: u.Geo, Provider: u.Provider, Interface: u.InterfaceName(), State: u.Tracker.State(), Degraded: d.degraded(u),
+		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Geo: u.Geo, Provider: u.Provider, ExpiresAt: u.ExpiresAt, Interface: u.InterfaceName(), State: u.Tracker.State(), Degraded: d.degraded(u),
 			Latency: u.Tracker.Latency(), Routed: routed[u.Name], Active: active[u.Name], Speed: d.speedOf(u), Incidents: d.openKinds(u.Name)}
 		if peer := u.link.Stats().Peer; peer != nil {
 			s.LastHandshake = peer.LastHandshake

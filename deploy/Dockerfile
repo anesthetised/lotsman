@@ -1,5 +1,6 @@
 # Runtime image. The container needs the kernel bits Lotsman programs:
 #   docker run -d --name lotsman \
+#     --env TZ \
 #     --cap-add NET_ADMIN --device /dev/net/tun \
 #     --sysctl net.ipv4.ip_forward=1 --sysctl net.ipv4.conf.default.rp_filter=2 \
 #     -p 51820:51820/udp \
@@ -10,7 +11,7 @@ WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /lotsman ./cmd/lotsman
+RUN CGO_ENABLED=0 go build -tags timetzdata -trimpath -ldflags="-s -w" -o /lotsman ./cmd/lotsman
 
 FROM gcr.io/distroless/static-debian12:nonroot
 # Root: writing /proc/sys needs it. TUN and netlink need only NET_ADMIN.

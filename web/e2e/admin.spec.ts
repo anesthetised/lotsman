@@ -14,16 +14,17 @@ test("the operator overview shows live data", async ({ page }) => {
   await expect(page.getByRole("img", { name: /Availability of lv-1 over 7 days: \d/ })).toBeVisible();
 });
 
-test("Outline quotas follow the upstream name and keep the last value on a provider failure", async ({ page }) => {
+test("Outline quotas and expiry follow the upstream name and keep the last value on a provider failure", async ({ page }) => {
   const quota = { limit: 500, remaining: 464.32, unit: "GB", updatedAt: "2026-11-21T15:00:00Z", stale: true };
   await page.route("**/api/outline-usage", (route) => route.fulfill({
-    json: { "lv-2": quota, "al-1": null, "lv-1": { ...quota, remaining: 123 } },
+    json: { "lv-2": { ...quota, expiresAt: "2030-02-03T10:34:56Z" }, "al-1": null, "lv-1": { ...quota, remaining: 123 } },
   }));
   await page.goto("/admin");
   const row = (name: string) => page.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) });
   await expect(page.getByRole("columnheader", { name: "Data remaining" })).toBeVisible();
   await expect(row("lv-2").getByRole("cell", { name: /464\.32 of 500 GB/ })).toBeVisible();
   await expect(row("lv-2")).toContainText("Out of date");
+  await expect(row("lv-2").locator("time")).toHaveAttribute("datetime", "2030-02-03T10:34:56.000Z");
   await expect(row("al-1")).toContainText("Remaining data unavailable");
   await expect(row("lv-1")).not.toContainText("123 of 500 GB");
 
@@ -31,10 +32,32 @@ test("Outline quotas follow the upstream name and keep the last value on a provi
   await expect(page.getByRole("heading", { name: "Upstream lv-2" })).toBeVisible();
   await expect(page.getByText("Data remaining", { exact: true })).toBeVisible();
   await expect(page.getByText("464.32 of 500 GB", { exact: true })).toBeVisible();
+  await expect(page.locator('time[datetime="2030-02-03T10:34:56.000Z"]')).toBeVisible();
   await page.getByRole("button", { name: "Language" }).click();
   await page.getByRole("menuitemradio", { name: "Русский" }).click();
   await expect(page.getByText("Остаток трафика", { exact: true })).toBeVisible();
   await expect(page.getByText(/464,32 из 500\sГБ/)).toBeVisible();
+});
+
+test("subscription expiry appears before traffic in the server's time zone", async ({ page }) => {
+  await page.route("**/admin", async (route) => {
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body: (await response.text()).replace('name="lotsman-time-zone" content=""', 'name="lotsman-time-zone" content="America/New_York"'),
+    });
+  });
+  await page.goto("/admin");
+  const header = page.getByRole("columnheader", { name: "Subscription expires" });
+  const index = await header.evaluate((th: HTMLTableCellElement) => th.cellIndex);
+  const firstRate = await page.getByRole("columnheader", { name: "Down", exact: true }).evaluate((th: HTMLTableCellElement) => th.cellIndex);
+  expect(index).toBeLessThan(firstRate);
+  const row = (name: string) => page.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) });
+  await expect(row("nl-1").locator(":scope > *").nth(index)).toHaveText(/5:34:56 AM EST/);
+  await expect(row("lv-1").locator(":scope > *").nth(index)).toHaveText("—");
+  await page.getByRole("link", { name: "nl-1", exact: true }).click();
+  await expect(page.getByText("Subscription expires", { exact: true })).toBeVisible();
+  await expect(page.getByText(/5:34:56 AM EST/)).toBeVisible();
 });
 
 test("the gateway totals and an upstream's page", async ({ page }) => {

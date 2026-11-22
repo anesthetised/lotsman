@@ -27,6 +27,7 @@ export const consoleEn = {
     title: (name: string) => `Upstream ${name}`,
     missing: "The gateway has no upstream of this name.",
     handshake: "Last handshake",
+    expiresAt: "Subscription expires",
     downNow: "Down now",
     upNow: "Up now",
     sinceStart: "Since start, down / up",

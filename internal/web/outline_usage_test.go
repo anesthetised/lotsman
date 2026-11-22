@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
 )
 
 type quotaTransport func(*http.Request) (*http.Response, error)
@@ -38,16 +39,16 @@ func TestOutlineUsage(t *testing.T) {
 			t.Fatal(err)
 		}
 		calls[body.Key]++
-		code, reply := http.StatusOK, `{"status":true,"access_key_name":"key-lv","plan_bandwidth":500,"remaining_bandwidth":"464.32","bandwidth_unit":"GB"}`
+		code, reply := http.StatusOK, `{"status":true,"access_key_name":"key-lv","plan_bandwidth":500,"remaining_bandwidth":"464.32","bandwidth_unit":"GB","expiration_date":123}`
 		if body.Key == keyAL {
-			reply = `{"status":true,"access_key_name":"key-al","plan_bandwidth":"500","reaming_bandwidth":"417,64","bandwidth_unit":"GB"}`
+			reply = `{"status":true,"access_key_name":"key-al","plan_bandwidth":"500","reaming_bandwidth":"417,64","bandwidth_unit":"GB","expiration_date":"03.02.2030 12:34:56"}`
 			if calls[keyAL] > 1 {
 				code, reply = http.StatusServiceUnavailable, ""
 			}
 		}
 		return &http.Response{StatusCode: code, Body: io.NopCloser(strings.NewReader(reply))}, nil
 	})}
-	usage := &outlineUsage{cfg: cfg.OutlineUsage, client: client, log: discardLog()}
+	usage := &outlineUsage{cfg: cfg.OutlineUsage, client: client, log: discardLog(), expirationZone: time.FixedZone("fixture", 2*3600)}
 	usage.refresh(t.Context())
 	usage.refresh(t.Context())
 	panel := func(auth Authenticator, handler http.Handler) http.Handler {
@@ -97,5 +98,9 @@ func TestOutlineUsage(t *testing.T) {
 	}
 	if calls[keyAL] != 2 || calls[keyLV] != 2 {
 		t.Errorf("provider requests = %v", calls)
+	}
+	expiry := rows["ol-al"].ExpiresAt
+	if want := time.Date(2030, 2, 3, 10, 34, 56, 0, time.UTC); expiry == nil || !expiry.Equal(want) || rows["ol-lv"].ExpiresAt != nil {
+		t.Errorf("provider expiries = %v and %v", expiry, rows["ol-lv"].ExpiresAt)
 	}
 }

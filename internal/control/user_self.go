@@ -304,6 +304,7 @@ func userSnapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Sna
 	for _, up := range st.Upstreams {
 		if visible[up.Name] {
 			up.Routed, up.Active, up.Incidents = 0, 0, nil
+			up.ExpiresAt = time.Time{}
 			if !u.Rights.ShowProviders {
 				up.Provider = ""
 			}

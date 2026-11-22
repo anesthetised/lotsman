@@ -559,7 +559,7 @@ func TestUserSnapshot(t *testing.T) {
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
 	st := daemon.Status{
 		Upstreams: []daemon.UpstreamStatus{
-			{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme", State: health.Up, Routed: 2, Active: 2, Latency: time.Millisecond,
+			{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme", State: health.Up, Routed: 2, Active: 2, Latency: time.Millisecond, ExpiresAt: now.Add(time.Hour),
 				Speed: health.Speed{Down: 7, Up: 8, Time: now}, Incidents: []store.IncidentKind{store.IncidentSendErrors}},
 			{Name: "de", Kind: "awg", Geo: "DE", Provider: "acme", State: health.Up, Routed: 1, Active: 1},
 			{Name: "us", Kind: "awg", Geo: "US", Provider: "beta", State: health.Up, Routed: 1},

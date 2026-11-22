@@ -43,6 +43,7 @@ interface Upstream {
   provider: string;
   state: UpstreamState;
   latencyMs: number;
+  expiresAt?: number;
   /** What its speed tests measure, about: bytes per second each way. */
   speed: { down: number; up: number };
 }
@@ -123,7 +124,7 @@ const upstreams: readonly Upstream[] = /* @__PURE__ */ (() => [
   { name: "lv-2", kind: UpstreamKind.OUTLINE, geo: "LV", provider: "provider-b", state: UpstreamState.UP, latencyMs: 52, speed: { down: 8e6, up: 3e6 } },
   { name: "al-1", kind: UpstreamKind.OUTLINE, geo: "AL", provider: "provider-b", state: UpstreamState.UP, latencyMs: 61, speed: { down: 6e6, up: 2.5e6 } },
   // Degraded by an open upload incident: its uploads crawl.
-  { name: "nl-1", kind: UpstreamKind.VLESS, geo: "NL", provider: "provider-c", state: UpstreamState.DEGRADED, latencyMs: 140, speed: { down: 3e6, up: 0.1e6 } },
+  { name: "nl-1", kind: UpstreamKind.VLESS, geo: "NL", provider: "provider-c", state: UpstreamState.DEGRADED, latencyMs: 140, expiresAt: Date.UTC(2030, 1, 3, 10, 34, 56), speed: { down: 3e6, up: 0.1e6 } },
   { name: "de-1", kind: UpstreamKind.AWG, geo: "DE", provider: "provider-a", state: UpstreamState.DOWN, latencyMs: 45, speed: { down: 9e6, up: 4e6 } },
 ])();
 
@@ -384,6 +385,7 @@ export class Simulation {
             routed: all ? routed.length : 0,
             active: all ? routed.filter((p) => this.isActive(p)).length : 0,
             traffic: all ? traffic(t.down, t.up, t.downRate, t.upRate) : undefined,
+            expiresAt: all && u.expiresAt !== undefined ? timestampFromMs(u.expiresAt) : undefined,
             // Operator views only, like the daemon's incidents; the user page does not show speed.
             speed: all ? this.latestSpeed(u) : undefined,
             incidents: all ? this.incidents.filter((i) => i.upstream === u.name && !i.ended).map((i) => i.kind) : [],

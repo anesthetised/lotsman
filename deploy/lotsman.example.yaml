@@ -33,6 +33,7 @@ upstreams:
     conf: /etc/lotsman/upstreams/ac-de.conf
     geo: DE
     provider: acme
+    # expires_at: 2030-02-03T12:34:56+02:00  # Optional, shown to the operator.
     # disable_udp_gso: true  # AWG only, for sendmmsg "message too long" on a low-PMTU path
   # An Outline (Shadowsocks) server: `conf` is a file (mode 0600) holding the
   # ss:// access key. TCP and UDP pass, ICMP does not. `max_flows` caps the

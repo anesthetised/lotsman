@@ -66,15 +66,28 @@ const PreferencesContext = createContext<ReturnType<typeof createPreferences>>()
 
 export const usePreferences = () => useContext(PreferencesContext)!;
 
+function pageTimeZone(): string | undefined {
+  const timeZone = document.querySelector<HTMLMetaElement>('meta[name="lotsman-time-zone"]')?.content;
+  if (!timeZone) return;
+  try {
+    return new Intl.DateTimeFormat("en", { timeZone }).resolvedOptions().timeZone;
+  } catch {
+    // A browser with older timezone data can still format in its own zone.
+    return undefined;
+  }
+}
+
 export function PreferencesProvider(props: { children?: JSX.Element }) {
   const prefs = createPreferences();
-  const current = createMemo(() => i18n(prefs.locale()));
+  const timeZone = pageTimeZone();
+  const current = createMemo(() => i18n(prefs.locale(), timeZone));
   // Keep the dictionaries and formatters live even where a component
   // destructures { t, fmt } once. The router and its streams stay mounted.
   const lang = {
     get locale() {
       return prefs.locale();
     },
+    timeZone,
     t: merge(() => current().t),
     fmt: merge(() => current().fmt),
   };

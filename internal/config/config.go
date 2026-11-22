@@ -94,6 +94,8 @@ type Upstream struct {
 	Conf     string `yaml:"conf"`     // the provider's AmneziaWG config, or a file with the access key
 	Geo      string `yaml:"geo"`      // the exit's country, ISO 3166-1 alpha-2
 	Provider string `yaml:"provider"` // who runs the exit; a route may name it
+	// ExpiresAt is optional operator metadata and does not affect routing.
+	ExpiresAt time.Time `yaml:"expires_at,omitempty"`
 	// MaxFlows caps the TCP and UDP flows a proxy upstream carries at once;
 	// 0 is the default.
 	MaxFlows int `yaml:"max_flows"`

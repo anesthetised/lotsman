@@ -58,6 +58,7 @@ message UpstreamStatus {
   Traffic traffic = 10; // unset until the daemon has sampled it
   Speed speed = 11; // the latest speed test; unset before the first or with health.speed off
   repeated IncidentKind incidents = 12; // open now; empty for a user session
+  google.protobuf.Timestamp expires_at = 13; // optional subscription metadata; operator only
 }
 
 // A speed test through one upstream: bytes per second each way.
