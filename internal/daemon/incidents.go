@@ -49,6 +49,9 @@ func (d *Daemon) closeLeftoverIncidents(now time.Time) {
 func (d *Daemon) setIncident(upstream string, kind store.IncidentKind, trouble bool, detail string, now time.Time) {
 	key := incidentKey{upstream, kind}
 	in := d.incidents[key]
+	if trouble && d.subscriptionBlockByName(upstream, now) != RoutingAllowed {
+		return
+	}
 	var err error
 	switch {
 	case trouble && in == nil:

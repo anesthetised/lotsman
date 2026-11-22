@@ -43,7 +43,7 @@ func (d *Daemon) startSpeedTests(ctx context.Context) {
 	s := *d.cfg.Health.Speed
 	now := time.Now()
 	for _, u := range d.ups {
-		if u.Tracker.State() != health.Up || d.notUp[u] {
+		if u.Tracker.State() != health.Up || d.notUp[u] || d.subscriptionBlock(u.Upstream, now) != RoutingAllowed {
 			continue
 		}
 		st := d.speeds[u]

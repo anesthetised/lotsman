@@ -187,6 +187,17 @@ var migrations = []string{
 		devices  INTEGER NOT NULL
 	);
 	CREATE UNIQUE INDEX incidents_open ON incidents (upstream, kind) WHERE ended IS NULL;`,
+	`CREATE TABLE upstream_subscriptions (
+		upstream   TEXT NOT NULL PRIMARY KEY,
+		expires_at TEXT NOT NULL
+	) WITHOUT ROWID;`,
+	`CREATE TABLE outline_usage (
+		upstream    TEXT NOT NULL PRIMARY KEY,
+		key_hash    BLOB NOT NULL,
+		observed_at INTEGER NOT NULL,
+		exhausted   INTEGER NOT NULL,
+		expires_at  TEXT
+	) WITHOUT ROWID;`,
 }
 
 type User struct {

@@ -12,6 +12,7 @@ import (
 	connect "connectrpc.com/connect/v2"
 	context "context"
 	v1 "github.com/anesthetised/lotsman/api/lotsman/v1"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	sync "sync"
 )
 
@@ -30,6 +31,9 @@ const (
 const (
 	// StatusServiceWatchProcedure is the procedure name of the StatusService's Watch RPC.
 	StatusServiceWatchProcedure = "/lotsman.v1.StatusService/Watch"
+	// StatusServiceReportOutlineUsageProcedure is the procedure name of the StatusService's
+	// ReportOutlineUsage RPC.
+	StatusServiceReportOutlineUsageProcedure = "/lotsman.v1.StatusService/ReportOutlineUsage"
 )
 
 var (
@@ -40,6 +44,13 @@ var (
 			Procedure:  StatusServiceWatchProcedure,
 		}
 	})
+	statusServiceReportOutlineUsageSpec = sync.OnceValue(func() connect.Spec {
+		return connect.Spec{
+			StreamType: connect.StreamTypeUnary,
+			Schema:     v1.File_lotsman_v1_status_proto.Services().ByName("StatusService").Methods().ByName("ReportOutlineUsage"),
+			Procedure:  StatusServiceReportOutlineUsageProcedure,
+		}
+	})
 )
 
 // StatusServiceClient is a client for the lotsman.v1.StatusService service.
@@ -48,6 +59,8 @@ type StatusServiceClient interface {
 	// Scope: operator. A user session gets the same stream filtered to its own
 	// peers and the upstreams they use (via UserSelfService.Watch).
 	Watch(context.Context, *v1.WatchStatusRequest) (StatusServiceWatchClientStream, error)
+	// Scope: internal. Sent directly from the panel's Outline API poller.
+	ReportOutlineUsage(context.Context, *v1.ReportOutlineUsageRequest) (*emptypb.Empty, error)
 }
 
 // NewStatusServiceClient constructs a client for the lotsman.v1.StatusService service. Multiple
@@ -82,6 +95,8 @@ type StatusServiceHandler interface {
 	// Scope: operator. A user session gets the same stream filtered to its own
 	// peers and the upstreams they use (via UserSelfService.Watch).
 	Watch(context.Context, *v1.WatchStatusRequest, StatusServiceWatchServerStream) error
+	// Scope: internal. Sent directly from the panel's Outline API poller.
+	ReportOutlineUsage(context.Context, *v1.ReportOutlineUsageRequest) (*emptypb.Empty, error)
 }
 
 // RegisterStatusServiceHandler registers svc as the lotsman.v1.StatusService implementation on
@@ -90,6 +105,7 @@ func RegisterStatusServiceHandler(server *connect.Server, svc StatusServiceHandl
 	adapter := statusServiceHandler{svc: svc}
 	server.Register(
 		connect.Method{Spec: statusServiceWatchSpec(), Handler: adapter.watch},
+		connect.Method{Spec: statusServiceReportOutlineUsageSpec(), Handler: adapter.reportOutlineUsage},
 	)
 }
 
@@ -115,6 +131,10 @@ func (UnimplementedStatusServiceHandler) Watch(context.Context, *v1.WatchStatusR
 	return connect.NewError(connect.CodeUnimplemented, "lotsman.v1.StatusService.Watch is not implemented")
 }
 
+func (UnimplementedStatusServiceHandler) ReportOutlineUsage(context.Context, *v1.ReportOutlineUsageRequest) (*emptypb.Empty, error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, "lotsman.v1.StatusService.ReportOutlineUsage is not implemented")
+}
+
 type statusServiceClient struct {
 	client *connect.Client
 }
@@ -127,6 +147,14 @@ func (c *statusServiceClient) Watch(ctx context.Context, req *v1.WatchStatusRequ
 	return StatusServiceWatchClientStream{stream: stream}, nil
 }
 
+func (c *statusServiceClient) ReportOutlineUsage(ctx context.Context, req *v1.ReportOutlineUsageRequest) (*emptypb.Empty, error) {
+	var res emptypb.Empty
+	if err := c.client.CallUnary(ctx, statusServiceReportOutlineUsageSpec(), req, &res); err != nil {
+		return nil, err
+	}
+	return &res, nil
+}
+
 type statusServiceHandler struct{ svc StatusServiceHandler }
 
 func (h statusServiceHandler) watch(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
@@ -135,4 +163,16 @@ func (h statusServiceHandler) watch(ctx context.Context, _ connect.Spec, stream 
 		return err
 	}
 	return h.svc.Watch(ctx, &req, StatusServiceWatchServerStream{stream: stream})
+}
+
+func (h statusServiceHandler) reportOutlineUsage(ctx context.Context, _ connect.Spec, stream connect.ServerStream) error {
+	var req v1.ReportOutlineUsageRequest
+	if err := stream.Receive(&req); err != nil {
+		return err
+	}
+	res, err := h.svc.ReportOutlineUsage(ctx, &req)
+	if err != nil {
+		return err
+	}
+	return stream.Send(res)
 }

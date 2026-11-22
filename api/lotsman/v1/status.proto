@@ -6,6 +6,7 @@ syntax = "proto3";
 package lotsman.v1;
 
 import "google/protobuf/duration.proto";
+import "google/protobuf/empty.proto";
 import "google/protobuf/timestamp.proto";
 import "lotsman/v1/incident.proto";
 
@@ -16,6 +17,20 @@ service StatusService {
   // Scope: operator. A user session gets the same stream filtered to its own
   // peers and the upstreams they use (via UserSelfService.Watch).
   rpc Watch(WatchStatusRequest) returns (stream StatusSnapshot);
+  // Scope: internal. Sent directly from the panel's Outline API poller.
+  rpc ReportOutlineUsage(ReportOutlineUsageRequest) returns (google.protobuf.Empty);
+}
+
+message ReportOutlineUsageRequest {
+  // The complete configured mapping, including keys whose usage is not known yet.
+  map<string, OutlineUsageReading> upstreams = 1;
+}
+
+message OutlineUsageReading {
+  bytes key_hash = 1; // identifies a provider key across polls without sending the key name
+  google.protobuf.Timestamp observed_at = 2; // unset until the provider reports usage
+  bool exhausted = 3;
+  google.protobuf.Timestamp expires_at = 4;
 }
 
 message WatchStatusRequest {
@@ -45,6 +60,13 @@ enum UpstreamKind {
   UPSTREAM_KIND_VLESS = 3;
 }
 
+enum RoutingBlock {
+  ROUTING_BLOCK_UNSPECIFIED = 0;
+  ROUTING_BLOCK_SUBSCRIPTION_EXPIRED = 1;
+  ROUTING_BLOCK_QUOTA_EXHAUSTED = 2;
+  ROUTING_BLOCK_UNAVAILABLE = 3; // user view; subscription details are operator-only
+}
+
 message UpstreamStatus {
   string name = 1;
   UpstreamKind kind = 2;
@@ -58,6 +80,8 @@ message UpstreamStatus {
   Traffic traffic = 10; // unset until the daemon has sampled it
   Speed speed = 11; // the latest speed test; unset before the first or with health.speed off
   repeated IncidentKind incidents = 12; // open now; empty for a user session
+  google.protobuf.Timestamp expires_at = 13; // optional subscription metadata; operator only
+  RoutingBlock routing_block = 14; // why this exit cannot carry client traffic despite reachability
 }
 
 // A speed test through one upstream: bytes per second each way.

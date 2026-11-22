@@ -4,7 +4,7 @@
 
 import { create, equals } from "@bufbuild/protobuf";
 import { durationMs } from "@bufbuild/protobuf/wkt";
-import { type UpstreamStatus, UpstreamState } from "../gen/lotsman/v1/status_pb";
+import { RoutingBlock, type UpstreamStatus, UpstreamState } from "../gen/lotsman/v1/status_pb";
 import { type Route, RouteSchema } from "../gen/lotsman/v1/user_pb";
 import type { Dict } from "../i18n/en";
 
@@ -130,7 +130,7 @@ export function moveCountry(draft: Draft, geo: string, to: number): Draft {
 
 /** An exit carries traffic while it is up, and as a last resort while degraded. */
 function usable(u: UpstreamStatus): boolean {
-  return u.state === UpstreamState.UP || u.state === UpstreamState.DEGRADED;
+  return u.routingBlock === RoutingBlock.UNSPECIFIED && (u.state === UpstreamState.UP || u.state === UpstreamState.DEGRADED);
 }
 
 export function matchesCountry(c: Pick<CountryChoice, "geo" | "providers">, u: Pick<UpstreamStatus, "geo" | "provider">): boolean {
@@ -149,9 +149,12 @@ export function providerAvailable(geo: string, provider: string, exits: readonly
   return exits.some((u) => u.geo === geo && u.provider === provider && usable(u));
 }
 
-/** A strict draft whose chosen countries have no usable exit: the device's traffic is blocked. */
-export function blocked(draft: Draft, exits: readonly UpstreamStatus[]): boolean {
-  return draft.strict && !chosen(draft).some((c) => countryNow(c, exits).available);
+/** How the draft would route a device with the exits currently available. */
+export function routeAvailability(draft: Draft, exits: readonly UpstreamStatus[]): "selected" | "blocked" | "fallback" | "none" {
+  const available = exits.filter(usable);
+  if (available.length === 0) return "none";
+  if (chosen(draft).some((c) => available.some((u) => matchesCountry(c, u)))) return "selected";
+  return draft.strict ? "blocked" : "fallback";
 }
 
 /**

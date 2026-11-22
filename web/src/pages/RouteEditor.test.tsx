@@ -6,7 +6,7 @@ import { durationFromMs } from "@bufbuild/protobuf/wkt";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/testing-library";
 import { createSignal, flush } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
-import { UpstreamState, UpstreamStatusSchema } from "../gen/lotsman/v1/status_pb";
+import { RoutingBlock, UpstreamState, UpstreamStatusSchema } from "../gen/lotsman/v1/status_pb";
 import { type Route, RouteSchema } from "../gen/lotsman/v1/user_pb";
 import { RouteEditor } from "./RouteEditor";
 
@@ -77,7 +77,7 @@ test("switches countries and providers, keeps the last of each, and Cancel goes 
   const providers = within(screen.getByRole("group", { name: "Providers in Germany" }));
   expect((providers.getByRole("button", { name: /provider-a/ }) as HTMLButtonElement).disabled).toBe(true);
   // A chosen provider that is down says so in words.
-  expect(providers.getByRole("button").textContent).toBe("provider-a, unavailable");
+  expect(providers.getByRole("button").textContent).toBe("provider-a · unavailable");
 
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   flush();
@@ -91,11 +91,32 @@ test("in the fastest mode there is no order; a strict route with nothing availab
   expect(screen.getByRole("button", { name: "Fastest" }).getAttribute("aria-pressed")).toBe("true");
   expect(screen.queryByRole("button", { name: /, 1 of/ })).toBeNull();
   expect(screen.getByRole("alert").textContent).toBe(
-    "No available exit. The selected countries are unavailable now, so traffic is blocked. Turn on another country or turn off “Only the selected countries”.",
+    "This route will block traffic while the selected exits are unavailable. Select another available country or provider.",
   );
   fireEvent.click(screen.getByRole("switch", { name: "Use Netherlands" }));
   flush();
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("live exclusion keeps the chosen provider and unsaved mode; another provider can still be saved", async () => {
+  const saved = create(RouteSchema, { fastest: true, strict: false, countries: [{ geo: "LV", providers: ["provider-a"] }] });
+  const apply = vi.fn(async (_: Route) => undefined);
+  const [current, setCurrent] = createSignal(exits);
+  render(() => <RouteEditor route={saved} exits={current()} providers apply={apply} />);
+  fireEvent.click(screen.getByRole("button", { name: "In order" }));
+  flush();
+  setCurrent([{ ...exits[0]!, routingBlock: RoutingBlock.UNAVAILABLE }, ...exits.slice(1)]);
+  flush();
+  expect(screen.getByRole("status").textContent).toContain("another allowed exit");
+  const providers = within(screen.getByRole("group", { name: "Providers in Latvia" }));
+  expect(providers.getByRole("button", { name: /provider-a.*unavailable/ }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.getByRole("button", { name: "In order" }).getAttribute("aria-pressed")).toBe("true");
+  fireEvent.click(screen.getByRole("button", { name: "provider-b" }));
+  flush();
+  expect(screen.queryByRole("status")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Apply" }));
+  await waitFor(() => expect(apply).toHaveBeenCalledOnce());
+  expect(apply.mock.calls[0]![0].countries).toEqual([{ ...saved.countries[0], providers: [] }]);
 });
 
 test("a failure stays in words; a new stored route resets the draft", async () => {

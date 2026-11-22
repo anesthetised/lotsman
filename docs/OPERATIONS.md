@@ -90,6 +90,7 @@ too.
 ```bash
 docker build -f deploy/Dockerfile -t lotsman .
 docker run -d --name lotsman \
+  --env TZ \
   --cap-add NET_ADMIN --device /dev/net/tun \
   --sysctl net.ipv4.ip_forward=1 --sysctl net.ipv4.conf.default.rp_filter=2 \
   -p 51820:51820/udp \
@@ -102,6 +103,12 @@ The two `--sysctl` flags matter: `/proc/sys` is read-only inside the container, 
 only verify them, not set them. For byte counts in [live connections](#live-connections), also
 pass `--sysctl net.netfilter.nf_conntrack_acct=1`; the container may fail to start with it
 when the host has no `nf_conntrack` loaded.
+
+Set `TZ` to a named IANA time zone in the environment that launches Docker to
+pass it to the container. On systemd installs, set `Environment=TZ=…` in local
+drop-ins for `lotsman` and `lotsman-web` instead. The web panel uses the zone of
+its process for absolute dates and chart labels. With no named `TZ`, it uses
+the browser's zone.
 
 ## Upgrading
 
@@ -134,6 +141,13 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 ## Configuration
 
 `/etc/lotsman/lotsman.yaml` — see `deploy/lotsman.example.yaml` for a commented example.
+
+Set a subscription expiry with `lotsman upstream expiry ac-nl 2030-02-03T12:34:56+02:00`.
+Pass `clear` to remove it, or omit the timestamp to show the stored value. The
+date is stored in SQLite and appears in the operator panel without a restart.
+At the deadline the gateway excludes the upstream from client routing and drops
+its pinned flows. Renewal makes it eligible again under the existing health and
+route rules. No expiry means no time restriction.
 
 | Key | Meaning |
 |---|---|
@@ -789,6 +803,16 @@ the token and refreshes the quotas at startup and every five minutes. It shows t
 data and plan limit on the operator's upstream list and detail pages. If a refresh fails,
 the panel marks the last successful values as out of date. If the provider has never
 returned quota data for an upstream, its quota is shown as unavailable.
+The same response includes the subscription expiry. The provider sends a wall-clock
+date, so set `outline_usage.expiration_time_zone` to its named time zone if it differs
+from the web process's `TZ`. When an automatic date is unavailable, the panel uses the
+upstream's stored expiry, if present.
+The gateway excludes an Outline upstream when the API reports zero remaining
+data or its subscription expires. It applies the last confirmed reading during
+API outages, including across restarts. Unknown values impose no restriction,
+and editing the mapping for an upstream invalidates the previous key's reading.
+The operator sees the reason. In the device form the exit is temporarily
+unavailable and remains selectable for use when it returns.
 
 ### Operators and passkeys
 

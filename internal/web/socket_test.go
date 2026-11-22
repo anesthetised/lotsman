@@ -21,6 +21,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/control"
 	"github.com/anesthetised/lotsman/internal/control/controltest"
 	"github.com/anesthetised/lotsman/internal/daemon"
+	"github.com/anesthetised/lotsman/internal/store"
 	"github.com/anesthetised/lotsman/internal/traffic"
 )
 
@@ -38,9 +39,10 @@ func (fakeSource) Ready() <-chan struct{} {
 	close(ready)
 	return ready
 }
-func (fakeSource) ClientMTU() int                              { return 1280 }
-func (fakeSource) Subnet() netip.Prefix                        { return netip.Prefix{} }
-func (fakeSource) PeerRoutes() map[netip.Addr]daemon.PeerRoute { return nil }
+func (fakeSource) ClientMTU() int                                        { return 1280 }
+func (fakeSource) ApplyOutlineUsage(map[string]store.OutlineUsage) error { return nil }
+func (fakeSource) Subnet() netip.Prefix                                  { return netip.Prefix{} }
+func (fakeSource) PeerRoutes() map[netip.Addr]daemon.PeerRoute           { return nil }
 func (fakeSource) Status() daemon.Status {
 	return daemon.Status{Upstreams: []daemon.UpstreamStatus{{Name: "nl", Kind: "awg"}}}
 }

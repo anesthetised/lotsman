@@ -97,6 +97,32 @@ upstreams: [{name: nl, conf: `+up+`, geo: NL, provider: acme}]
 	return path
 }
 
+func TestUpstreamExpiryCommand(t *testing.T) {
+	config := testConfig(t)
+	for _, tc := range []struct {
+		args []string
+		out  string
+	}{
+		{[]string{"nl"}, "-\n"},
+		{[]string{"nl", "2030-02-03T12:34:56+02:00"}, ""},
+		{[]string{"nl"}, "2030-02-03T10:34:56Z\n"},
+		{[]string{"nl", "2031-04-05T06:07:08Z"}, ""},
+		{[]string{"nl"}, "2031-04-05T06:07:08Z\n"},
+		{[]string{"nl", "clear"}, ""},
+		{[]string{"nl"}, "-\n"},
+	} {
+		got, err := capture(t, append([]string{"-config", config, "upstream", "expiry"}, tc.args...)...)
+		if err != nil || got != tc.out {
+			t.Fatalf("upstream expiry %v = %q, %v; want %q", tc.args, got, err, tc.out)
+		}
+	}
+	for _, args := range [][]string{{"unknown", "2030-02-03T12:34:56Z"}, {"nl", "2030-02-03"}} {
+		if _, err := capture(t, append([]string{"-config", config, "upstream", "expiry"}, args...)...); err == nil {
+			t.Fatalf("upstream expiry %v should fail", args)
+		}
+	}
+}
+
 func TestConfigCheckRejectsUnsafeUpstream(t *testing.T) {
 	for _, tc := range []struct {
 		name, old, replacement, wantError string

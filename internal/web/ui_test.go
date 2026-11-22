@@ -81,3 +81,20 @@ func TestSinglePageApp(t *testing.T) {
 		t.Errorf("PUT: status %d", w.Code)
 	}
 }
+
+func TestUITimeZone(t *testing.T) {
+	files := fstest.MapFS{"index.html": {Data: []byte(timeZoneMeta + ">")}}
+	for _, tc := range []struct{ tz, want string }{
+		{"America/New_York", "America/New_York"},
+		{"invalid", ""},
+		{"", ""},
+	} {
+		t.Run(tc.tz, func(t *testing.T) {
+			t.Setenv("TZ", tc.tz)
+			want := `<meta name="lotsman-time-zone" content="` + tc.want + `">`
+			if got := get(uiPanel(t, files), "/admin").Body.String(); got != want {
+				t.Errorf("timezone metadata = %q, want %q", got, want)
+			}
+		})
+	}
+}

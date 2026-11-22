@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	lotsmanv1 "github.com/anesthetised/lotsman/api/lotsman/v1"
+	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
 )
 
 const (
@@ -26,8 +34,9 @@ const (
 
 // OutlineUsageConfig maps upstream names to the provider's access key names.
 type OutlineUsageConfig struct {
-	TokenFile string            `yaml:"token_file"`
-	Upstreams map[string]string `yaml:"upstreams"`
+	TokenFile          string            `yaml:"token_file"`
+	Upstreams          map[string]string `yaml:"upstreams"`
+	ExpirationTimeZone string            `yaml:"expiration_time_zone"`
 }
 
 func (c *OutlineUsageConfig) validate() error {
@@ -36,6 +45,11 @@ func (c *OutlineUsageConfig) validate() error {
 	}
 	if len(c.Upstreams) == 0 {
 		return errors.New("outline_usage.upstreams: at least one mapping required")
+	}
+	if c.ExpirationTimeZone != "" {
+		if _, err := time.LoadLocation(c.ExpirationTimeZone); err != nil || c.ExpirationTimeZone == "Local" {
+			return errors.New("outline_usage.expiration_time_zone: use a named timezone")
+		}
 	}
 	for upstream, key := range c.Upstreams {
 		if upstream == "" || strings.TrimSpace(upstream) != upstream || key == "" || strings.TrimSpace(key) != key {
@@ -46,17 +60,19 @@ func (c *OutlineUsageConfig) validate() error {
 }
 
 type outlineQuota struct {
-	Limit     float64   `json:"limit"`
-	Remaining float64   `json:"remaining"`
-	Unit      string    `json:"unit"`
-	UpdatedAt time.Time `json:"updatedAt"`
-	Stale     bool      `json:"stale"`
+	Limit     float64    `json:"limit"`
+	Remaining float64    `json:"remaining"`
+	Unit      string     `json:"unit"`
+	UpdatedAt time.Time  `json:"updatedAt"`
+	Stale     bool       `json:"stale"`
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
 type outlineUsage struct {
-	cfg    *OutlineUsageConfig
-	client *http.Client
-	log    *slog.Logger
+	cfg            *OutlineUsageConfig
+	client         *http.Client
+	log            *slog.Logger
+	expirationZone *time.Location
 
 	mu     sync.RWMutex
 	quotas map[string]*outlineQuota
@@ -64,15 +80,35 @@ type outlineUsage struct {
 
 // StartOutlineUsage fetches quota data in the background for the lifetime of
 // the panel. The handler serves only the cache, even during an API failure.
-func StartOutlineUsage(ctx context.Context, cfg *OutlineUsageConfig, log *slog.Logger) http.Handler {
+func StartOutlineUsage(ctx context.Context, cfg *OutlineUsageConfig, daemon http.RoundTripper, log *slog.Logger) http.Handler {
+	transport := connecthttp.NewTransport(&http.Client{Transport: daemon, Timeout: 5 * time.Second}, "http://lotsman")
+	gateway := lotsmanv1connect.NewStatusServiceClient(connect.NewClient(transport))
 	if cfg == nil {
+		go func() {
+			tick := time.NewTicker(outlineRefreshInterval)
+			defer tick.Stop()
+			for {
+				if _, err := gateway.ReportOutlineUsage(ctx, &lotsmanv1.ReportOutlineUsageRequest{}); err == nil {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+				}
+			}
+		}()
 		return nil
 	}
 	client := &http.Client{
 		Timeout:       8 * time.Second,
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	u := &outlineUsage{cfg: cfg, client: client, log: log, quotas: make(map[string]*outlineQuota, len(cfg.Upstreams))}
+	expirationZone := runtimeTimeZone()
+	if cfg.ExpirationTimeZone != "" {
+		expirationZone, _ = time.LoadLocation(cfg.ExpirationTimeZone)
+	}
+	u := &outlineUsage{cfg: cfg, client: client, log: log, expirationZone: expirationZone, quotas: make(map[string]*outlineQuota, len(cfg.Upstreams))}
 	for upstream := range cfg.Upstreams {
 		u.quotas[upstream] = nil
 	}
@@ -82,6 +118,9 @@ func StartOutlineUsage(ctx context.Context, cfg *OutlineUsageConfig, log *slog.L
 		defer tick.Stop()
 		for {
 			u.refresh(ctx)
+			if _, err := gateway.ReportOutlineUsage(ctx, u.routingReadings()); err != nil && ctx.Err() == nil {
+				log.Warn("could not report Outline limits to the gateway", "code", connect.CodeOf(err))
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -90,6 +129,25 @@ func StartOutlineUsage(ctx context.Context, cfg *OutlineUsageConfig, log *slog.L
 		}
 	}()
 	return u
+}
+
+func (u *outlineUsage) routingReadings() *lotsmanv1.ReportOutlineUsageRequest {
+	payload := &lotsmanv1.ReportOutlineUsageRequest{Upstreams: make(map[string]*lotsmanv1.OutlineUsageReading, len(u.cfg.Upstreams))}
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	for name, key := range u.cfg.Upstreams {
+		hash := sha256.Sum256([]byte(key))
+		row := &lotsmanv1.OutlineUsageReading{KeyHash: hash[:]}
+		if quota := u.quotas[name]; quota != nil {
+			row.ObservedAt = timestamppb.New(quota.UpdatedAt)
+			row.Exhausted = quota.Remaining == 0
+			if quota.ExpiresAt != nil {
+				row.ExpiresAt = timestamppb.New(*quota.ExpiresAt)
+			}
+		}
+		payload.Upstreams[name] = row
+	}
+	return payload
 }
 
 func (u *outlineUsage) ServeHTTP(w http.ResponseWriter, _ *http.Request) {
@@ -162,6 +220,7 @@ func (u *outlineUsage) fetch(ctx context.Context, token, key string) (*outlineQu
 		Remaining       json.RawMessage `json:"remaining_bandwidth"`
 		LegacyRemaining json.RawMessage `json:"reaming_bandwidth"` // spelling in Outline VPN's API
 		Unit            string          `json:"bandwidth_unit"`
+		ExpirationDate  json.RawMessage `json:"expiration_date"`
 	}
 	if err != nil || len(payload) > maxBody || json.Unmarshal(payload, &details) != nil || !details.Status || details.Key != key {
 		return nil, errors.New("invalid provider response")
@@ -176,7 +235,16 @@ func (u *outlineUsage) fetch(ctx context.Context, token, key string) (*outlineQu
 	}
 	switch details.Unit = strings.ToUpper(strings.TrimSpace(details.Unit)); details.Unit {
 	case "B", "KB", "MB", "GB", "TB":
-		return &outlineQuota{Limit: limit, Remaining: remaining, Unit: details.Unit, UpdatedAt: time.Now().UTC()}, nil
+		quota := &outlineQuota{Limit: limit, Remaining: remaining, Unit: details.Unit, UpdatedAt: time.Now().UTC()}
+		// The provider returns a wall-clock date with no UTC offset.
+		var expirationDate string
+		if u.expirationZone != nil && json.Unmarshal(details.ExpirationDate, &expirationDate) == nil {
+			if expires, err := time.ParseInLocation("02.01.2006 15:04:05", expirationDate, u.expirationZone); err == nil {
+				expiry := expires.UTC()
+				quota.ExpiresAt = &expiry
+			}
+		}
+		return quota, nil
 	default:
 		return nil, errors.New("unsupported quota unit")
 	}

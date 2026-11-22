@@ -62,7 +62,7 @@ func runWeb(ctx context.Context, configPath string, level slog.Level) error {
 	defer stop()
 	h := web.New(web.Deps{
 		Config: cfg, Auth: newAuthenticator(operators, daemon), SignIn: operators,
-		Daemon: daemon, OutlineUsage: web.StartOutlineUsage(ctx, cfg.OutlineUsage, log),
+		Daemon: daemon, OutlineUsage: web.StartOutlineUsage(ctx, cfg.OutlineUsage, daemon, log),
 		UI: web.Dist(), Log: log,
 	})
 	log.Info("web panel serving", "listen", ln.Addr().String(), "public_url", cfg.Origin(), "socket", cfg.Socket)

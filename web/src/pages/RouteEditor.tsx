@@ -14,7 +14,6 @@ import type { Dict } from "../i18n/en";
 import { buttonClass } from "../ui/button";
 import { Chip, Segmented, Switch, SwitchField } from "../ui/Toggles";
 import {
-  blocked,
   changed,
   chosen,
   type CountryChoice,
@@ -26,6 +25,7 @@ import {
   type Offer,
   offerOf,
   providerAvailable,
+  routeAvailability,
   routeOf,
   sameOffer,
   toggleCountry,
@@ -82,7 +82,9 @@ export function RouteEditor(props: RouteEditorProps) {
           fallback={
             <>
               <RouteView draft={draft()} offer={offer()} exits={props.exits} />
-              <NoExit draft={draft()} exits={props.exits} />
+              <Show when={props.providers}>
+                <NoExit draft={draft()} exits={props.exits} />
+              </Show>
             </>
           }
         >
@@ -226,17 +228,17 @@ export function RouteFields(props: RouteFieldsProps) {
             <div role="group" aria-label={t.route.providers(name())} class="flex flex-wrap gap-x-1.5">
               <For each={providers()}>
                 {(p) => {
-                  const down = () => c().on && c().providers.includes(p) && !providerAvailable(c().geo, p, props.exits);
+                  const down = () => !providerAvailable(c().geo, p, props.exits);
                   return (
                     <Chip
                       pressed={c().providers.includes(p)}
-                      warn={down()}
+                      warn={c().on && down()}
                       disabled={!c().on || (c().providers.length === 1 && c().providers.includes(p))}
                       onChange={() => props.setDraft((d) => toggleProvider(d, c().geo, p, props.offer))}
                     >
                       {p}
                       <Show when={down()}>
-                        <span class="sr-only">, {t.route.unavailable}</span>
+                        <span> · {t.route.providerUnavailable}</span>
                       </Show>
                     </Chip>
                   );
@@ -284,7 +286,7 @@ export function RouteFields(props: RouteFieldsProps) {
       </p>
       <SwitchField
         label={t.route.strict}
-        hint={t.route.strictHelp}
+        hint={props.draft.strict ? t.route.strictHelp : t.route.fallback}
         checked={props.draft.strict}
         onChange={(strict) => props.setDraft((d) => ({ ...d, strict }))}
       />
@@ -296,19 +298,28 @@ export function RouteFields(props: RouteFieldsProps) {
 /** The country's latency now, or that it is unavailable. */
 function latency(c: CountryChoice, exits: readonly UpstreamStatus[], t: Dict, ms: (n: number) => string): string {
   const now = countryNow(c, exits);
-  if (!now.available) return t.route.unavailable;
+  if (!now.available) {
+    return c.providers.length > 0 && countryNow({ geo: c.geo, providers: [] }, exits).available
+      ? t.route.selectionUnavailable
+      : t.route.unavailable;
+  }
   return now.latencyMs === undefined ? "" : ms(now.latencyMs);
 }
 
-/** Warns that the route leaves the device blocked now; with fix, says how to change that. */
+/** Explains how the current route would behave if no selected exit is usable. */
 function NoExit(props: { draft: Draft; exits: readonly UpstreamStatus[]; fix?: boolean }) {
   const { t } = useI18n();
+  const result = createMemo(() => routeAvailability(props.draft, props.exits));
   return (
-    <Show when={blocked(props.draft, props.exits)}>
-      <p role="alert" class="rounded-md border border-warn p-3">
-        <span class="font-semibold text-warn">{t.route.noExit}</span> {t.route.noExitWhy}
-        <Show when={props.fix}> {t.route.noExitFix}</Show>
-      </p>
+    <Show when={result() !== "selected"}>
+      <Show when={result() === "fallback"} fallback={
+        <p role="alert" class="rounded-md border border-warn px-3 py-2.5">
+          {result() === "none" ? t.route.noAllowedExit : t.route.noExitWhy}
+          <Show when={result() === "blocked" && props.fix}> {t.route.noExitFix}</Show>
+        </p>
+      }>
+        <p role="status" class="rounded-md border border-line bg-bg px-3 py-2.5 text-muted">{t.route.fallbackAvailable}</p>
+      </Show>
     </Show>
   );
 }

@@ -26,10 +26,11 @@ export interface FakeOptions {
   signedIn?: () => boolean;
   /** The user page's limits (see FakeSelfOptions). */
   self?: FakeSelfOptions;
+  exhaustedOutline?: string;
 }
 
 export function createFakeTransport(options: FakeOptions = {}): Transport {
-  const sim = new Simulation(options.seed, options.clock);
+  const sim = new Simulation(options.seed, options.clock, options.exhaustedOutline);
   const clock = options.clock ?? Date.now;
   const history = (kind: "upstream" | "peer", req: HistoryRequest, allowed = true) => {
     const to = req.to ? timestampMs(req.to) : clock();

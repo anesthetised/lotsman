@@ -19,12 +19,13 @@ export function pickLocale(languages: readonly string[]): Locale {
 
 export interface I18n {
   locale: Locale;
+  timeZone?: string;
   t: Dict;
   fmt: Formatters;
 }
 
-export function i18n(locale: Locale): I18n {
-  return { locale, t: dictionaries[locale], fmt: formatters(locale) };
+export function i18n(locale: Locale, timeZone?: string): I18n {
+  return { locale, timeZone, t: dictionaries[locale], fmt: formatters(locale, timeZone) };
 }
 
 /** English by default, so components render outside the app shell (tests) too. */

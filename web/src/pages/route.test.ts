@@ -1,13 +1,12 @@
 import { create } from "@bufbuild/protobuf";
 import { durationFromMs } from "@bufbuild/protobuf/wkt";
 import { describe, expect, test } from "vitest";
-import { UpstreamState, UpstreamStatusSchema } from "../gen/lotsman/v1/status_pb";
+import { RoutingBlock, UpstreamState, UpstreamStatusSchema } from "../gen/lotsman/v1/status_pb";
 import { type Route, RouteSchema } from "../gen/lotsman/v1/user_pb";
 import { en } from "../i18n/en";
 import { formatters } from "../i18n/format";
 import { ru } from "../i18n/ru";
 import {
-  blocked,
   changed,
   chosen,
   countryNow,
@@ -17,6 +16,7 @@ import {
   moveCountry,
   offerOf,
   providerAvailable,
+  routeAvailability,
   routeOf,
   routeSummary,
   sameOffer,
@@ -126,11 +126,21 @@ describe("now", () => {
     expect(providerAvailable("LV", "provider-a", exits)).toBe(true);
   });
 
-  test("a strict route is blocked when none of its countries is available; one that falls back never is", () => {
+  test("a route can use its selection, use a fallback or block traffic", () => {
     const germany = draftOf(route({ strict: true, countries: [{ geo: "DE" }] }), offer);
-    expect(blocked(germany, exits)).toBe(true);
-    expect(blocked({ ...germany, strict: false }, exits)).toBe(false);
-    expect(blocked(toggleCountry(germany, "NL", offer), exits)).toBe(false);
+    expect(routeAvailability(germany, exits)).toBe("blocked");
+    expect(routeAvailability({ ...germany, strict: false }, exits)).toBe("fallback");
+    expect(routeAvailability(toggleCountry(germany, "NL", offer), exits)).toBe("selected");
+    expect(routeAvailability({ ...germany, strict: false }, exits.filter((u) => u.geo === "DE"))).toBe("none");
+  });
+
+  test("blocked exits stay on offer but do not contribute to availability or latency", () => {
+    const restricted = [{ ...exits[0]!, routingBlock: RoutingBlock.UNAVAILABLE }, ...exits.slice(1)];
+    expect(offerOf(restricted, country, true)).toEqual(offer);
+    expect(countryNow({ geo: "LV", providers: [] }, restricted)).toEqual({ available: true, latencyMs: 52 });
+    expect(providerAvailable("LV", "provider-a", restricted)).toBe(false);
+    const sameProvider = { ...exits[0]!, name: "lv-3", latency: durationFromMs(85) };
+    expect(countryNow({ geo: "LV", providers: ["provider-a"] }, [...restricted, sameProvider])).toEqual({ available: true, latencyMs: 85 });
   });
 });
 

@@ -559,8 +559,8 @@ func TestUserSnapshot(t *testing.T) {
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
 	st := daemon.Status{
 		Upstreams: []daemon.UpstreamStatus{
-			{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme", State: health.Up, Routed: 2, Active: 2, Latency: time.Millisecond,
-				Speed: health.Speed{Down: 7, Up: 8, Time: now}, Incidents: []store.IncidentKind{store.IncidentSendErrors}},
+			{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme", State: health.Up, Routed: 2, Active: 2, Latency: time.Millisecond, ExpiresAt: now.Add(time.Hour),
+				Speed: health.Speed{Down: 7, Up: 8, Time: now}, Incidents: []store.IncidentKind{store.IncidentSendErrors}, RoutingBlock: daemon.SubscriptionExpired},
 			{Name: "de", Kind: "awg", Geo: "DE", Provider: "acme", State: health.Up, Routed: 1, Active: 1},
 			{Name: "us", Kind: "awg", Geo: "US", Provider: "beta", State: health.Up, Routed: 1},
 			{Name: "fi", Kind: "awg", Geo: "FI", Provider: "beta", State: health.Up},
@@ -582,7 +582,7 @@ func TestUserSnapshot(t *testing.T) {
 			// The exit's speed is hers to see; its incidents are the operator's.
 			{Name: "nl", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "NL", Provider: "acme",
 				State: lotsmanv1.UpstreamState_UPSTREAM_STATE_UP, Latency: got.Upstreams[0].Latency,
-				Speed: &lotsmanv1.Speed{DownRate: 7, UpRate: 8, Time: timestamppb.New(now)}},
+				Speed: &lotsmanv1.Speed{DownRate: 7, UpRate: 8, Time: timestamppb.New(now)}, RoutingBlock: lotsmanv1.RoutingBlock_ROUTING_BLOCK_UNAVAILABLE},
 			// Routed through, though not among her exits.
 			{Name: "fi", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "FI", Provider: "beta", State: lotsmanv1.UpstreamState_UPSTREAM_STATE_UP},
 		},

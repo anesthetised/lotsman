@@ -54,9 +54,10 @@ func (panelSource) Ready() <-chan struct{} {
 	close(ready)
 	return ready
 }
-func (panelSource) ClientMTU() int                              { return 1280 }
-func (panelSource) Subnet() netip.Prefix                        { return netip.Prefix{} }
-func (panelSource) PeerRoutes() map[netip.Addr]daemon.PeerRoute { return nil }
+func (panelSource) ClientMTU() int                                        { return 1280 }
+func (panelSource) ApplyOutlineUsage(map[string]store.OutlineUsage) error { return nil }
+func (panelSource) Subnet() netip.Prefix                                  { return netip.Prefix{} }
+func (panelSource) PeerRoutes() map[netip.Addr]daemon.PeerRoute           { return nil }
 func (p panelSource) Status() daemon.Status {
 	st := daemon.Status{Upstreams: []daemon.UpstreamStatus{{Name: "nl", Kind: "awg", Geo: "NL"}}}
 	if p.Users != nil {

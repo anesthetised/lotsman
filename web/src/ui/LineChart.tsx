@@ -49,9 +49,10 @@ export function LineChart(props: LineChartProps) {
   let plot: uPlot | undefined;
 
   const options = (width: number, locale: Locale): uPlot.Options => {
-    const clock = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-    const hours = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" });
-    const days = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" });
+    const timeZone = lang.timeZone;
+    const clock = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit", timeZone });
+    const hours = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", timeZone });
+    const days = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric", timeZone });
     const style = getComputedStyle(el);
     const token = (name: string) => style.getPropertyValue(name).trim();
     const axis: uPlot.Axis = {
@@ -70,6 +71,7 @@ export function LineChart(props: LineChartProps) {
       height: props.height ?? 200,
       legend: { show: false },
       cursor: { show: false },
+      tzDate: timeZone ? (seconds) => uPlot.tzDate(new Date(seconds * 1000), timeZone) : undefined,
       scales: { y: { range: (_u, _min, max) => [0, Math.max(max, 1)] } },
       axes: [
         { ...axis, ...timeAxis },

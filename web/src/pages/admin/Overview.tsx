@@ -18,6 +18,7 @@ import { LiveError } from "../LiveError";
 import { kindLabel, stateLabel, stateLevel } from "../upstream";
 import { IncidentBadge } from "./IncidentList";
 import { OutlineQuota, type OutlineQuotaValue, useOutlineUsage } from "./OutlineQuota";
+import { SubscriptionExpiry, subscriptionExpiry } from "./SubscriptionExpiry";
 
 const windows = ["1", "5", "15"] as const;
 type Window = (typeof windows)[number];
@@ -40,6 +41,7 @@ function LiveOverview() {
   const showQuota = createMemo(() =>
     snapshot().upstreams.some((upstream) => upstream.kind === UpstreamKind.OUTLINE && outlineUsage()[upstream.name] !== undefined),
   );
+  const showExpiry = createMemo(() => snapshot().upstreams.some((u) => u.expiresAt));
   const [window, setWindow] = createSignal<Window>("1");
 
   // Keep the longest window; the chart shows its tail.
@@ -101,6 +103,9 @@ function LiveOverview() {
           <thead class="text-left text-xs text-muted">
             <tr>
               <th scope="col" class="px-3 py-2 font-medium">{t.admin.name}</th>
+              <Show when={showExpiry()}>
+                <th scope="col" class="px-3 py-2 font-medium">{c.upstream.expiresAt}</th>
+              </Show>
               <Show when={showQuota()}>
                 <th scope="col" class="px-3 py-2 font-medium">{c.outlineUsage.title}</th>
               </Show>
@@ -120,6 +125,7 @@ function LiveOverview() {
                   upstream={u()}
                   trend={trends()[u().name] ?? []}
                   showQuota={showQuota()}
+                  showExpiry={showExpiry()}
                   quota={outlineUsage()[u().name]}
                 />
               )}
@@ -165,6 +171,7 @@ function UpstreamRow(props: {
   upstream: UpstreamStatus;
   trend: readonly number[];
   showQuota: boolean;
+  showExpiry: boolean;
   quota?: OutlineQuotaValue | null;
 }) {
   const { t, fmt } = useI18n();
@@ -179,6 +186,13 @@ function UpstreamRow(props: {
           {kindLabel(u().kind)} · {u().geo}
         </div>
       </th>
+      <Show when={props.showExpiry}>
+        <td class="px-3 py-1.5 tabular-nums">
+          <Show when={subscriptionExpiry(u())} fallback={<span class="text-muted">—</span>}>
+            {(date) => <SubscriptionExpiry date={date()} />}
+          </Show>
+        </td>
+      </Show>
       <Show when={props.showQuota}>
         <td class="px-3 py-1.5">
           <Show when={u().kind === UpstreamKind.OUTLINE && props.quota !== undefined} fallback={<span class="text-muted">—</span>}>
@@ -188,7 +202,7 @@ function UpstreamRow(props: {
       </Show>
       <td class="px-3 py-1.5">
         <div class="flex flex-col items-start gap-1">
-          <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />
+          <StateBadge level={stateLevel(u().state, u().routingBlock)} label={stateLabel(t, u().state, u().routingBlock)} />
           <IncidentBadge upstream={u().name} kinds={u().incidents} />
         </div>
       </td>

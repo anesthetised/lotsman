@@ -48,8 +48,9 @@ func newFakeSource(st daemon.Status) *fakeSource {
 	return f
 }
 
-func (f *fakeSource) Ready() <-chan struct{} { return f.ready }
-func (f *fakeSource) ClientMTU() int         { return 1280 }
+func (f *fakeSource) Ready() <-chan struct{}                                { return f.ready }
+func (f *fakeSource) ClientMTU() int                                        { return 1280 }
+func (f *fakeSource) ApplyOutlineUsage(map[string]store.OutlineUsage) error { return nil }
 
 func (f *fakeSource) Status() daemon.Status { return f.st }
 
@@ -68,9 +69,10 @@ func (f *fakeSource) setTraffic(tr traffic.Snapshot) {
 func TestSnapshot(t *testing.T) {
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
 	handshake := now.Add(-time.Minute)
+	expiry := now.Add(24 * time.Hour)
 	st := daemon.Status{
 		Upstreams: []daemon.UpstreamStatus{
-			{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme", State: health.Up,
+			{Name: "nl", Kind: "awg", Geo: "NL", Provider: "acme", State: health.Up, ExpiresAt: expiry,
 				Latency: 25 * time.Millisecond, LastHandshake: handshake, Routed: 2, Active: 1,
 				Speed:     health.Speed{Down: 13, Up: 14, Time: handshake},
 				Incidents: []store.IncidentKind{store.IncidentDownload, store.IncidentSendErrors}},
@@ -98,7 +100,7 @@ func TestSnapshot(t *testing.T) {
 		Time: timestamppb.New(now), ClientMtu: 1280,
 		Total: &lotsmanv1.Traffic{DownBytes: 9, UpBytes: 10, DownRate: 11, UpRate: 12},
 		Upstreams: []*lotsmanv1.UpstreamStatus{
-			{Name: "nl", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "NL", Provider: "acme",
+			{Name: "nl", Kind: lotsmanv1.UpstreamKind_UPSTREAM_KIND_AWG, Geo: "NL", Provider: "acme", ExpiresAt: timestamppb.New(expiry),
 				State: lotsmanv1.UpstreamState_UPSTREAM_STATE_UP, Latency: durationpb.New(25 * time.Millisecond),
 				LastHandshake: timestamppb.New(handshake), Routed: 2, Active: 1,
 				Traffic:   &lotsmanv1.Traffic{DownBytes: 5, UpBytes: 6, DownRate: 7, UpRate: 8},
@@ -264,6 +266,7 @@ func TestWatchRejectsInvalidInterval(t *testing.T) {
 func TestUnimplemented(t *testing.T) {
 	implemented := []string{
 		lotsmanv1connect.StatusServiceWatchProcedure,
+		lotsmanv1connect.StatusServiceReportOutlineUsageProcedure,
 		lotsmanv1connect.ConnectionServiceWatchProcedure,
 		lotsmanv1connect.HistoryServiceUpstreamProcedure,
 		lotsmanv1connect.HistoryServicePeerProcedure,

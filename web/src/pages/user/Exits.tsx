@@ -88,11 +88,15 @@ function ExitList(props: { exits: readonly ExitCard[] }) {
             <li class="space-y-2 rounded-xl border border-line bg-surface p-4">
               <div class="flex flex-wrap items-center justify-between gap-2">
                 <span class="font-medium">{label()}</span>
-                <Show when={status()}>{(u) => <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />}</Show>
+                <Show when={status()}>{(u) => (
+                  <StateBadge level={stateLevel(u().state, u().routingBlock)} label={stateLabel(t, u().state, u().routingBlock)} />
+                )}</Show>
               </div>
               <p class="text-sm text-muted">
                 {exit().devices ? t.user.usedBy(exit().devices) : t.user.unused}
-                <Show when={status()?.latency}>{(latency) => <> · {t.user.latency}: {fmt.milliseconds(durationMs(latency()))}</>}</Show>
+                <Show when={!status()?.routingBlock && status()?.latency}>
+                  {(latency) => <> · {t.user.latency}: {fmt.milliseconds(durationMs(latency()))}</>}
+                </Show>
               </p>
               <Availability name={exit().name} label={t.user.availabilityLabel(label())} load={ctx.self.upstreamHistory} />
             </li>

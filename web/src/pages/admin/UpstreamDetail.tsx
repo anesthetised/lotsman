@@ -21,6 +21,7 @@ import { kindLabel, stateLabel, stateLevel } from "../upstream";
 import { historyRanges, meanOf, type RangeKey, rateSeries, speedSeries } from "./history";
 import { IncidentBadge, IncidentLog } from "./IncidentList";
 import { OutlineQuota, useOutlineUsage } from "./OutlineQuota";
+import { SubscriptionExpiry, subscriptionExpiry } from "./SubscriptionExpiry";
 
 export default function UpstreamDetail() {
   const { t } = useI18n();
@@ -62,6 +63,7 @@ function Upstream(props: { upstream: UpstreamStatus; snapshot: StatusSnapshot })
   const { t, fmt, c } = useConsoleI18n();
   const u = () => props.upstream;
   const outlineUsage = useOutlineUsage();
+  const expiry = createMemo(() => subscriptionExpiry(u()));
   const now = () => (props.snapshot.time ? timestampDate(props.snapshot.time) : new Date());
   // The last five minutes of the live rate.
   const live = createMemo<number[][]>((prev) => {
@@ -83,11 +85,19 @@ function Upstream(props: { upstream: UpstreamStatus; snapshot: StatusSnapshot })
     <>
       <div class="flex flex-wrap items-baseline gap-x-4 gap-y-1">
         <h1 class="text-lg font-semibold">{c.upstream.title(u().name)}</h1>
-        <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />
+        <StateBadge level={stateLevel(u().state, u().routingBlock)} label={stateLabel(t, u().state, u().routingBlock)} />
         <IncidentBadge upstream={u().name} kinds={u().incidents} />
         <span class="text-muted">
           {[kindLabel(u().kind), u().geo, u().provider].filter(Boolean).join(" · ")}
         </span>
+        <Show when={expiry()}>
+          {(date) => (
+            <div class="text-sm tabular-nums">
+              <span class="mr-2 text-muted">{c.upstream.expiresAt}</span>
+              <SubscriptionExpiry date={date()} />
+            </div>
+          )}
+        </Show>
         <Show when={u().kind === UpstreamKind.OUTLINE}>
           <OutlineQuota quota={outlineUsage()[u().name]} labeled />
         </Show>

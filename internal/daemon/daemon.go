@@ -96,6 +96,7 @@ type Daemon struct {
 	unroutePending map[netip.Addr]bool        // cleanup must finish before routing this address again
 	devicePeers    map[awgconf.Key]store.Peer // added peers, retained until device and route cleanup succeed
 	aliveFailed    map[string]string          // upstream → last SetAlive error; the kernel is stale until it succeeds
+	appliedAlive   map[*Upstream]bool         // the last successful SetAlive for each link
 	dpStale        bool                       // d.ups is not yet pushed to the dataplane; retried every round
 	dpSetUp        bool                       // dataplane Setup was called, so stop must tear it down
 	notUp          map[*Upstream]bool         // opened upstreams whose device still has to come up
@@ -107,9 +108,12 @@ type Daemon struct {
 	ready          chan struct{}              // closed after the first reconcile
 	rounds         chan struct{}              // one pending token once a round has finished since Rounds was last read
 
-	transfers map[*Upstream]*transferState // throughput health while health.transfer is set
-	speeds    map[*Upstream]*speedState    // speed tests while health.speed is set
-	incidents map[incidentKey]*openIncident
+	transfers         map[*Upstream]*transferState // throughput health while health.transfer is set
+	speeds            map[*Upstream]*speedState    // speed tests while health.speed is set
+	incidents         map[incidentKey]*openIncident
+	expiries          map[string]time.Time
+	outlineUsage      map[string]store.OutlineUsage
+	subscriptionTimer *time.Timer
 
 	// Monotonic counters for metrics.
 	probes   map[string]*[2]uint64 // upstream → {ok, fail}
@@ -135,6 +139,7 @@ func New(d Deps) *Daemon {
 		unroutePending: map[netip.Addr]bool{},
 		devicePeers:    map[awgconf.Key]store.Peer{},
 		aliveFailed:    map[string]string{},
+		appliedAlive:   map[*Upstream]bool{},
 		notUp:          map[*Upstream]bool{},
 		failures:       map[failure]string{},
 		fetched:        map[string]time.Time{},
@@ -236,6 +241,9 @@ func (d *Daemon) start(ctx context.Context) error {
 	d.closeLeftoverIncidents(time.Now())
 	d.mu.Lock()
 	cfg := d.cfg
+	if err := d.loadSubscriptions(); err != nil {
+		d.log.Error("load subscription limits", "err", err)
+	}
 	d.mu.Unlock()
 	// Provider configs are loaded and resolved before d.mu is taken, so slow
 	// DNS never blocks Status or Metrics. The serve loop delivers SIGHUP only
@@ -373,6 +381,9 @@ func (d *Daemon) teardown() []link {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.stopped = true
+	if d.subscriptionTimer != nil {
+		d.subscriptionTimer.Stop()
+	}
 	// A start that failed before dataplane setup changed no rule, route or
 	// firewall, so it removes none: the host's may not be its own.
 	var err error
@@ -610,6 +621,7 @@ func (d *Daemon) dropUpstream(u *Upstream) link {
 		}
 	}
 	delete(d.aliveFailed, u.Name)
+	delete(d.appliedAlive, u)
 	delete(d.notUp, u)
 	delete(d.failures, failure{"up", u.Name})
 	delete(d.transfers, u)
@@ -1179,9 +1191,7 @@ func (d *Daemon) applyAlive(u *Upstream) error {
 	alive := d.alive(u)
 	err := d.dp.SetAlive(u.InterfaceName(), alive)
 	if err == nil {
-		if st := d.transfers[u]; st != nil {
-			st.alive = alive
-		}
+		d.appliedAlive[u] = alive
 		if _, stale := d.aliveFailed[u.Name]; stale {
 			d.log.Info("set alive recovered", "upstream", u.Name)
 			delete(d.aliveFailed, u.Name)
@@ -1216,6 +1226,10 @@ func (d *Daemon) reconcile() error {
 		exits[u.Name] = u.Rights.Exits
 	}
 	var errs []error
+	if err := d.loadSubscriptions(); err != nil {
+		errs = append(errs, fmt.Errorf("load subscription limits: %w", err))
+	}
+	d.scheduleSubscriptionExpiry(time.Now())
 	wanted := map[awgconf.Key]bool{}
 	for _, p := range peers {
 		wanted[p.PublicKey] = true
@@ -1267,6 +1281,14 @@ func (d *Daemon) route(p store.Peer, exits []string) error {
 		}
 	}
 	current := d.assignments[p.IP]
+	if current != "" && d.subscriptionBlockByName(current, time.Now()) != RoutingAllowed {
+		// Revoke access before trying the replacement, so a failed Route
+		// cannot leave new flows using the excluded upstream.
+		if err := d.unroute(p.IP); err != nil {
+			return err
+		}
+		current = ""
+	}
 	want, ok := policy.Select(p.Route.Tiers(), policy.Exits(d.candidates(), exits), current)
 	switch {
 	case !ok && current != "":
@@ -1326,14 +1348,18 @@ func (d *Daemon) interfaceOf(upstream string) string {
 }
 
 func (d *Daemon) candidates() []policy.Upstream {
-	out := make([]policy.Upstream, len(d.ups))
-	for i, u := range d.ups {
-		out[i] = policy.Upstream{
+	out := make([]policy.Upstream, 0, len(d.ups))
+	now := time.Now()
+	for _, u := range d.ups {
+		if d.subscriptionBlock(u.Upstream, now) != RoutingAllowed {
+			continue
+		}
+		out = append(out, policy.Upstream{
 			Upstream: u.Upstream,
 			Healthy:  u.Tracker.State() == health.Up && !d.notUp[u], // a device that is not up carries nothing
 			Degraded: d.degraded(u),
 			Latency:  u.Tracker.Latency(),
-		}
+		})
 	}
 	return out
 }
@@ -1347,6 +1373,8 @@ type UpstreamStatus struct {
 	Kind          string
 	Geo           string
 	Provider      string
+	ExpiresAt     time.Time `json:"-"` // only included in the live operator API
+	RoutingBlock  RoutingBlock
 	Interface     string
 	State         health.State
 	Degraded      bool // reachable, but failing its transfer probes
@@ -1393,7 +1421,7 @@ func (d *Daemon) Status() Status {
 		return cmp.Or(strings.Compare(a.User, b.User), strings.Compare(a.Device, b.Device))
 	})
 	for _, u := range d.ups {
-		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Geo: u.Geo, Provider: u.Provider, Interface: u.InterfaceName(), State: u.Tracker.State(), Degraded: d.degraded(u),
+		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Geo: u.Geo, Provider: u.Provider, ExpiresAt: d.subscriptionExpiry(u.Upstream), RoutingBlock: d.subscriptionBlock(u.Upstream, now), Interface: u.InterfaceName(), State: u.Tracker.State(), Degraded: d.degraded(u),
 			Latency: u.Tracker.Latency(), Routed: routed[u.Name], Active: active[u.Name], Speed: d.speedOf(u), Incidents: d.openKinds(u.Name)}
 		if peer := u.link.Stats().Peer; peer != nil {
 			s.LastHandshake = peer.LastHandshake

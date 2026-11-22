@@ -3,8 +3,10 @@ package web
 import (
 	"bytes"
 	"embed"
+	"html"
 	"io/fs"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -36,6 +38,17 @@ const placeholder = `<!doctype html>
 
 // staticTimeout bounds writing a file; API streams are not subject to it.
 const staticTimeout = 30 * time.Second
+const timeZoneMeta = `<meta name="lotsman-time-zone" content=""`
+
+// runtimeTimeZone returns the named zone supplied to the web process.
+func runtimeTimeZone() *time.Location {
+	name := os.Getenv("TZ")
+	if name == "" || name == "Local" {
+		return nil
+	}
+	zone, _ := time.LoadLocation(name)
+	return zone
+}
 
 // ui serves the single-page app from files: a file by its path, and
 // index.html for any other page, so client-side routes such as /u
@@ -49,6 +62,10 @@ func newUI(files fs.FS) *ui {
 	index, err := fs.ReadFile(files, "index.html")
 	if err != nil {
 		return &ui{index: []byte(placeholder)}
+	}
+	if zone := runtimeTimeZone(); zone != nil {
+		meta := `<meta name="lotsman-time-zone" content="` + html.EscapeString(zone.String()) + `"`
+		index = bytes.Replace(index, []byte(timeZoneMeta), []byte(meta), 1)
 	}
 	return &ui{files: files, index: index}
 }

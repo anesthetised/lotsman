@@ -26,7 +26,7 @@ export interface Formatters {
   /** How long ago `date` was, relative to `now`: "5 seconds ago". */
   ago(date: Date, now: Date): string;
   /** A date and time of day: "Nov 19, 2026, 12:15 PM". */
-  dateTime(date: Date): string;
+  dateTime(date: Date, withSeconds?: boolean): string;
   /** A time of day with seconds: "12:15:03 PM". */
   time(date: Date): string;
   /** A count: "1,234". */
@@ -35,7 +35,7 @@ export interface Formatters {
   country(code: string): string;
 }
 
-export function formatters(locale: string): Formatters {
+export function formatters(locale: string, timeZone?: string): Formatters {
   const unit = (value: number, name: string) =>
     new Intl.NumberFormat(locale, {
       style: "unit",
@@ -45,8 +45,12 @@ export function formatters(locale: string): Formatters {
     }).format(value);
   const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   const percent = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 });
-  const dateTime = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short" });
-  const time = new Intl.DateTimeFormat(locale, { timeStyle: "medium" });
+  const dateTime = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone });
+  const preciseDateTime = new Intl.DateTimeFormat(locale, {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZone,
+  });
+  const time = new Intl.DateTimeFormat(locale, { timeStyle: "medium", timeZone });
   const count = new Intl.NumberFormat(locale);
   const regions = new Intl.DisplayNames(locale, { type: "region", fallback: "code" });
 
@@ -85,8 +89,8 @@ export function formatters(locale: string): Formatters {
       if (abs < 86400) return relative.format(Math.round(seconds / 3600), "hour");
       return relative.format(Math.round(seconds / 86400), "day");
     },
-    dateTime(date) {
-      return dateTime.format(date);
+    dateTime(date, withSeconds) {
+      return (withSeconds ? preciseDateTime : dateTime).format(date);
     },
     time(date) {
       return time.format(date);

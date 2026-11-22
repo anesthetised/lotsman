@@ -44,6 +44,8 @@ Commands:
                               print the config again
   device rm USER/DEVICE       remove the device
   upstream status             show upstream health as last written by the daemon
+  upstream expiry NAME [TIME|clear]
+                              show, set (RFC 3339) or clear a subscription expiry
   incidents [-upstream NAME] [-n N]
                               list the latest N (50) incidents with upstreams, of every upstream
                               or of NAME: the open ones first, then the newest
@@ -133,6 +135,8 @@ func run(args []string) error {
 		return deviceRemove(*configPath, rest)
 	case "upstream status":
 		return upstreamStatus(*configPath)
+	case "upstream expiry":
+		return upstreamExpiry(*configPath, rest)
 	case "incidents":
 		return incidents(*configPath, rest)
 	case "web", "web enroll":

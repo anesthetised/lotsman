@@ -8,6 +8,7 @@ import type { UpstreamStatus } from "../../gen/lotsman/v1/status_pb";
 import type { Device, Route } from "../../gen/lotsman/v1/user_pb";
 import { useI18n } from "../../i18n";
 import { Dialog } from "../../ui/Dialog";
+import { ChevronDownIcon } from "../../ui/icons";
 import { StateBadge } from "../../ui/StateBadge";
 import { RouteEditor } from "../RouteEditor";
 import { stateLabel, stateLevel } from "../upstream";
@@ -68,10 +69,14 @@ export function IssuedConfig() {
 function DeviceCard(props: { device: Device }) {
   const { t, fmt } = useI18n();
   const ctx = useUser();
+  // Mount the editor on first expansion and keep its draft when collapsed.
+  const [expanded, setExpanded] = createSignal<boolean>();
   const [open, setOpen] = createSignal(false);
   const status = () => ctx.peer(props.device.peerId);
   const exit = () => ctx.upstream(status()?.upstream ?? "");
   const panel = () => `config-${props.device.peerId}`;
+  const title = () => `device-${props.device.peerId}`;
+  const details = () => `device-details-${props.device.peerId}`;
   const routeHeading = () => `route-${props.device.peerId}`;
   /** An exit in words: its country, and its provider when the user may see it. */
   const exitName = (u: UpstreamStatus) => [fmt.country(u.geo), ctx.rights().showProviders ? u.provider : ""].filter(Boolean).join(" · ");
@@ -80,10 +85,18 @@ function DeviceCard(props: { device: Device }) {
     return outcome.ok ? undefined : () => failureText(t, outcome.failure);
   };
   return (
-    <li class="space-y-3 rounded-xl border border-line bg-surface p-4">
-      <div class="flex items-start justify-between gap-3">
-        <div class="min-w-0">
-          <h3 class="break-words text-lg font-medium">{props.device.name}</h3>
+    <li class="rounded-xl border border-line bg-surface p-4">
+      <div class="group/device-summary relative grid gap-3">
+        <div>
+          <div class="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+            <h3 id={title()} class="min-w-0 flex-1 break-words text-lg font-medium">{props.device.name}</h3>
+            <div class="flex items-center gap-2">
+              <Show when={exit()} fallback={<StateBadge level="bad" label={t.user.blocked} />}>
+                {(u) => <StateBadge level={stateLevel(u().state, u().routingBlock)} label={stateLabel(t, u().state, u().routingBlock)} />}
+              </Show>
+              <span class={["text-muted group-hover/device-summary:text-fg", { "rotate-180": expanded() }]}><ChevronDownIcon /></span>
+            </div>
+          </div>
           <p class="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
             <span class="font-mono">{props.device.address}</span>
             <span>
@@ -97,40 +110,49 @@ function DeviceCard(props: { device: Device }) {
             </span>
           </p>
         </div>
-        <Show when={exit()} fallback={<StateBadge level="bad" label={t.user.blocked} />}>
-          {(u) => <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />}
-        </Show>
-      </div>
-      <p class="flex justify-between gap-3 rounded-lg bg-bg px-3 py-2 text-sm">
-        <span>
-          {t.route.now}: <span class="font-semibold">{exit() ? exitName(exit()!) : t.route.blocked}</span>
-        </span>
-        <span class="tabular-nums text-muted">{exit()?.latency ? fmt.milliseconds(durationMs(exit()!.latency!)) : "—"}</span>
-      </p>
-      <section aria-labelledby={routeHeading()} class="space-y-2 border-t border-line pt-3">
-        <h4 id={routeHeading()} class="font-medium">
-          {t.route.title}
-          <span class="sr-only"> {props.device.name}</span>
-        </h4>
-        <RouteEditor
-          route={props.device.route}
-          exits={ctx.exits()}
-          providers={ctx.rights().showProviders}
-          readOnly={!ctx.rights().editRoutes}
-          busy={ctx.busy()}
-          apply={apply}
+        <p class="flex justify-between gap-3 rounded-lg bg-bg px-3 py-2 text-sm">
+          <span class="min-w-0 break-words">
+            {t.route.now}: <span class="font-semibold">{exit() ? exitName(exit()!) : t.route.blocked}</span>
+          </span>
+          <span class="shrink-0 tabular-nums text-muted">{exit()?.latency && !exit()?.routingBlock ? fmt.milliseconds(durationMs(exit()!.latency!)) : "—"}</span>
+        </p>
+        <button
+          type="button"
+          class="absolute inset-0 w-full cursor-pointer rounded-lg"
+          aria-labelledby={title()}
+          aria-controls={details()}
+          aria-expanded={expanded() ? "true" : "false"}
+          onClick={() => setExpanded(!expanded())}
         />
-      </section>
-      <div class="flex flex-wrap gap-2 border-t border-line pt-3">
-        <button type="button" class={touchButton("secondary")} aria-expanded={open() ? "true" : "false"} aria-controls={panel()} onClick={() => setOpen(!open())}>
-          {open() ? t.user.config.hide : t.user.config.show}
-          <span class="sr-only"> {props.device.name}</span>
-        </button>
-        <RemoveDevice device={props.device.name} />
       </div>
-      <div id={panel()}>
-        <Show when={open()}>
-          <PeerConfig peerId={props.device.peerId} device={props.device.name} />
+      <div id={details()} hidden={!expanded()} class="mt-3 space-y-3">
+        <Show when={expanded() !== undefined}>
+          <section aria-labelledby={routeHeading()} class="space-y-2 border-t border-line pt-3">
+            <h4 id={routeHeading()} class="font-medium">
+              {t.route.title}
+              <span class="sr-only"> {props.device.name}</span>
+            </h4>
+            <RouteEditor
+              route={props.device.route}
+              exits={ctx.exits()}
+              providers={ctx.rights().showProviders}
+              readOnly={!ctx.rights().editRoutes}
+              busy={ctx.busy()}
+              apply={apply}
+            />
+          </section>
+          <div class="flex flex-wrap gap-2 border-t border-line pt-3">
+            <button type="button" class={touchButton("secondary")} aria-expanded={open() ? "true" : "false"} aria-controls={panel()} onClick={() => setOpen(!open())}>
+              {open() ? t.user.config.hide : t.user.config.show}
+              <span class="sr-only"> {props.device.name}</span>
+            </button>
+            <RemoveDevice device={props.device.name} />
+          </div>
+          <div id={panel()}>
+            <Show when={open()}>
+              <PeerConfig peerId={props.device.peerId} device={props.device.name} />
+            </Show>
+          </div>
         </Show>
       </div>
     </li>

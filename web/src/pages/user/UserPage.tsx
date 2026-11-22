@@ -113,7 +113,10 @@ function LiveUser(props: { token: string }) {
           rights,
           peer: (id) => peers().get(id),
           upstream: (name) => upstreams().get(name),
-          exits: () => snapshot().upstreams,
+          exits: () => {
+            const allowed = rights().exits;
+            return allowed.length ? snapshot().upstreams.filter((u) => allowed.includes(u.name)) : snapshot().upstreams;
+          },
           configs: new Map(),
           issued,
           issue,
@@ -130,8 +133,8 @@ function LiveUser(props: { token: string }) {
                 {t.user.devices}
               </h2>
               <IssuedConfig />
-              <Devices />
               <AddDevice />
+              <Devices />
             </section>
           </div>
           <div class="space-y-4">

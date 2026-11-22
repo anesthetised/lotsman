@@ -38,7 +38,8 @@ func (s Scope) String() string {
 // Scopes holds every RPC of lotsman.v1 that the panel forwards. An RPC
 // missing from it is refused; a test fails until a new RPC gets a scope.
 var Scopes = map[string]Scope{
-	lotsmanv1connect.StatusServiceWatchProcedure: Operator,
+	lotsmanv1connect.StatusServiceWatchProcedure:              Operator,
+	lotsmanv1connect.StatusServiceReportOutlineUsageProcedure: Internal,
 
 	lotsmanv1connect.HistoryServiceUpstreamProcedure: Operator,
 	lotsmanv1connect.HistoryServicePeerProcedure:     Operator,
