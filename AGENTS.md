@@ -10,6 +10,10 @@ backlog. Follow the user's current authorized scope. Preserve unrelated work.
 Only the parent agent assigns work or commits; subagents must not delegate, commit,
 push, or open PRs. A push needs an explicit user request; opening a PR needs approval.
 
+## Merging pull requests
+
+Squash-merge pull requests into `main` after all CI checks pass.
+
 ## Roles and agent tiers
 
 The parent agent orchestrates: it assigns issues, reviews the actual diffs,
