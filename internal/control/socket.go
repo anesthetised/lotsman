@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/anesthetised/lotsman/internal/flows"
 )
 
 const (
@@ -103,11 +105,28 @@ func (l *listener) Close() error {
 // and the shutdown does not wait for them.
 func Serve(ctx context.Context, ln net.Listener, src Source) error {
 	defer ln.Close()
+	sampler := flows.NewSampler(flows.Conntrack{}, peerRoutes{src}, src.Subnet())
+	samplerCtx, stopSampler := context.WithCancel(ctx)
+	samplerDone := make(chan struct{})
+	go func() {
+		defer close(samplerDone)
+		select {
+		case <-samplerCtx.Done():
+		case <-src.Ready():
+			sampler.Run(samplerCtx, MinInterval)
+		}
+	}()
+	defer func() {
+		stopSampler()
+		<-samplerDone
+	}()
+
 	p := new(http.Protocols)
 	p.SetHTTP1(true)
 	p.SetUnencryptedHTTP2(true)
 	srv := &http.Server{
-		Handler: Handler(src), Protocols: p, ReadHeaderTimeout: 5 * time.Second,
+		Handler:   handler(newServer(src, connectionService{src: src, conntrack: sampler, sampled: sampler.Ready()})),
+		Protocols: p, ReadHeaderTimeout: 5 * time.Second,
 		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 	served := make(chan error, 1)

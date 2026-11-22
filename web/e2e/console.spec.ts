@@ -190,13 +190,14 @@ test("remove a device and a user, confirmed from the keyboard", async ({ page })
   await expect(page.getByText("There is no user of this name.")).toBeVisible();
 });
 
-test("the connections table updates live, sorts and filters by peer", async ({ page }) => {
+test("the connections table updates live, sorts and filters by users and devices", async ({ page }) => {
   await page.goto("/admin/connections");
   const table = page.getByRole("table", { name: "Open connections" });
   await expect(table.getByRole("row")).toHaveCount(26); // header + the fake's cap of 25
   await expect(page.getByRole("status")).toHaveText("Only the 25 fastest are shown; the gateway left the rest out.");
   await expect(table.getByRole("columnheader", { name: "Down rate" })).toHaveAttribute("aria-sort", "descending");
   await expect(table.getByRole("columnheader", { name: "Last traffic" })).toBeVisible();
+  await expect(table.getByRole("row").nth(1).locator("time")).toHaveAttribute("datetime", /T\d{2}:\d{2}:\d{2}/);
 
   // Rates arrive from the second update and keep changing.
   const first = table.getByRole("row").nth(1);
@@ -211,13 +212,31 @@ test("the connections table updates live, sorts and filters by peer", async ({ p
   await table.getByRole("button", { name: "Up rate" }).click();
   await expect(table.getByRole("columnheader", { name: "Up rate" })).toHaveAttribute("aria-sort", "ascending");
 
-  await page.getByLabel("Peer").selectOption({ label: "alice/phone" });
+  await page.locator("summary").filter({ hasText: "All users and devices" }).click();
+  const alice = page.getByRole("group", { name: "alice" });
+  const bob = page.getByRole("group", { name: "bob" });
+  await alice.getByRole("checkbox", { name: "phone", exact: true }).check();
   await expect(page).toHaveURL("/admin/connections?peer=peer-1");
   await expect(page.getByRole("status")).toBeHidden();
   const peers = await table.getByRole("row").locator("td:first-child").allTextContents();
   expect(peers.length).toBeGreaterThan(0);
   expect(new Set(peers)).toEqual(new Set(["alice/phone"]));
   await expect(table.getByRole("row").nth(1)).toContainText("10.8.0.2:");
+
+  await bob.getByRole("checkbox", { name: "All devices for bob" }).check();
+  await expect(page.locator("summary")).toContainText("3 selected devices");
+  const peerNames = () => table.locator("tbody td:first-child").allTextContents().then((names) => [...new Set(names)].sort());
+  await expect.poll(peerNames).toEqual(["alice/phone", "bob/laptop", "bob/phone"]);
+
+  await bob.getByRole("checkbox", { name: "laptop", exact: true }).uncheck();
+  await expect.poll(peerNames).toEqual(["alice/phone", "bob/phone"]);
+  await page.reload();
+  await expect.poll(peerNames).toEqual(["alice/phone", "bob/phone"]);
+
+  await page.locator("summary").filter({ hasText: "2 selected devices" }).click();
+  await page.getByRole("button", { name: "Clear filter" }).click();
+  await expect(page).toHaveURL("/admin/connections");
+  await expect(table.getByRole("row")).toHaveCount(26);
   await noSidewaysScroll(page);
 });
 
@@ -225,13 +244,14 @@ test("a device's connections open from its user's page", async ({ page }) => {
   await page.goto("/admin/users/bob");
   await page.getByRole("region", { name: "Devices" }).getByRole("link", { name: "Connections bob/phone" }).click();
   await expect(page).toHaveURL("/admin/connections?peer=peer-4");
-  await expect(page.getByLabel("Peer")).toHaveValue("peer-4");
+  await expect(page.locator("summary")).toHaveText("1 selected device");
   await expect(page.getByRole("table", { name: "Open connections" }).getByRole("row").nth(1)).toContainText("al-1");
 
   // An unknown peer is the daemon's NotFound; picking another one recovers.
   await page.goto("/admin/connections?peer=peer-99");
   await expect(page.getByRole("alert")).toContainText("peer peer-99 not found");
-  await page.getByLabel("Peer").selectOption({ label: "All peers" });
+  await page.locator("summary").filter({ hasText: "1 selected device" }).click();
+  await page.getByRole("button", { name: "Clear filter" }).click();
   await expect(page.getByRole("table", { name: "Open connections" })).toBeVisible();
 });
 

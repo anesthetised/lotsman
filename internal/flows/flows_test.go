@@ -92,6 +92,28 @@ func TestRates(t *testing.T) {
 	}
 }
 
+func TestFirstViewIncludesTrafficObservedBeforeItOpened(t *testing.T) {
+	src := &fakeSource{entries: []Entry{tcp(alice, 40000, "1.1.1.1:443", 100, 1000)}}
+	sampler := NewSampler(src, peers, subnet)
+	sampler.sample(t0)
+	before, _ := meter(sampler)
+	if f := snapshot(t, before).Flows[0]; !f.LastTraffic.IsZero() {
+		t.Fatalf("baseline with existing bytes inferred activity at %s", f.LastTraffic)
+	}
+	src.entries = []Entry{tcp(alice, 40000, "1.1.1.1:443", 200, 1000)}
+	last := t0.Add(time.Second)
+	sampler.sample(last)
+	sampler.sample(last.Add(time.Second))
+
+	for range 2 {
+		m, _ := meter(sampler)
+		got := snapshot(t, m).Flows
+		if len(got) != 1 || !got[0].LastTraffic.Equal(last) || got[0].UpRate != 0 || got[0].DownRate != 0 {
+			t.Fatalf("first view = %+v, want previously observed traffic and no rates", got)
+		}
+	}
+}
+
 func TestFlowsComeAndGo(t *testing.T) {
 	flow := tcp(alice, 40000, "1.1.1.1:443", 1000, 1000)
 	src := &fakeSource{entries: []Entry{flow}}
@@ -169,7 +191,7 @@ func TestMapping(t *testing.T) {
 	}
 
 	m, _ = meter(src)
-	m.Peer = "bob"
+	m.PeerIDs = map[string]bool{"bob": true}
 	if flows := snapshot(t, m).Flows; len(flows) != 1 || flows[0].PeerID != "bob" {
 		t.Errorf("flows of bob = %+v", flows)
 	}

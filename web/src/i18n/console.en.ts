@@ -140,9 +140,13 @@ export const consoleEn = {
   connections: {
     title: "Connections",
     peer: "Peer",
-    allPeers: "All peers",
+    allPeers: "All users and devices",
+    allDevices: "All devices",
+    userDevices: (user: string) => `All devices for ${user}`,
+    selectedDevices: (count: number) => count === 1 ? "1 selected device" : `${count} selected devices`,
+    clearFilter: "Clear filter",
     intro:
-      "Live from the gateway's connection table and never stored. Destinations are numeric. Last traffic appears when the gateway sees new bytes during this view.",
+      "Live from the gateway's connection table. Last traffic is the latest sample with new bytes. Connections are kept in memory while open.",
     count: (n: number) => (n === 1 ? "1 connection" : `${n} connections`),
     updated: (time: string) => `updated ${time}`,
     truncated: (n: number) => `Only the ${n} fastest are shown; the gateway left the rest out.`,

@@ -1070,23 +1070,24 @@ Who sees what:
 - Operators only. Every operator sees every client's connections; a user's own page never shows
   connections, not even their own.
 - Per connection: the client (peer), protocol, the client's tunnel IP and port, the destination IP
-  and port, the client's current upstream, when it started, and bytes and rate in each direction
+  and port, the client's current upstream, when it started, the latest sample with new bytes, and bytes and rate in each direction
   (down is towards the client). Destinations are numeric: no reverse DNS, no hostnames, no SNI, no
   payload. A client's DNS queries appear as UDP connections to its resolver.
 - The upstream is the one the client's new connections take now. A connection that stayed on the
   previous upstream after a failover (see [How failover behaves](#how-failover-behaves)) shows the
   new one.
 - The start time is the kernel's with `net.netfilter.nf_conntrack_timestamp=1`, which Lotsman does
-  not set. Without it, a connection that opens while the view is open starts when it was first
-  seen, and one that was already open has no start time.
-- At most 500 connections per update, fastest first; the update says when more were left out.
+  not set. Without it, a connection that opens after the first daemon sample starts when it was
+  first seen. Last traffic is unset until the sampler has observed new bytes for the connection.
+- Operators can select several users and devices. At most 500 matching connections per update are
+  shown, fastest first; the update says when more were left out.
 - Updates come every second, or every `interval` of the watch if longer. Each viewer measures
   rates on their own, so the first update after opening the view has bytes but no rates.
 
-Nothing is kept at rest. The table is read only while someone watches, on every update of that
-view, and each reading is dropped once it is sent: connections never reach the database, the
-status file, the metrics or the logs. The kernel's own table is short-lived and visible to root on
-the host anyway (`conntrack -L`); Lotsman adds no record of it.
+The daemon samples conntrack once a second, including when the panel is closed, and keeps only the
+latest open client connections in memory. Connections never reach the database, status file,
+metrics or logs. An operator who opens the panel sees the timestamps that the daemon has already
+observed. A daemon restart starts a fresh sample history.
 
 ## How failover behaves
 

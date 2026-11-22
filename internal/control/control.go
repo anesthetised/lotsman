@@ -42,11 +42,15 @@ type Source interface {
 // NewServer registers every service of the API. An RPC whose issue has not
 // landed yet fails with CodeUnimplemented.
 func NewServer(src Source) *connect.Server {
+	return newServer(src, connectionService{src: src, conntrack: flows.Conntrack{}})
+}
+
+func newServer(src Source, connections connectionService) *connect.Server {
 	s := connect.NewServer()
 	lotsmanv1connect.RegisterStatusServiceHandler(s, statusService{src})
 	lotsmanv1connect.RegisterHistoryServiceHandler(s, historyService{src})
 	lotsmanv1connect.RegisterIncidentServiceHandler(s, incidentService{src})
-	lotsmanv1connect.RegisterConnectionServiceHandler(s, connectionService{src, flows.Conntrack{}})
+	lotsmanv1connect.RegisterConnectionServiceHandler(s, connections)
 	lotsmanv1connect.RegisterUserServiceHandler(s, userService{src})
 	lotsmanv1connect.RegisterUserSelfServiceHandler(s, newUserSelfService(src))
 	return s
@@ -54,8 +58,12 @@ func NewServer(src Source) *connect.Server {
 
 // Handler is the API on its HTTP routes.
 func Handler(src Source) http.Handler {
+	return handler(NewServer(src))
+}
+
+func handler(server *connect.Server) http.Handler {
 	mux := http.NewServeMux()
-	connecthttp.Mount(mux, NewServer(src))
+	connecthttp.Mount(mux, server)
 	return mux
 }
 

@@ -13,6 +13,7 @@ import type { PeerStatus } from "../../gen/lotsman/v1/status_pb";
 import { useI18n } from "../../i18n";
 import { useConsoleI18n } from "../../i18n/console";
 import { LiveError } from "../LiveError";
+import { ConnectionFilter, type Filter } from "./ConnectionFilter";
 import { connectionKey, type SortKey, sortConnections } from "./connectionSort";
 
 export default function Connections() {
@@ -28,48 +29,37 @@ export default function Connections() {
 
 function LiveConnections() {
   const { t, c } = useConsoleI18n();
-  const [params, setParams] = useSearchParams<{ peer: string }>();
-  const peer = () => params.peer ?? "";
+  const [params, setParams] = useSearchParams<{ peer?: string | string[]; user?: string | string[] }>();
+  const values = (value: string | string[] | undefined) => typeof value === "string" ? [value] : value ?? [];
+  const filter = createMemo(() => ({ users: values(params.user), peers: values(params.peer) }));
+  const filtered = () => filter().users.length > 0 || filter().peers.length > 0;
+  const update = (f: Filter) => setParams({ user: [...f.users], peer: [...f.peers] }, { replace: true });
   const status = createLive((signal) => api.status.watch({}, { signal }));
   const peers = createMemo(() => new Map(status().peers.map((p) => [p.peerId, p])));
+  // Compare the selection by value. Live status snapshots must not reopen the stream.
+  const peerIds = createMemo(() => {
+    const selected = new Set(filter().peers);
+    for (const p of status().peers) {
+      if (filter().users.includes(p.user)) selected.add(p.peerId);
+    }
+    return [...selected].sort();
+  }, { equals: (a, b) => a.length === b.length && a.every((id, i) => id === b[i]) });
   return (
     <div class="space-y-4">
       <div class="flex flex-wrap items-center justify-between gap-4">
         <h1 class="text-lg font-semibold">{c.connections.title}</h1>
-        <div class="flex items-center gap-2">
-          <label for="connections-peer" class="text-muted">
-            {c.connections.peer}
-          </label>
-          <select
-            id="connections-peer"
-            class="rounded-md border border-line bg-surface px-2 py-1.5"
-            onChange={(e) => setParams({ peer: e.currentTarget.value || undefined })}
-          >
-            <option value="" selected={peer() === ""}>
-              {c.connections.allPeers}
-            </option>
-            <For each={status().peers} keyed={(p) => p.peerId}>
-              {(p) => (
-                <option value={p().peerId} selected={p().peerId === peer()}>
-                  {peerLabel(p())}
-                </option>
-              )}
-            </For>
-          </select>
-        </div>
+        <ConnectionFilter peers={status().peers} filter={filter()} count={peerIds().length} onChange={update} />
       </div>
       <p class="max-w-3xl text-muted">{c.connections.intro}</p>
       <Errored fallback={(error, reset) => <LiveError error={error()} retry={reset} />}>
         <Loading fallback={<p class="text-muted">{t.common.connecting}</p>}>
-          <ConnectionTable peer={peer()} peers={peers()} />
+          <Show when={!filtered() || peerIds().length > 0} fallback={<p class="text-muted">{c.connections.empty}</p>}>
+            <ConnectionTable peerIds={peerIds()} peers={peers()} />
+          </Show>
         </Loading>
       </Errored>
     </div>
   );
-}
-
-function peerLabel(p: PeerStatus): string {
-  return `${p.user}/${p.device}`;
 }
 
 const protocols: Record<Protocol, string> = {
@@ -79,9 +69,9 @@ const protocols: Record<Protocol, string> = {
   [Protocol.ICMP]: "ICMP",
 };
 
-function ConnectionTable(props: { peer: string; peers: ReadonlyMap<string, PeerStatus> }) {
+function ConnectionTable(props: { peerIds: readonly string[]; peers: ReadonlyMap<string, PeerStatus> }) {
   const { fmt, c } = useConsoleI18n();
-  const snapshot = createLive((signal) => admin.connections.watch({ peerId: props.peer }, { signal }));
+  const snapshot = createLive((signal) => admin.connections.watch({ peerIds: [...props.peerIds] }, { signal }));
   const [sort, setSort] = createSignal<SortKey>("downRate");
   const [ascending, setAscending] = createSignal(false);
   const rows = createMemo(() => sortConnections(snapshot().connections, sort(), ascending()));

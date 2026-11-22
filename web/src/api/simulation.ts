@@ -337,7 +337,7 @@ export class Simulation {
       source: protocol === Protocol.ICMP ? peer.address : `${peer.address}:${sourcePort}`,
       destination: port ? `${ip}:${port}` : ip,
       started,
-      lastTraffic: 0,
+      lastTraffic: started ? 0 : this.time - 10_000,
       weight: heft * (this.flowRand() ** 2 + 0.01),
       down: heft * this.flowRand() * 5e7,
       up: heft * this.flowRand() * 5e6,
@@ -398,15 +398,17 @@ export class Simulation {
    * The open connections of one peer, or of all, fastest first and at most
    * CONNECTION_CAP of them. NotFound for an unknown peer, as the daemon answers.
    */
-  connections(peerId = "", observedAfter?: number): ConnectionSnapshot {
+  connections(peerIds: readonly string[]): ConnectionSnapshot {
     this.advance();
-    if (peerId && !this.peers.some((p) => p.id === peerId)) throw new ConnectError(`peer ${peerId} not found`, Code.NotFound);
+    for (const id of peerIds) {
+      if (!this.peers.some((p) => p.id === id)) throw new ConnectError(`peer ${id} not found`, Code.NotFound);
+    }
     const flows = this.flows
-      .filter((f) => !peerId || f.peer.id === peerId)
+      .filter((f) => peerIds.length === 0 || peerIds.includes(f.peer.id))
       .sort((a, b) => b.downRate + b.upRate - (a.downRate + a.upRate));
     return create(ConnectionSnapshotSchema, {
       time: timestampFromMs(this.time),
-      connections: flows.slice(0, CONNECTION_CAP).map((f) => connection(f, observedAfter)),
+      connections: flows.slice(0, CONNECTION_CAP).map(connection),
       truncated: flows.length > CONNECTION_CAP,
     });
   }
@@ -669,7 +671,7 @@ export class Simulation {
   }
 }
 
-function connection(f: Flow, observedAfter?: number): Connection {
+function connection(f: Flow): Connection {
   return create(ConnectionSchema, {
     peerId: f.peer.id,
     protocol: f.protocol,
@@ -677,7 +679,7 @@ function connection(f: Flow, observedAfter?: number): Connection {
     destination: f.destination,
     upstream: f.peer.upstream,
     started: f.started ? timestampFromMs(f.started) : undefined,
-    lastTraffic: observedAfter !== undefined && f.lastTraffic > observedAfter ? timestampFromMs(f.lastTraffic) : undefined,
+    lastTraffic: f.lastTraffic ? timestampFromMs(f.lastTraffic) : undefined,
     traffic: traffic(f.down, f.up, f.downRate, f.upRate),
   });
 }

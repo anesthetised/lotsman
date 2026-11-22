@@ -276,7 +276,7 @@ test("ConnectionService.Watch streams the fastest connections, rates from the se
   expect(first.connections).toHaveLength(CONNECTION_CAP);
   expect(first.truncated).toBe(true);
   expect(first.connections.every((c) => c.traffic?.downRate === 0n && c.traffic.upRate === 0n)).toBe(true);
-  expect(first.connections.every((c) => c.lastTraffic === undefined)).toBe(true);
+  expect(first.connections.some((c) => c.lastTraffic !== undefined && timestampMs(c.lastTraffic) < timestampMs(first.time!))).toBe(true);
   expect(first.connections.some((c) => (c.traffic?.downBytes ?? 0n) > 0n)).toBe(true);
 
   const pending = next(stream);
@@ -296,6 +296,10 @@ test("ConnectionService.Watch filters by peer and refuses an unknown one", async
     expect(s.connections.length).toBeGreaterThan(0);
     expect(s.truncated).toBe(false);
     expect(s.connections.every((c) => c.peerId === "peer-1" && c.source.startsWith("10.8.0.2") && c.upstream === "lv-1")).toBe(true);
+    break;
+  }
+  for await (const s of connections.watch({ peerId: "peer-1", peerIds: ["peer-4"] })) {
+    expect(new Set(s.connections.map((c) => c.peerId))).toEqual(new Set(["peer-1", "peer-4"]));
     break;
   }
   const stream = connections.watch({ peerId: "peer-99" })[Symbol.asyncIterator]();

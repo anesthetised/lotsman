@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/exec"
 	"os/user"
@@ -44,7 +45,6 @@ func (everyoneOperator) User(*http.Request) (string, error) { return "", nil }
 // any name. The test never calls the connection service. Its users are nil
 // unless a test sets them; their peers are in the status, routed nowhere.
 type panelSource struct {
-	control.ConnectionSource
 	control.IncidentSource
 	*controltest.Users
 }
@@ -54,7 +54,9 @@ func (panelSource) Ready() <-chan struct{} {
 	close(ready)
 	return ready
 }
-func (panelSource) ClientMTU() int { return 1280 }
+func (panelSource) ClientMTU() int                              { return 1280 }
+func (panelSource) Subnet() netip.Prefix                        { return netip.Prefix{} }
+func (panelSource) PeerRoutes() map[netip.Addr]daemon.PeerRoute { return nil }
 func (p panelSource) Status() daemon.Status {
 	st := daemon.Status{Upstreams: []daemon.UpstreamStatus{{Name: "nl", Kind: "awg", Geo: "NL"}}}
 	if p.Users != nil {

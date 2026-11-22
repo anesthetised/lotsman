@@ -28,6 +28,7 @@ type ConnectionSource interface {
 type connectionService struct {
 	src       ConnectionSource
 	conntrack flows.Source
+	sampled   <-chan struct{}
 }
 
 // Watch sends the flows as soon as the daemon is ready and then every
@@ -43,10 +44,33 @@ func (s connectionService) Watch(ctx context.Context, req *lotsmanv1.WatchConnec
 		return ctx.Err()
 	case <-s.src.Ready():
 	}
-	if id := req.GetPeerId(); id != "" && !s.hasPeer(id) {
-		return connect.NewError(connect.CodeNotFound, "peer "+id+" not found")
+	peers := peerRoutes{s.src}
+	ids := make(map[string]bool, len(req.GetPeerIds())+1)
+	for _, id := range req.GetPeerIds() {
+		ids[id] = true
 	}
-	m := &flows.Meter{Source: s.conntrack, Peers: peerRoutes{s.src}, Subnet: s.src.Subnet(), Peer: req.GetPeerId()}
+	if id := req.GetPeerId(); id != "" {
+		ids[id] = true
+	}
+	if len(ids) != 0 {
+		known := make(map[string]bool)
+		for _, p := range peers.Peers() {
+			known[p.ID] = true
+		}
+		for id := range ids {
+			if !known[id] {
+				return connect.NewError(connect.CodeNotFound, "peer "+id+" not found")
+			}
+		}
+	}
+	if s.sampled != nil {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-s.sampled:
+		}
+	}
+	m := &flows.Meter{Source: s.conntrack, Peers: peers, Subnet: s.src.Subnet(), PeerIDs: ids}
 	tick := time.NewTicker(interval)
 	defer tick.Stop()
 	for {
@@ -63,15 +87,6 @@ func (s connectionService) Watch(ctx context.Context, req *lotsmanv1.WatchConnec
 		case <-tick.C:
 		}
 	}
-}
-
-func (s connectionService) hasPeer(id string) bool {
-	for _, r := range s.src.PeerRoutes() {
-		if PeerID(r.ID) == id {
-			return true
-		}
-	}
-	return false
 }
 
 // conntrackError keeps the kernel's error inside the daemon. Without

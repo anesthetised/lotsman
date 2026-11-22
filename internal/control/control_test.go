@@ -28,7 +28,7 @@ import (
 )
 
 // fakeSource is a daemon with a fixed status and the traffic the test sets.
-// The connection service has its own fake; here it is never called.
+// Its connection routes let the control server sample independently.
 type fakeSource struct {
 	ConnectionSource
 	HistorySource  // none unless a test sets one
@@ -43,7 +43,7 @@ type fakeSource struct {
 }
 
 func newFakeSource(st daemon.Status) *fakeSource {
-	f := &fakeSource{ready: make(chan struct{}), st: st}
+	f := &fakeSource{ConnectionSource: fakeRoutes{}, ready: make(chan struct{}), st: st}
 	close(f.ready)
 	return f
 }
