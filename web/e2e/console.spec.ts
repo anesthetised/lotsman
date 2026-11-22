@@ -215,6 +215,10 @@ test("the connections table updates live, sorts and filters by users and devices
   await page.locator("summary").filter({ hasText: "All users and devices" }).click();
   const alice = page.getByRole("group", { name: "alice" });
   const bob = page.getByRole("group", { name: "bob" });
+  const aliceDevices = alice.getByRole("button", { name: "Devices for alice" });
+  await expect(aliceDevices).toHaveAttribute("aria-expanded", "false");
+  await expect(alice.getByRole("checkbox", { name: "phone", exact: true })).toBeHidden();
+  await aliceDevices.click();
   await alice.getByRole("checkbox", { name: "phone", exact: true }).check();
   await expect(page).toHaveURL("/admin/connections?peer=peer-1");
   await expect(page.getByRole("status")).toBeHidden();
@@ -228,8 +232,13 @@ test("the connections table updates live, sorts and filters by users and devices
   const peerNames = () => table.locator("tbody td:first-child").allTextContents().then((names) => [...new Set(names)].sort());
   await expect.poll(peerNames).toEqual(["alice/phone", "bob/laptop", "bob/phone"]);
 
+  await bob.getByRole("button", { name: "Devices for bob" }).click();
   await bob.getByRole("checkbox", { name: "laptop", exact: true }).uncheck();
+  await expect(bob.getByRole("checkbox", { name: "All devices for bob" })).toHaveJSProperty("indeterminate", true);
   await expect.poll(peerNames).toEqual(["alice/phone", "bob/phone"]);
+  await page.keyboard.press("Escape");
+  await expect(bob).toBeHidden();
+  await expect(page.locator("summary")).toBeFocused();
   await page.reload();
   await expect.poll(peerNames).toEqual(["alice/phone", "bob/phone"]);
 

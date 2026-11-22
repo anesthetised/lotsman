@@ -148,8 +148,8 @@ export const consoleRu: ConsoleDict = {
     title: "Соединения",
     peer: "Пир",
     allPeers: "Все пользователи и устройства",
-    allDevices: "Все устройства",
     userDevices: (user: string) => `Все устройства пользователя ${user}`,
+    devicesFor: (user: string) => `Устройства пользователя ${user}`,
     selectedDevices: (count: number) => `Выбрано устройств: ${count}`,
     clearFilter: "Сбросить фильтр",
     intro:

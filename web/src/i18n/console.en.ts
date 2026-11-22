@@ -141,8 +141,8 @@ export const consoleEn = {
     title: "Connections",
     peer: "Peer",
     allPeers: "All users and devices",
-    allDevices: "All devices",
     userDevices: (user: string) => `All devices for ${user}`,
+    devicesFor: (user: string) => `Devices for ${user}`,
     selectedDevices: (count: number) => count === 1 ? "1 selected device" : `${count} selected devices`,
     clearFilter: "Clear filter",
     intro:
