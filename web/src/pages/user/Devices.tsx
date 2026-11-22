@@ -98,14 +98,14 @@ function DeviceCard(props: { device: Device }) {
           </p>
         </div>
         <Show when={exit()} fallback={<StateBadge level="bad" label={t.user.blocked} />}>
-          {(u) => <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />}
+          {(u) => <StateBadge level={stateLevel(u().state, u().routingBlock)} label={stateLabel(t, u().state, u().routingBlock)} />}
         </Show>
       </div>
       <p class="flex justify-between gap-3 rounded-lg bg-bg px-3 py-2 text-sm">
         <span>
           {t.route.now}: <span class="font-semibold">{exit() ? exitName(exit()!) : t.route.blocked}</span>
         </span>
-        <span class="tabular-nums text-muted">{exit()?.latency ? fmt.milliseconds(durationMs(exit()!.latency!)) : "—"}</span>
+        <span class="tabular-nums text-muted">{exit()?.latency && !exit()?.routingBlock ? fmt.milliseconds(durationMs(exit()!.latency!)) : "—"}</span>
       </p>
       <section aria-labelledby={routeHeading()} class="space-y-2 border-t border-line pt-3">
         <h4 id={routeHeading()} class="font-medium">

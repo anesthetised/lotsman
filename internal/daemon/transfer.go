@@ -35,7 +35,6 @@ type transferState struct {
 	probes  map[store.IncidentKind]*transferProbe // probeDownload, and probeUpload while it is configured
 	next    time.Time                             // the next probe is due then; zero means at once
 	running bool
-	alive   bool // what applyAlive last pushed to the dataplane
 }
 
 // transferProbe is one direction of an upstream's transfer probe.
@@ -80,7 +79,7 @@ func (d *Daemon) degraded(u *Upstream) bool {
 // its last resort, it stays alive, or that client's flows would be cut every
 // round. Callers hold d.mu.
 func (d *Daemon) alive(u *Upstream) bool {
-	if u.Tracker.State() != health.Up {
+	if u.Tracker.State() != health.Up || d.subscriptionBlock(u.Upstream, time.Now()) != RoutingAllowed {
 		return false
 	}
 	if !d.degraded(u) {
@@ -94,12 +93,11 @@ func (d *Daemon) alive(u *Upstream) bool {
 	return false
 }
 
-// syncAlive pushes alive again for upstreams with throughput health whose
-// answer changed because clients moved, which the dataplane does not see by
-// itself. Reconcile calls it after routing. Callers hold d.mu.
+// syncAlive pushes policy changes the dataplane does not see by itself.
+// Reconcile calls it after routing. Callers hold d.mu.
 func (d *Daemon) syncAlive() {
-	for u, st := range d.transfers {
-		if d.alive(u) != st.alive && slices.Contains(d.ups, u) {
+	for _, u := range d.ups {
+		if d.alive(u) != d.appliedAlive[u] {
 			_ = d.applyAlive(u) // failure is logged and retried next round
 		}
 	}
@@ -119,12 +117,12 @@ func (d *Daemon) startTransfers(ctx context.Context) {
 	now := time.Now()
 	for _, u := range d.ups {
 		// A probe through an upstream that is down only proves it again.
-		if u.Tracker.State() != health.Up || d.notUp[u] {
+		if u.Tracker.State() != health.Up || d.notUp[u] || d.subscriptionBlock(u.Upstream, now) != RoutingAllowed {
 			continue
 		}
 		st := d.transfers[u]
 		if st == nil {
-			st = &transferState{probes: map[store.IncidentKind]*transferProbe{}, alive: true}
+			st = &transferState{probes: map[store.IncidentKind]*transferProbe{}}
 			d.transfers[u] = st
 		}
 		if st.running || now.Before(st.next) || d.speedTesting(u) {

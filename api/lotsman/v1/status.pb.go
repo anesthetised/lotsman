@@ -14,6 +14,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	durationpb "google.golang.org/protobuf/types/known/durationpb"
+	emptypb "google.golang.org/protobuf/types/known/emptypb"
 	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
@@ -134,6 +135,171 @@ func (UpstreamKind) EnumDescriptor() ([]byte, []int) {
 	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{1}
 }
 
+type RoutingBlock int32
+
+const (
+	RoutingBlock_ROUTING_BLOCK_UNSPECIFIED          RoutingBlock = 0
+	RoutingBlock_ROUTING_BLOCK_SUBSCRIPTION_EXPIRED RoutingBlock = 1
+	RoutingBlock_ROUTING_BLOCK_QUOTA_EXHAUSTED      RoutingBlock = 2
+	RoutingBlock_ROUTING_BLOCK_UNAVAILABLE          RoutingBlock = 3 // user view; subscription details are operator-only
+)
+
+// Enum value maps for RoutingBlock.
+var (
+	RoutingBlock_name = map[int32]string{
+		0: "ROUTING_BLOCK_UNSPECIFIED",
+		1: "ROUTING_BLOCK_SUBSCRIPTION_EXPIRED",
+		2: "ROUTING_BLOCK_QUOTA_EXHAUSTED",
+		3: "ROUTING_BLOCK_UNAVAILABLE",
+	}
+	RoutingBlock_value = map[string]int32{
+		"ROUTING_BLOCK_UNSPECIFIED":          0,
+		"ROUTING_BLOCK_SUBSCRIPTION_EXPIRED": 1,
+		"ROUTING_BLOCK_QUOTA_EXHAUSTED":      2,
+		"ROUTING_BLOCK_UNAVAILABLE":          3,
+	}
+)
+
+func (x RoutingBlock) Enum() *RoutingBlock {
+	p := new(RoutingBlock)
+	*p = x
+	return p
+}
+
+func (x RoutingBlock) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (RoutingBlock) Descriptor() protoreflect.EnumDescriptor {
+	return file_lotsman_v1_status_proto_enumTypes[2].Descriptor()
+}
+
+func (RoutingBlock) Type() protoreflect.EnumType {
+	return &file_lotsman_v1_status_proto_enumTypes[2]
+}
+
+func (x RoutingBlock) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use RoutingBlock.Descriptor instead.
+func (RoutingBlock) EnumDescriptor() ([]byte, []int) {
+	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{2}
+}
+
+type ReportOutlineUsageRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The complete configured mapping, including keys whose usage is not known yet.
+	Upstreams     map[string]*OutlineUsageReading `protobuf:"bytes,1,rep,name=upstreams,proto3" json:"upstreams,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ReportOutlineUsageRequest) Reset() {
+	*x = ReportOutlineUsageRequest{}
+	mi := &file_lotsman_v1_status_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ReportOutlineUsageRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ReportOutlineUsageRequest) ProtoMessage() {}
+
+func (x *ReportOutlineUsageRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_lotsman_v1_status_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ReportOutlineUsageRequest.ProtoReflect.Descriptor instead.
+func (*ReportOutlineUsageRequest) Descriptor() ([]byte, []int) {
+	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *ReportOutlineUsageRequest) GetUpstreams() map[string]*OutlineUsageReading {
+	if x != nil {
+		return x.Upstreams
+	}
+	return nil
+}
+
+type OutlineUsageReading struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	KeyHash       []byte                 `protobuf:"bytes,1,opt,name=key_hash,json=keyHash,proto3" json:"key_hash,omitempty"`          // identifies a provider key across polls without sending the key name
+	ObservedAt    *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=observed_at,json=observedAt,proto3" json:"observed_at,omitempty"` // unset until the provider reports usage
+	Exhausted     bool                   `protobuf:"varint,3,opt,name=exhausted,proto3" json:"exhausted,omitempty"`
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OutlineUsageReading) Reset() {
+	*x = OutlineUsageReading{}
+	mi := &file_lotsman_v1_status_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OutlineUsageReading) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OutlineUsageReading) ProtoMessage() {}
+
+func (x *OutlineUsageReading) ProtoReflect() protoreflect.Message {
+	mi := &file_lotsman_v1_status_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OutlineUsageReading.ProtoReflect.Descriptor instead.
+func (*OutlineUsageReading) Descriptor() ([]byte, []int) {
+	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *OutlineUsageReading) GetKeyHash() []byte {
+	if x != nil {
+		return x.KeyHash
+	}
+	return nil
+}
+
+func (x *OutlineUsageReading) GetObservedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ObservedAt
+	}
+	return nil
+}
+
+func (x *OutlineUsageReading) GetExhausted() bool {
+	if x != nil {
+		return x.Exhausted
+	}
+	return false
+}
+
+func (x *OutlineUsageReading) GetExpiresAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExpiresAt
+	}
+	return nil
+}
+
 type WatchStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Interval      *durationpb.Duration   `protobuf:"bytes,1,opt,name=interval,proto3" json:"interval,omitempty"`
@@ -143,7 +309,7 @@ type WatchStatusRequest struct {
 
 func (x *WatchStatusRequest) Reset() {
 	*x = WatchStatusRequest{}
-	mi := &file_lotsman_v1_status_proto_msgTypes[0]
+	mi := &file_lotsman_v1_status_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -155,7 +321,7 @@ func (x *WatchStatusRequest) String() string {
 func (*WatchStatusRequest) ProtoMessage() {}
 
 func (x *WatchStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_status_proto_msgTypes[0]
+	mi := &file_lotsman_v1_status_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -168,7 +334,7 @@ func (x *WatchStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use WatchStatusRequest.ProtoReflect.Descriptor instead.
 func (*WatchStatusRequest) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{0}
+	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *WatchStatusRequest) GetInterval() *durationpb.Duration {
@@ -191,7 +357,7 @@ type StatusSnapshot struct {
 
 func (x *StatusSnapshot) Reset() {
 	*x = StatusSnapshot{}
-	mi := &file_lotsman_v1_status_proto_msgTypes[1]
+	mi := &file_lotsman_v1_status_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -203,7 +369,7 @@ func (x *StatusSnapshot) String() string {
 func (*StatusSnapshot) ProtoMessage() {}
 
 func (x *StatusSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_status_proto_msgTypes[1]
+	mi := &file_lotsman_v1_status_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -216,7 +382,7 @@ func (x *StatusSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StatusSnapshot.ProtoReflect.Descriptor instead.
 func (*StatusSnapshot) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{1}
+	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *StatusSnapshot) GetTime() *timestamppb.Timestamp {
@@ -262,20 +428,21 @@ type UpstreamStatus struct {
 	Provider      string                 `protobuf:"bytes,4,opt,name=provider,proto3" json:"provider,omitempty"`
 	State         UpstreamState          `protobuf:"varint,5,opt,name=state,proto3,enum=lotsman.v1.UpstreamState" json:"state,omitempty"`
 	Latency       *durationpb.Duration   `protobuf:"bytes,6,opt,name=latency,proto3" json:"latency,omitempty"`
-	LastHandshake *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_handshake,json=lastHandshake,proto3" json:"last_handshake,omitempty"`          // unset for proxy upstreams / never
-	Routed        uint32                 `protobuf:"varint,8,opt,name=routed,proto3" json:"routed,omitempty"`                                            // peers directed through it
-	Active        uint32                 `protobuf:"varint,9,opt,name=active,proto3" json:"active,omitempty"`                                            // of those, handshake inside the active window
-	Traffic       *Traffic               `protobuf:"bytes,10,opt,name=traffic,proto3" json:"traffic,omitempty"`                                          // unset until the daemon has sampled it
-	Speed         *Speed                 `protobuf:"bytes,11,opt,name=speed,proto3" json:"speed,omitempty"`                                              // the latest speed test; unset before the first or with health.speed off
-	Incidents     []IncidentKind         `protobuf:"varint,12,rep,packed,name=incidents,proto3,enum=lotsman.v1.IncidentKind" json:"incidents,omitempty"` // open now; empty for a user session
-	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`                     // optional subscription metadata; operator only
+	LastHandshake *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=last_handshake,json=lastHandshake,proto3" json:"last_handshake,omitempty"`                             // unset for proxy upstreams / never
+	Routed        uint32                 `protobuf:"varint,8,opt,name=routed,proto3" json:"routed,omitempty"`                                                               // peers directed through it
+	Active        uint32                 `protobuf:"varint,9,opt,name=active,proto3" json:"active,omitempty"`                                                               // of those, handshake inside the active window
+	Traffic       *Traffic               `protobuf:"bytes,10,opt,name=traffic,proto3" json:"traffic,omitempty"`                                                             // unset until the daemon has sampled it
+	Speed         *Speed                 `protobuf:"bytes,11,opt,name=speed,proto3" json:"speed,omitempty"`                                                                 // the latest speed test; unset before the first or with health.speed off
+	Incidents     []IncidentKind         `protobuf:"varint,12,rep,packed,name=incidents,proto3,enum=lotsman.v1.IncidentKind" json:"incidents,omitempty"`                    // open now; empty for a user session
+	ExpiresAt     *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=expires_at,json=expiresAt,proto3" json:"expires_at,omitempty"`                                        // optional subscription metadata; operator only
+	RoutingBlock  RoutingBlock           `protobuf:"varint,14,opt,name=routing_block,json=routingBlock,proto3,enum=lotsman.v1.RoutingBlock" json:"routing_block,omitempty"` // why this exit cannot carry client traffic despite reachability
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *UpstreamStatus) Reset() {
 	*x = UpstreamStatus{}
-	mi := &file_lotsman_v1_status_proto_msgTypes[2]
+	mi := &file_lotsman_v1_status_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -287,7 +454,7 @@ func (x *UpstreamStatus) String() string {
 func (*UpstreamStatus) ProtoMessage() {}
 
 func (x *UpstreamStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_status_proto_msgTypes[2]
+	mi := &file_lotsman_v1_status_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -300,7 +467,7 @@ func (x *UpstreamStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpstreamStatus.ProtoReflect.Descriptor instead.
 func (*UpstreamStatus) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{2}
+	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *UpstreamStatus) GetName() string {
@@ -394,6 +561,13 @@ func (x *UpstreamStatus) GetExpiresAt() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *UpstreamStatus) GetRoutingBlock() RoutingBlock {
+	if x != nil {
+		return x.RoutingBlock
+	}
+	return RoutingBlock_ROUTING_BLOCK_UNSPECIFIED
+}
+
 // A speed test through one upstream: bytes per second each way.
 type Speed struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -406,7 +580,7 @@ type Speed struct {
 
 func (x *Speed) Reset() {
 	*x = Speed{}
-	mi := &file_lotsman_v1_status_proto_msgTypes[3]
+	mi := &file_lotsman_v1_status_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -418,7 +592,7 @@ func (x *Speed) String() string {
 func (*Speed) ProtoMessage() {}
 
 func (x *Speed) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_status_proto_msgTypes[3]
+	mi := &file_lotsman_v1_status_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -431,7 +605,7 @@ func (x *Speed) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Speed.ProtoReflect.Descriptor instead.
 func (*Speed) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{3}
+	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *Speed) GetDownRate() uint64 {
@@ -470,7 +644,7 @@ type PeerStatus struct {
 
 func (x *PeerStatus) Reset() {
 	*x = PeerStatus{}
-	mi := &file_lotsman_v1_status_proto_msgTypes[4]
+	mi := &file_lotsman_v1_status_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -482,7 +656,7 @@ func (x *PeerStatus) String() string {
 func (*PeerStatus) ProtoMessage() {}
 
 func (x *PeerStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_status_proto_msgTypes[4]
+	mi := &file_lotsman_v1_status_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -495,7 +669,7 @@ func (x *PeerStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PeerStatus.ProtoReflect.Descriptor instead.
 func (*PeerStatus) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{4}
+	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *PeerStatus) GetPeerId() string {
@@ -562,7 +736,7 @@ type Traffic struct {
 
 func (x *Traffic) Reset() {
 	*x = Traffic{}
-	mi := &file_lotsman_v1_status_proto_msgTypes[5]
+	mi := &file_lotsman_v1_status_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -574,7 +748,7 @@ func (x *Traffic) String() string {
 func (*Traffic) ProtoMessage() {}
 
 func (x *Traffic) ProtoReflect() protoreflect.Message {
-	mi := &file_lotsman_v1_status_proto_msgTypes[5]
+	mi := &file_lotsman_v1_status_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -587,7 +761,7 @@ func (x *Traffic) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Traffic.ProtoReflect.Descriptor instead.
 func (*Traffic) Descriptor() ([]byte, []int) {
-	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{5}
+	return file_lotsman_v1_status_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *Traffic) GetDownBytes() uint64 {
@@ -623,7 +797,19 @@ var File_lotsman_v1_status_proto protoreflect.FileDescriptor
 const file_lotsman_v1_status_proto_rawDesc = "" +
 	"\n" +
 	"\x17lotsman/v1/status.proto\x12\n" +
-	"lotsman.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19lotsman/v1/incident.proto\"K\n" +
+	"lotsman.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1bgoogle/protobuf/empty.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x19lotsman/v1/incident.proto\"\xce\x01\n" +
+	"\x19ReportOutlineUsageRequest\x12R\n" +
+	"\tupstreams\x18\x01 \x03(\v24.lotsman.v1.ReportOutlineUsageRequest.UpstreamsEntryR\tupstreams\x1a]\n" +
+	"\x0eUpstreamsEntry\x12\x10\n" +
+	"\x03key\x18\x01 \x01(\tR\x03key\x125\n" +
+	"\x05value\x18\x02 \x01(\v2\x1f.lotsman.v1.OutlineUsageReadingR\x05value:\x028\x01\"\xc6\x01\n" +
+	"\x13OutlineUsageReading\x12\x19\n" +
+	"\bkey_hash\x18\x01 \x01(\fR\akeyHash\x12;\n" +
+	"\vobserved_at\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"observedAt\x12\x1c\n" +
+	"\texhausted\x18\x03 \x01(\bR\texhausted\x129\n" +
+	"\n" +
+	"expires_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"K\n" +
 	"\x12WatchStatusRequest\x125\n" +
 	"\binterval\x18\x01 \x01(\v2\x19.google.protobuf.DurationR\binterval\"\xf2\x01\n" +
 	"\x0eStatusSnapshot\x12.\n" +
@@ -632,7 +818,7 @@ const file_lotsman_v1_status_proto_rawDesc = "" +
 	"client_mtu\x18\x02 \x01(\rR\tclientMtu\x128\n" +
 	"\tupstreams\x18\x03 \x03(\v2\x1a.lotsman.v1.UpstreamStatusR\tupstreams\x12,\n" +
 	"\x05peers\x18\x04 \x03(\v2\x16.lotsman.v1.PeerStatusR\x05peers\x12)\n" +
-	"\x05total\x18\x05 \x01(\v2\x13.lotsman.v1.TrafficR\x05total\"\xa4\x04\n" +
+	"\x05total\x18\x05 \x01(\v2\x13.lotsman.v1.TrafficR\x05total\"\xe3\x04\n" +
 	"\x0eUpstreamStatus\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
 	"\x04kind\x18\x02 \x01(\x0e2\x18.lotsman.v1.UpstreamKindR\x04kind\x12\x10\n" +
@@ -648,7 +834,8 @@ const file_lotsman_v1_status_proto_rawDesc = "" +
 	"\x05speed\x18\v \x01(\v2\x11.lotsman.v1.SpeedR\x05speed\x126\n" +
 	"\tincidents\x18\f \x03(\x0e2\x18.lotsman.v1.IncidentKindR\tincidents\x129\n" +
 	"\n" +
-	"expires_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\"m\n" +
+	"expires_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\texpiresAt\x12=\n" +
+	"\rrouting_block\x18\x0e \x01(\x0e2\x18.lotsman.v1.RoutingBlockR\froutingBlock\"m\n" +
 	"\x05Speed\x12\x1b\n" +
 	"\tdown_rate\x18\x01 \x01(\x04R\bdownRate\x12\x17\n" +
 	"\aup_rate\x18\x02 \x01(\x04R\x06upRate\x12.\n" +
@@ -678,9 +865,15 @@ const file_lotsman_v1_status_proto_rawDesc = "" +
 	"\x19UPSTREAM_KIND_UNSPECIFIED\x10\x00\x12\x15\n" +
 	"\x11UPSTREAM_KIND_AWG\x10\x01\x12\x19\n" +
 	"\x15UPSTREAM_KIND_OUTLINE\x10\x02\x12\x17\n" +
-	"\x13UPSTREAM_KIND_VLESS\x10\x032V\n" +
+	"\x13UPSTREAM_KIND_VLESS\x10\x03*\x97\x01\n" +
+	"\fRoutingBlock\x12\x1d\n" +
+	"\x19ROUTING_BLOCK_UNSPECIFIED\x10\x00\x12&\n" +
+	"\"ROUTING_BLOCK_SUBSCRIPTION_EXPIRED\x10\x01\x12!\n" +
+	"\x1dROUTING_BLOCK_QUOTA_EXHAUSTED\x10\x02\x12\x1d\n" +
+	"\x19ROUTING_BLOCK_UNAVAILABLE\x10\x032\xab\x01\n" +
 	"\rStatusService\x12E\n" +
-	"\x05Watch\x12\x1e.lotsman.v1.WatchStatusRequest\x1a\x1a.lotsman.v1.StatusSnapshot0\x01B:Z8github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1b\x06proto3"
+	"\x05Watch\x12\x1e.lotsman.v1.WatchStatusRequest\x1a\x1a.lotsman.v1.StatusSnapshot0\x01\x12S\n" +
+	"\x12ReportOutlineUsage\x12%.lotsman.v1.ReportOutlineUsageRequest\x1a\x16.google.protobuf.EmptyB:Z8github.com/anesthetised/lotsman/api/lotsman/v1;lotsmanv1b\x06proto3"
 
 var (
 	file_lotsman_v1_status_proto_rawDescOnce sync.Once
@@ -694,45 +887,57 @@ func file_lotsman_v1_status_proto_rawDescGZIP() []byte {
 	return file_lotsman_v1_status_proto_rawDescData
 }
 
-var file_lotsman_v1_status_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_lotsman_v1_status_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
+var file_lotsman_v1_status_proto_enumTypes = make([]protoimpl.EnumInfo, 3)
+var file_lotsman_v1_status_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
 var file_lotsman_v1_status_proto_goTypes = []any{
-	(UpstreamState)(0),            // 0: lotsman.v1.UpstreamState
-	(UpstreamKind)(0),             // 1: lotsman.v1.UpstreamKind
-	(*WatchStatusRequest)(nil),    // 2: lotsman.v1.WatchStatusRequest
-	(*StatusSnapshot)(nil),        // 3: lotsman.v1.StatusSnapshot
-	(*UpstreamStatus)(nil),        // 4: lotsman.v1.UpstreamStatus
-	(*Speed)(nil),                 // 5: lotsman.v1.Speed
-	(*PeerStatus)(nil),            // 6: lotsman.v1.PeerStatus
-	(*Traffic)(nil),               // 7: lotsman.v1.Traffic
-	(*durationpb.Duration)(nil),   // 8: google.protobuf.Duration
-	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
-	(IncidentKind)(0),             // 10: lotsman.v1.IncidentKind
+	(UpstreamState)(0),                // 0: lotsman.v1.UpstreamState
+	(UpstreamKind)(0),                 // 1: lotsman.v1.UpstreamKind
+	(RoutingBlock)(0),                 // 2: lotsman.v1.RoutingBlock
+	(*ReportOutlineUsageRequest)(nil), // 3: lotsman.v1.ReportOutlineUsageRequest
+	(*OutlineUsageReading)(nil),       // 4: lotsman.v1.OutlineUsageReading
+	(*WatchStatusRequest)(nil),        // 5: lotsman.v1.WatchStatusRequest
+	(*StatusSnapshot)(nil),            // 6: lotsman.v1.StatusSnapshot
+	(*UpstreamStatus)(nil),            // 7: lotsman.v1.UpstreamStatus
+	(*Speed)(nil),                     // 8: lotsman.v1.Speed
+	(*PeerStatus)(nil),                // 9: lotsman.v1.PeerStatus
+	(*Traffic)(nil),                   // 10: lotsman.v1.Traffic
+	nil,                               // 11: lotsman.v1.ReportOutlineUsageRequest.UpstreamsEntry
+	(*timestamppb.Timestamp)(nil),     // 12: google.protobuf.Timestamp
+	(*durationpb.Duration)(nil),       // 13: google.protobuf.Duration
+	(IncidentKind)(0),                 // 14: lotsman.v1.IncidentKind
+	(*emptypb.Empty)(nil),             // 15: google.protobuf.Empty
 }
 var file_lotsman_v1_status_proto_depIdxs = []int32{
-	8,  // 0: lotsman.v1.WatchStatusRequest.interval:type_name -> google.protobuf.Duration
-	9,  // 1: lotsman.v1.StatusSnapshot.time:type_name -> google.protobuf.Timestamp
-	4,  // 2: lotsman.v1.StatusSnapshot.upstreams:type_name -> lotsman.v1.UpstreamStatus
-	6,  // 3: lotsman.v1.StatusSnapshot.peers:type_name -> lotsman.v1.PeerStatus
-	7,  // 4: lotsman.v1.StatusSnapshot.total:type_name -> lotsman.v1.Traffic
-	1,  // 5: lotsman.v1.UpstreamStatus.kind:type_name -> lotsman.v1.UpstreamKind
-	0,  // 6: lotsman.v1.UpstreamStatus.state:type_name -> lotsman.v1.UpstreamState
-	8,  // 7: lotsman.v1.UpstreamStatus.latency:type_name -> google.protobuf.Duration
-	9,  // 8: lotsman.v1.UpstreamStatus.last_handshake:type_name -> google.protobuf.Timestamp
-	7,  // 9: lotsman.v1.UpstreamStatus.traffic:type_name -> lotsman.v1.Traffic
-	5,  // 10: lotsman.v1.UpstreamStatus.speed:type_name -> lotsman.v1.Speed
-	10, // 11: lotsman.v1.UpstreamStatus.incidents:type_name -> lotsman.v1.IncidentKind
-	9,  // 12: lotsman.v1.UpstreamStatus.expires_at:type_name -> google.protobuf.Timestamp
-	9,  // 13: lotsman.v1.Speed.time:type_name -> google.protobuf.Timestamp
-	9,  // 14: lotsman.v1.PeerStatus.last_handshake:type_name -> google.protobuf.Timestamp
-	7,  // 15: lotsman.v1.PeerStatus.traffic:type_name -> lotsman.v1.Traffic
-	2,  // 16: lotsman.v1.StatusService.Watch:input_type -> lotsman.v1.WatchStatusRequest
-	3,  // 17: lotsman.v1.StatusService.Watch:output_type -> lotsman.v1.StatusSnapshot
-	17, // [17:18] is the sub-list for method output_type
-	16, // [16:17] is the sub-list for method input_type
-	16, // [16:16] is the sub-list for extension type_name
-	16, // [16:16] is the sub-list for extension extendee
-	0,  // [0:16] is the sub-list for field type_name
+	11, // 0: lotsman.v1.ReportOutlineUsageRequest.upstreams:type_name -> lotsman.v1.ReportOutlineUsageRequest.UpstreamsEntry
+	12, // 1: lotsman.v1.OutlineUsageReading.observed_at:type_name -> google.protobuf.Timestamp
+	12, // 2: lotsman.v1.OutlineUsageReading.expires_at:type_name -> google.protobuf.Timestamp
+	13, // 3: lotsman.v1.WatchStatusRequest.interval:type_name -> google.protobuf.Duration
+	12, // 4: lotsman.v1.StatusSnapshot.time:type_name -> google.protobuf.Timestamp
+	7,  // 5: lotsman.v1.StatusSnapshot.upstreams:type_name -> lotsman.v1.UpstreamStatus
+	9,  // 6: lotsman.v1.StatusSnapshot.peers:type_name -> lotsman.v1.PeerStatus
+	10, // 7: lotsman.v1.StatusSnapshot.total:type_name -> lotsman.v1.Traffic
+	1,  // 8: lotsman.v1.UpstreamStatus.kind:type_name -> lotsman.v1.UpstreamKind
+	0,  // 9: lotsman.v1.UpstreamStatus.state:type_name -> lotsman.v1.UpstreamState
+	13, // 10: lotsman.v1.UpstreamStatus.latency:type_name -> google.protobuf.Duration
+	12, // 11: lotsman.v1.UpstreamStatus.last_handshake:type_name -> google.protobuf.Timestamp
+	10, // 12: lotsman.v1.UpstreamStatus.traffic:type_name -> lotsman.v1.Traffic
+	8,  // 13: lotsman.v1.UpstreamStatus.speed:type_name -> lotsman.v1.Speed
+	14, // 14: lotsman.v1.UpstreamStatus.incidents:type_name -> lotsman.v1.IncidentKind
+	12, // 15: lotsman.v1.UpstreamStatus.expires_at:type_name -> google.protobuf.Timestamp
+	2,  // 16: lotsman.v1.UpstreamStatus.routing_block:type_name -> lotsman.v1.RoutingBlock
+	12, // 17: lotsman.v1.Speed.time:type_name -> google.protobuf.Timestamp
+	12, // 18: lotsman.v1.PeerStatus.last_handshake:type_name -> google.protobuf.Timestamp
+	10, // 19: lotsman.v1.PeerStatus.traffic:type_name -> lotsman.v1.Traffic
+	4,  // 20: lotsman.v1.ReportOutlineUsageRequest.UpstreamsEntry.value:type_name -> lotsman.v1.OutlineUsageReading
+	5,  // 21: lotsman.v1.StatusService.Watch:input_type -> lotsman.v1.WatchStatusRequest
+	3,  // 22: lotsman.v1.StatusService.ReportOutlineUsage:input_type -> lotsman.v1.ReportOutlineUsageRequest
+	6,  // 23: lotsman.v1.StatusService.Watch:output_type -> lotsman.v1.StatusSnapshot
+	15, // 24: lotsman.v1.StatusService.ReportOutlineUsage:output_type -> google.protobuf.Empty
+	23, // [23:25] is the sub-list for method output_type
+	21, // [21:23] is the sub-list for method input_type
+	21, // [21:21] is the sub-list for extension type_name
+	21, // [21:21] is the sub-list for extension extendee
+	0,  // [0:21] is the sub-list for field type_name
 }
 
 func init() { file_lotsman_v1_status_proto_init() }
@@ -746,8 +951,8 @@ func file_lotsman_v1_status_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_lotsman_v1_status_proto_rawDesc), len(file_lotsman_v1_status_proto_rawDesc)),
-			NumEnums:      2,
-			NumMessages:   6,
+			NumEnums:      3,
+			NumMessages:   9,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

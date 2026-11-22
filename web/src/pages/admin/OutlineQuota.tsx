@@ -9,7 +9,6 @@ export interface OutlineQuotaValue {
   unit: keyof typeof units;
   updatedAt: string;
   stale: boolean;
-  expiresAt?: string;
 }
 
 /** A null entry is configured but has no sample yet. */

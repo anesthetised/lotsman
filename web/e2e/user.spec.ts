@@ -233,7 +233,7 @@ test("a blocked device says so, and turning on another country lifts it", async 
   await expect(phone).toContainText("No exit");
   await expect(phone).toContainText("Now: traffic blocked");
   await expect(phone.getByRole("alert")).toHaveText(
-    "No available exit. The selected countries are unavailable now, so traffic is blocked. Turn on another country or turn off “Only the selected countries”.",
+    "This route will block traffic while the selected exits are unavailable. Select another available country or provider.",
   );
   await expect(phone.getByText("unavailable", { exact: true })).toBeVisible();
   // Countries only: no provider anywhere on the page.
@@ -245,6 +245,32 @@ test("a blocked device says so, and turning on another country lifts it", async 
   await phone.getByRole("button", { name: "Apply" }).click();
   await expect(phone).toContainText("Now: Netherlands");
   await expect(phone).toContainText("Degraded");
+});
+
+test("the device form preserves an unavailable provider and explains strict and fallback routes", async ({ page }, info) => {
+  if (info.project.name === "phone") await page.setViewportSize({ width: 320, height: 820 });
+  await page.goto(link.replace("/u#", "/u?fixture=outline-exhausted#"));
+  await expect(page.getByRole("region", { name: "Exits" }).getByText("Temporarily unavailable", { exact: true })).toBeVisible();
+  await expect(page.locator("main")).not.toContainText("Data limit reached");
+
+  const form = await addForm(page);
+  await form.getByLabel("Name").fill("test-tablet");
+  const providers = form.getByRole("group", { name: "Providers in Latvia" });
+  const excluded = providers.getByRole("button", { name: /provider-b.*unavailable/ });
+  await expect(excluded).toHaveAttribute("aria-pressed", "true");
+  await expect(providers.getByRole("button", { name: "provider-a", exact: true })).toBeEnabled();
+  for (const name of ["Albania", "Germany", "Netherlands"]) {
+    await form.getByRole("switch", { name: `Use ${name}` }).click();
+  }
+  await providers.getByRole("button", { name: "provider-a", exact: true }).click();
+  await expect(form.getByRole("alert")).toContainText("This route will block traffic");
+  await expect(excluded).toHaveAttribute("aria-pressed", "true");
+  await form.getByRole("switch", { name: "Only the selected countries" }).click();
+  await expect(form.getByRole("status")).toContainText("another allowed exit");
+  await expect(excluded).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+    await page.evaluate(() => innerWidth),
+  );
 });
 
 test("a user whose routes the operator sets sees them read-only", async ({ page }) => {

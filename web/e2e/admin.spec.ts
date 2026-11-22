@@ -17,14 +17,14 @@ test("the operator overview shows live data", async ({ page }) => {
 test("Outline quotas and expiry follow the upstream name and keep the last value on a provider failure", async ({ page }) => {
   const quota = { limit: 500, remaining: 464.32, unit: "GB", updatedAt: "2026-11-21T15:00:00Z", stale: true };
   await page.route("**/api/outline-usage", (route) => route.fulfill({
-    json: { "lv-2": { ...quota, expiresAt: "2030-02-03T10:34:56Z" }, "al-1": null, "lv-1": { ...quota, remaining: 123 } },
+    json: { "lv-2": quota, "al-1": null, "lv-1": { ...quota, remaining: 123 } },
   }));
   await page.goto("/admin");
   const row = (name: string) => page.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) });
   await expect(page.getByRole("columnheader", { name: "Data remaining" })).toBeVisible();
   await expect(row("lv-2").getByRole("cell", { name: /464\.32 of 500 GB/ })).toBeVisible();
   await expect(row("lv-2")).toContainText("Out of date");
-  await expect(row("lv-2").locator("time")).toHaveAttribute("datetime", "2030-02-03T10:34:56.000Z");
+  await expect(row("lv-2").locator("time")).toHaveAttribute("datetime", "2030-02-04T10:34:56.000Z");
   await expect(row("al-1")).toContainText("Remaining data unavailable");
   await expect(row("lv-1")).not.toContainText("123 of 500 GB");
 
@@ -32,7 +32,7 @@ test("Outline quotas and expiry follow the upstream name and keep the last value
   await expect(page.getByRole("heading", { name: "Upstream lv-2" })).toBeVisible();
   await expect(page.getByText("Data remaining", { exact: true })).toBeVisible();
   await expect(page.getByText("464.32 of 500 GB", { exact: true })).toBeVisible();
-  await expect(page.locator('time[datetime="2030-02-03T10:34:56.000Z"]')).toBeVisible();
+  await expect(page.locator('time[datetime="2030-02-04T10:34:56.000Z"]')).toBeVisible();
   await page.getByRole("button", { name: "Language" }).click();
   await page.getByRole("menuitemradio", { name: "Русский" }).click();
   await expect(page.getByText("Остаток трафика", { exact: true })).toBeVisible();

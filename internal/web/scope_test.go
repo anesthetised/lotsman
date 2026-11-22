@@ -52,7 +52,7 @@ func TestScopesFollowServices(t *testing.T) {
 	for p, s := range Scopes {
 		want := Operator
 		switch {
-		case p == "/lotsman.v1.UserSelfService/ResolveLink":
+		case p == "/lotsman.v1.UserSelfService/ResolveLink", p == "/lotsman.v1.StatusService/ReportOutlineUsage":
 			want = Internal
 		case strings.HasPrefix(p, "/lotsman.v1.UserSelfService/"):
 			want = User

@@ -18,7 +18,12 @@ const fakeAuth = import.meta.env.VITE_FAKE_API ? createFakeAuthServer({ storage:
 
 /** Shared with the operator console's clients in `admin.ts`. */
 export const transport: Transport = fakeAuth
-  ? createFakeTransport({ seed: 7, interceptors: [onUnauthenticated(redirectToSignIn)], signedIn: fakeAuth.signedIn })
+  ? createFakeTransport({
+      seed: 7,
+      interceptors: [onUnauthenticated(redirectToSignIn)],
+      signedIn: fakeAuth.signedIn,
+      exhaustedOutline: new URLSearchParams(location.search).get("fixture") === "outline-exhausted" ? "lv-2" : undefined,
+    })
   : createConnectTransport({ baseUrl: "/api", interceptors: [onUnauthenticated(redirectToSignIn)] });
 
 export const api = {

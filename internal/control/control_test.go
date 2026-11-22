@@ -48,8 +48,9 @@ func newFakeSource(st daemon.Status) *fakeSource {
 	return f
 }
 
-func (f *fakeSource) Ready() <-chan struct{} { return f.ready }
-func (f *fakeSource) ClientMTU() int         { return 1280 }
+func (f *fakeSource) Ready() <-chan struct{}                                { return f.ready }
+func (f *fakeSource) ClientMTU() int                                        { return 1280 }
+func (f *fakeSource) ApplyOutlineUsage(map[string]store.OutlineUsage) error { return nil }
 
 func (f *fakeSource) Status() daemon.Status { return f.st }
 
@@ -265,6 +266,7 @@ func TestWatchRejectsInvalidInterval(t *testing.T) {
 func TestUnimplemented(t *testing.T) {
 	implemented := []string{
 		lotsmanv1connect.StatusServiceWatchProcedure,
+		lotsmanv1connect.StatusServiceReportOutlineUsageProcedure,
 		lotsmanv1connect.ConnectionServiceWatchProcedure,
 		lotsmanv1connect.HistoryServiceUpstreamProcedure,
 		lotsmanv1connect.HistoryServicePeerProcedure,

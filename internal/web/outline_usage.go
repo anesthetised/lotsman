@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,6 +17,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"connectrpc.com/connect/v2"
+	"connectrpc.com/connect/v2/connecthttp"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
+	lotsmanv1 "github.com/anesthetised/lotsman/api/lotsman/v1"
+	"github.com/anesthetised/lotsman/api/lotsman/v1/lotsmanv1connect"
 )
 
 const (
@@ -72,8 +80,24 @@ type outlineUsage struct {
 
 // StartOutlineUsage fetches quota data in the background for the lifetime of
 // the panel. The handler serves only the cache, even during an API failure.
-func StartOutlineUsage(ctx context.Context, cfg *OutlineUsageConfig, log *slog.Logger) http.Handler {
+func StartOutlineUsage(ctx context.Context, cfg *OutlineUsageConfig, daemon http.RoundTripper, log *slog.Logger) http.Handler {
+	transport := connecthttp.NewTransport(&http.Client{Transport: daemon, Timeout: 5 * time.Second}, "http://lotsman")
+	gateway := lotsmanv1connect.NewStatusServiceClient(connect.NewClient(transport))
 	if cfg == nil {
+		go func() {
+			tick := time.NewTicker(outlineRefreshInterval)
+			defer tick.Stop()
+			for {
+				if _, err := gateway.ReportOutlineUsage(ctx, &lotsmanv1.ReportOutlineUsageRequest{}); err == nil {
+					return
+				}
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+				}
+			}
+		}()
 		return nil
 	}
 	client := &http.Client{
@@ -94,6 +118,9 @@ func StartOutlineUsage(ctx context.Context, cfg *OutlineUsageConfig, log *slog.L
 		defer tick.Stop()
 		for {
 			u.refresh(ctx)
+			if _, err := gateway.ReportOutlineUsage(ctx, u.routingReadings()); err != nil && ctx.Err() == nil {
+				log.Warn("could not report Outline limits to the gateway", "code", connect.CodeOf(err))
+			}
 			select {
 			case <-ctx.Done():
 				return
@@ -102,6 +129,25 @@ func StartOutlineUsage(ctx context.Context, cfg *OutlineUsageConfig, log *slog.L
 		}
 	}()
 	return u
+}
+
+func (u *outlineUsage) routingReadings() *lotsmanv1.ReportOutlineUsageRequest {
+	payload := &lotsmanv1.ReportOutlineUsageRequest{Upstreams: make(map[string]*lotsmanv1.OutlineUsageReading, len(u.cfg.Upstreams))}
+	u.mu.RLock()
+	defer u.mu.RUnlock()
+	for name, key := range u.cfg.Upstreams {
+		hash := sha256.Sum256([]byte(key))
+		row := &lotsmanv1.OutlineUsageReading{KeyHash: hash[:]}
+		if quota := u.quotas[name]; quota != nil {
+			row.ObservedAt = timestamppb.New(quota.UpdatedAt)
+			row.Exhausted = quota.Remaining == 0
+			if quota.ExpiresAt != nil {
+				row.ExpiresAt = timestamppb.New(*quota.ExpiresAt)
+			}
+		}
+		payload.Upstreams[name] = row
+	}
+	return payload
 }
 
 func (u *outlineUsage) ServeHTTP(w http.ResponseWriter, _ *http.Request) {

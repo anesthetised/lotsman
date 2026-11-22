@@ -101,6 +101,16 @@ func TestOutlineUsage(t *testing.T) {
 	}
 	expiry := rows["ol-al"].ExpiresAt
 	if want := time.Date(2030, 2, 3, 10, 34, 56, 0, time.UTC); expiry == nil || !expiry.Equal(want) || rows["ol-lv"].ExpiresAt != nil {
-		t.Errorf("provider expiries = %v and %v", expiry, rows["ol-lv"].ExpiresAt)
+		t.Fatalf("provider expiries = %v and %v", expiry, rows["ol-lv"].ExpiresAt)
+	}
+	quota := *usage.quotas["ol-al"]
+	quota.Remaining = 0
+	usage.quotas["ol-al"] = &quota
+	usage.quotas["ol-lv"] = nil
+	readings := usage.routingReadings().GetUpstreams()
+	if al, lv := readings["ol-al"], readings["ol-lv"]; !al.GetExhausted() ||
+		!al.GetObservedAt().AsTime().Equal(quota.UpdatedAt) || !al.GetExpiresAt().AsTime().Equal(*expiry) ||
+		lv.GetObservedAt() != nil || lv.GetExhausted() || len(lv.GetKeyHash()) != 32 {
+		t.Fatal("invalid mapping of confirmed and unknown Outline readings")
 	}
 }

@@ -191,6 +191,13 @@ var migrations = []string{
 		upstream   TEXT NOT NULL PRIMARY KEY,
 		expires_at TEXT NOT NULL
 	) WITHOUT ROWID;`,
+	`CREATE TABLE outline_usage (
+		upstream    TEXT NOT NULL PRIMARY KEY,
+		key_hash    BLOB NOT NULL,
+		observed_at INTEGER NOT NULL,
+		exhausted   INTEGER NOT NULL,
+		expires_at  TEXT
+	) WITHOUT ROWID;`,
 }
 
 type User struct {

@@ -8,8 +8,8 @@
 
 import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
 import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
-import type { Duration, Timestamp } from "@bufbuild/protobuf/wkt";
-import { file_google_protobuf_duration, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
+import type { Duration, EmptySchema, Timestamp } from "@bufbuild/protobuf/wkt";
+import { file_google_protobuf_duration, file_google_protobuf_empty, file_google_protobuf_timestamp } from "@bufbuild/protobuf/wkt";
 import type { IncidentKind } from "./incident_pb";
 import { file_lotsman_v1_incident } from "./incident_pb";
 import type { Message } from "@bufbuild/protobuf";
@@ -18,7 +18,62 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file lotsman/v1/status.proto.
  */
 export const file_lotsman_v1_status: GenFile = /*@__PURE__*/
-  fileDesc("Chdsb3RzbWFuL3YxL3N0YXR1cy5wcm90bxIKbG90c21hbi52MSJBChJXYXRjaFN0YXR1c1JlcXVlc3QSKwoIaW50ZXJ2YWwYASABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24iyAEKDlN0YXR1c1NuYXBzaG90EigKBHRpbWUYASABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEhIKCmNsaWVudF9tdHUYAiABKA0SLQoJdXBzdHJlYW1zGAMgAygLMhoubG90c21hbi52MS5VcHN0cmVhbVN0YXR1cxIlCgVwZWVycxgEIAMoCzIWLmxvdHNtYW4udjEuUGVlclN0YXR1cxIiCgV0b3RhbBgFIAEoCzITLmxvdHNtYW4udjEuVHJhZmZpYyK0AwoOVXBzdHJlYW1TdGF0dXMSDAoEbmFtZRgBIAEoCRImCgRraW5kGAIgASgOMhgubG90c21hbi52MS5VcHN0cmVhbUtpbmQSCwoDZ2VvGAMgASgJEhAKCHByb3ZpZGVyGAQgASgJEigKBXN0YXRlGAUgASgOMhkubG90c21hbi52MS5VcHN0cmVhbVN0YXRlEioKB2xhdGVuY3kYBiABKAsyGS5nb29nbGUucHJvdG9idWYuRHVyYXRpb24SMgoObGFzdF9oYW5kc2hha2UYByABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg4KBnJvdXRlZBgIIAEoDRIOCgZhY3RpdmUYCSABKA0SJAoHdHJhZmZpYxgKIAEoCzITLmxvdHNtYW4udjEuVHJhZmZpYxIgCgVzcGVlZBgLIAEoCzIRLmxvdHNtYW4udjEuU3BlZWQSKwoJaW5jaWRlbnRzGAwgAygOMhgubG90c21hbi52MS5JbmNpZGVudEtpbmQSLgoKZXhwaXJlc19hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiVQoFU3BlZWQSEQoJZG93bl9yYXRlGAEgASgEEg8KB3VwX3JhdGUYAiABKAQSKAoEdGltZRgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiuAEKClBlZXJTdGF0dXMSDwoHcGVlcl9pZBgBIAEoCRIMCgR1c2VyGAIgASgJEg4KBmRldmljZRgDIAEoCRIPCgdhZGRyZXNzGAQgASgJEhAKCHVwc3RyZWFtGAUgASgJEjIKDmxhc3RfaGFuZHNoYWtlGAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIkCgd0cmFmZmljGAcgASgLMhMubG90c21hbi52MS5UcmFmZmljIlMKB1RyYWZmaWMSEgoKZG93bl9ieXRlcxgBIAEoBBIQCgh1cF9ieXRlcxgCIAEoBBIRCglkb3duX3JhdGUYAyABKAQSDwoHdXBfcmF0ZRgEIAEoBCqYAQoNVXBzdHJlYW1TdGF0ZRIeChpVUFNUUkVBTV9TVEFURV9VTlNQRUNJRklFRBAAEhoKFlVQU1RSRUFNX1NUQVRFX1VOS05PV04QARIVChFVUFNUUkVBTV9TVEFURV9VUBACEhsKF1VQU1RSRUFNX1NUQVRFX0RFR1JBREVEEAMSFwoTVVBTVFJFQU1fU1RBVEVfRE9XThAEKngKDFVwc3RyZWFtS2luZBIdChlVUFNUUkVBTV9LSU5EX1VOU1BFQ0lGSUVEEAASFQoRVVBTVFJFQU1fS0lORF9BV0cQARIZChVVUFNUUkVBTV9LSU5EX09VVExJTkUQAhIXChNVUFNUUkVBTV9LSU5EX1ZMRVNTEAMyVgoNU3RhdHVzU2VydmljZRJFCgVXYXRjaBIeLmxvdHNtYW4udjEuV2F0Y2hTdGF0dXNSZXF1ZXN0GhoubG90c21hbi52MS5TdGF0dXNTbmFwc2hvdDABQjpaOGdpdGh1Yi5jb20vYW5lc3RoZXRpc2VkL2xvdHNtYW4vYXBpL2xvdHNtYW4vdjE7bG90c21hbnYxYgZwcm90bzM", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_lotsman_v1_incident]);
+  fileDesc("Chdsb3RzbWFuL3YxL3N0YXR1cy5wcm90bxIKbG90c21hbi52MSK3AQoZUmVwb3J0T3V0bGluZVVzYWdlUmVxdWVzdBJHCgl1cHN0cmVhbXMYASADKAsyNC5sb3RzbWFuLnYxLlJlcG9ydE91dGxpbmVVc2FnZVJlcXVlc3QuVXBzdHJlYW1zRW50cnkaUQoOVXBzdHJlYW1zRW50cnkSCwoDa2V5GAEgASgJEi4KBXZhbHVlGAIgASgLMh8ubG90c21hbi52MS5PdXRsaW5lVXNhZ2VSZWFkaW5nOgI4ASKbAQoTT3V0bGluZVVzYWdlUmVhZGluZxIQCghrZXlfaGFzaBgBIAEoDBIvCgtvYnNlcnZlZF9hdBgCIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEQoJZXhoYXVzdGVkGAMgASgIEi4KCmV4cGlyZXNfYXQYBCABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIkEKEldhdGNoU3RhdHVzUmVxdWVzdBIrCghpbnRlcnZhbBgBIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiLIAQoOU3RhdHVzU25hcHNob3QSKAoEdGltZRgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASEgoKY2xpZW50X210dRgCIAEoDRItCgl1cHN0cmVhbXMYAyADKAsyGi5sb3RzbWFuLnYxLlVwc3RyZWFtU3RhdHVzEiUKBXBlZXJzGAQgAygLMhYubG90c21hbi52MS5QZWVyU3RhdHVzEiIKBXRvdGFsGAUgASgLMhMubG90c21hbi52MS5UcmFmZmljIuUDCg5VcHN0cmVhbVN0YXR1cxIMCgRuYW1lGAEgASgJEiYKBGtpbmQYAiABKA4yGC5sb3RzbWFuLnYxLlVwc3RyZWFtS2luZBILCgNnZW8YAyABKAkSEAoIcHJvdmlkZXIYBCABKAkSKAoFc3RhdGUYBSABKA4yGS5sb3RzbWFuLnYxLlVwc3RyZWFtU3RhdGUSKgoHbGF0ZW5jeRgGIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbhIyCg5sYXN0X2hhbmRzaGFrZRgHIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDgoGcm91dGVkGAggASgNEg4KBmFjdGl2ZRgJIAEoDRIkCgd0cmFmZmljGAogASgLMhMubG90c21hbi52MS5UcmFmZmljEiAKBXNwZWVkGAsgASgLMhEubG90c21hbi52MS5TcGVlZBIrCglpbmNpZGVudHMYDCADKA4yGC5sb3RzbWFuLnYxLkluY2lkZW50S2luZBIuCgpleHBpcmVzX2F0GA0gASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIvCg1yb3V0aW5nX2Jsb2NrGA4gASgOMhgubG90c21hbi52MS5Sb3V0aW5nQmxvY2siVQoFU3BlZWQSEQoJZG93bl9yYXRlGAEgASgEEg8KB3VwX3JhdGUYAiABKAQSKAoEdGltZRgDIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiuAEKClBlZXJTdGF0dXMSDwoHcGVlcl9pZBgBIAEoCRIMCgR1c2VyGAIgASgJEg4KBmRldmljZRgDIAEoCRIPCgdhZGRyZXNzGAQgASgJEhAKCHVwc3RyZWFtGAUgASgJEjIKDmxhc3RfaGFuZHNoYWtlGAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIkCgd0cmFmZmljGAcgASgLMhMubG90c21hbi52MS5UcmFmZmljIlMKB1RyYWZmaWMSEgoKZG93bl9ieXRlcxgBIAEoBBIQCgh1cF9ieXRlcxgCIAEoBBIRCglkb3duX3JhdGUYAyABKAQSDwoHdXBfcmF0ZRgEIAEoBCqYAQoNVXBzdHJlYW1TdGF0ZRIeChpVUFNUUkVBTV9TVEFURV9VTlNQRUNJRklFRBAAEhoKFlVQU1RSRUFNX1NUQVRFX1VOS05PV04QARIVChFVUFNUUkVBTV9TVEFURV9VUBACEhsKF1VQU1RSRUFNX1NUQVRFX0RFR1JBREVEEAMSFwoTVVBTVFJFQU1fU1RBVEVfRE9XThAEKngKDFVwc3RyZWFtS2luZBIdChlVUFNUUkVBTV9LSU5EX1VOU1BFQ0lGSUVEEAASFQoRVVBTVFJFQU1fS0lORF9BV0cQARIZChVVUFNUUkVBTV9LSU5EX09VVExJTkUQAhIXChNVUFNUUkVBTV9LSU5EX1ZMRVNTEAMqlwEKDFJvdXRpbmdCbG9jaxIdChlST1VUSU5HX0JMT0NLX1VOU1BFQ0lGSUVEEAASJgoiUk9VVElOR19CTE9DS19TVUJTQ1JJUFRJT05fRVhQSVJFRBABEiEKHVJPVVRJTkdfQkxPQ0tfUVVPVEFfRVhIQVVTVEVEEAISHQoZUk9VVElOR19CTE9DS19VTkFWQUlMQUJMRRADMqsBCg1TdGF0dXNTZXJ2aWNlEkUKBVdhdGNoEh4ubG90c21hbi52MS5XYXRjaFN0YXR1c1JlcXVlc3QaGi5sb3RzbWFuLnYxLlN0YXR1c1NuYXBzaG90MAESUwoSUmVwb3J0T3V0bGluZVVzYWdlEiUubG90c21hbi52MS5SZXBvcnRPdXRsaW5lVXNhZ2VSZXF1ZXN0GhYuZ29vZ2xlLnByb3RvYnVmLkVtcHR5QjpaOGdpdGh1Yi5jb20vYW5lc3RoZXRpc2VkL2xvdHNtYW4vYXBpL2xvdHNtYW4vdjE7bG90c21hbnYxYgZwcm90bzM", [file_google_protobuf_duration, file_google_protobuf_empty, file_google_protobuf_timestamp, file_lotsman_v1_incident]);
+
+/**
+ * @generated from message lotsman.v1.ReportOutlineUsageRequest
+ */
+export type ReportOutlineUsageRequest = Message<"lotsman.v1.ReportOutlineUsageRequest"> & {
+  /**
+   * The complete configured mapping, including keys whose usage is not known yet.
+   *
+   * @generated from field: map<string, lotsman.v1.OutlineUsageReading> upstreams = 1;
+   */
+  upstreams: { [key: string]: OutlineUsageReading };
+};
+
+/**
+ * Describes the message lotsman.v1.ReportOutlineUsageRequest.
+ * Use `create(ReportOutlineUsageRequestSchema)` to create a new message.
+ */
+export const ReportOutlineUsageRequestSchema: GenMessage<ReportOutlineUsageRequest> = /*@__PURE__*/
+  messageDesc(file_lotsman_v1_status, 0);
+
+/**
+ * @generated from message lotsman.v1.OutlineUsageReading
+ */
+export type OutlineUsageReading = Message<"lotsman.v1.OutlineUsageReading"> & {
+  /**
+   * identifies a provider key across polls without sending the key name
+   *
+   * @generated from field: bytes key_hash = 1;
+   */
+  keyHash: Uint8Array;
+
+  /**
+   * unset until the provider reports usage
+   *
+   * @generated from field: google.protobuf.Timestamp observed_at = 2;
+   */
+  observedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: bool exhausted = 3;
+   */
+  exhausted: boolean;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp expires_at = 4;
+   */
+  expiresAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message lotsman.v1.OutlineUsageReading.
+ * Use `create(OutlineUsageReadingSchema)` to create a new message.
+ */
+export const OutlineUsageReadingSchema: GenMessage<OutlineUsageReading> = /*@__PURE__*/
+  messageDesc(file_lotsman_v1_status, 1);
 
 /**
  * @generated from message lotsman.v1.WatchStatusRequest
@@ -35,7 +90,7 @@ export type WatchStatusRequest = Message<"lotsman.v1.WatchStatusRequest"> & {
  * Use `create(WatchStatusRequestSchema)` to create a new message.
  */
 export const WatchStatusRequestSchema: GenMessage<WatchStatusRequest> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_status, 0);
+  messageDesc(file_lotsman_v1_status, 2);
 
 /**
  * @generated from message lotsman.v1.StatusSnapshot
@@ -74,7 +129,7 @@ export type StatusSnapshot = Message<"lotsman.v1.StatusSnapshot"> & {
  * Use `create(StatusSnapshotSchema)` to create a new message.
  */
 export const StatusSnapshotSchema: GenMessage<StatusSnapshot> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_status, 1);
+  messageDesc(file_lotsman_v1_status, 3);
 
 /**
  * @generated from message lotsman.v1.UpstreamStatus
@@ -158,6 +213,13 @@ export type UpstreamStatus = Message<"lotsman.v1.UpstreamStatus"> & {
    * @generated from field: google.protobuf.Timestamp expires_at = 13;
    */
   expiresAt?: Timestamp | undefined;
+
+  /**
+   * why this exit cannot carry client traffic despite reachability
+   *
+   * @generated from field: lotsman.v1.RoutingBlock routing_block = 14;
+   */
+  routingBlock: RoutingBlock;
 };
 
 /**
@@ -165,7 +227,7 @@ export type UpstreamStatus = Message<"lotsman.v1.UpstreamStatus"> & {
  * Use `create(UpstreamStatusSchema)` to create a new message.
  */
 export const UpstreamStatusSchema: GenMessage<UpstreamStatus> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_status, 2);
+  messageDesc(file_lotsman_v1_status, 4);
 
 /**
  * A speed test through one upstream: bytes per second each way.
@@ -194,7 +256,7 @@ export type Speed = Message<"lotsman.v1.Speed"> & {
  * Use `create(SpeedSchema)` to create a new message.
  */
 export const SpeedSchema: GenMessage<Speed> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_status, 3);
+  messageDesc(file_lotsman_v1_status, 5);
 
 /**
  * @generated from message lotsman.v1.PeerStatus
@@ -249,7 +311,7 @@ export type PeerStatus = Message<"lotsman.v1.PeerStatus"> & {
  * Use `create(PeerStatusSchema)` to create a new message.
  */
 export const PeerStatusSchema: GenMessage<PeerStatus> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_status, 4);
+  messageDesc(file_lotsman_v1_status, 6);
 
 /**
  * Directions are from the user's side: down = towards the client. A peer
@@ -289,7 +351,7 @@ export type Traffic = Message<"lotsman.v1.Traffic"> & {
  * Use `create(TrafficSchema)` to create a new message.
  */
 export const TrafficSchema: GenMessage<Traffic> = /*@__PURE__*/
-  messageDesc(file_lotsman_v1_status, 5);
+  messageDesc(file_lotsman_v1_status, 7);
 
 /**
  * @generated from enum lotsman.v1.UpstreamState
@@ -363,6 +425,39 @@ export const UpstreamKindSchema: GenEnum<UpstreamKind> = /*@__PURE__*/
   enumDesc(file_lotsman_v1_status, 1);
 
 /**
+ * @generated from enum lotsman.v1.RoutingBlock
+ */
+export enum RoutingBlock {
+  /**
+   * @generated from enum value: ROUTING_BLOCK_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: ROUTING_BLOCK_SUBSCRIPTION_EXPIRED = 1;
+   */
+  SUBSCRIPTION_EXPIRED = 1,
+
+  /**
+   * @generated from enum value: ROUTING_BLOCK_QUOTA_EXHAUSTED = 2;
+   */
+  QUOTA_EXHAUSTED = 2,
+
+  /**
+   * user view; subscription details are operator-only
+   *
+   * @generated from enum value: ROUTING_BLOCK_UNAVAILABLE = 3;
+   */
+  UNAVAILABLE = 3,
+}
+
+/**
+ * Describes the enum lotsman.v1.RoutingBlock.
+ */
+export const RoutingBlockSchema: GenEnum<RoutingBlock> = /*@__PURE__*/
+  enumDesc(file_lotsman_v1_status, 2);
+
+/**
  * @generated from service lotsman.v1.StatusService
  */
 export const StatusService: GenService<{
@@ -377,6 +472,16 @@ export const StatusService: GenService<{
     methodKind: "server_streaming";
     input: typeof WatchStatusRequestSchema;
     output: typeof StatusSnapshotSchema;
+  },
+  /**
+   * Scope: internal. Sent directly from the panel's Outline API poller.
+   *
+   * @generated from rpc lotsman.v1.StatusService.ReportOutlineUsage
+   */
+  reportOutlineUsage: {
+    methodKind: "unary";
+    input: typeof ReportOutlineUsageRequestSchema;
+    output: typeof EmptySchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_lotsman_v1_status, 0);

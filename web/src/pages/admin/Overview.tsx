@@ -41,7 +41,7 @@ function LiveOverview() {
   const showQuota = createMemo(() =>
     snapshot().upstreams.some((upstream) => upstream.kind === UpstreamKind.OUTLINE && outlineUsage()[upstream.name] !== undefined),
   );
-  const showExpiry = createMemo(() => snapshot().upstreams.some((u) => subscriptionExpiry(u, outlineUsage()[u.name])));
+  const showExpiry = createMemo(() => snapshot().upstreams.some((u) => u.expiresAt));
   const [window, setWindow] = createSignal<Window>("1");
 
   // Keep the longest window; the chart shows its tail.
@@ -188,7 +188,7 @@ function UpstreamRow(props: {
       </th>
       <Show when={props.showExpiry}>
         <td class="px-3 py-1.5 tabular-nums">
-          <Show when={subscriptionExpiry(u(), props.quota)} fallback={<span class="text-muted">—</span>}>
+          <Show when={subscriptionExpiry(u())} fallback={<span class="text-muted">—</span>}>
             {(date) => <SubscriptionExpiry date={date()} />}
           </Show>
         </td>
@@ -202,7 +202,7 @@ function UpstreamRow(props: {
       </Show>
       <td class="px-3 py-1.5">
         <div class="flex flex-col items-start gap-1">
-          <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />
+          <StateBadge level={stateLevel(u().state, u().routingBlock)} label={stateLabel(t, u().state, u().routingBlock)} />
           <IncidentBadge upstream={u().name} kinds={u().incidents} />
         </div>
       </td>

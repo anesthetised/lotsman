@@ -12,6 +12,7 @@ import (
 	"connectrpc.com/connect/v2"
 	"connectrpc.com/connect/v2/connecthttp"
 	"google.golang.org/protobuf/types/known/durationpb"
+	"google.golang.org/protobuf/types/known/emptypb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	lotsmanv1 "github.com/anesthetised/lotsman/api/lotsman/v1"
@@ -37,6 +38,7 @@ type Source interface {
 	HistorySource
 	IncidentSource
 	Users
+	ApplyOutlineUsage(map[string]store.OutlineUsage) error
 }
 
 // NewServer registers every service of the API. An RPC whose issue has not
@@ -76,6 +78,39 @@ func (s statusService) Watch(ctx context.Context, req *lotsmanv1.WatchStatusRequ
 		return snapshot(time.Now(), s.src.ClientMTU(), s.src.Status(), s.src.Traffic()), nil
 	}
 	return streamSnapshots(ctx, req, s.src.Ready(), next, stream.Send)
+}
+
+func (s statusService) ReportOutlineUsage(ctx context.Context, req *lotsmanv1.ReportOutlineUsageRequest) (*emptypb.Empty, error) {
+	readings := make(map[string]store.OutlineUsage, len(req.GetUpstreams()))
+	for name, reading := range req.GetUpstreams() {
+		if name == "" || len(reading.GetKeyHash()) != 32 ||
+			(reading.GetObservedAt() == nil && (reading.GetExhausted() || reading.GetExpiresAt() != nil)) {
+			return nil, connect.NewError(connect.CodeInvalidArgument, "invalid Outline usage reading")
+		}
+		value := store.OutlineUsage{KeyHash: reading.GetKeyHash(), Exhausted: reading.GetExhausted()}
+		if observed := reading.GetObservedAt(); observed != nil {
+			if err := observed.CheckValid(); err != nil {
+				return nil, connect.NewError(connect.CodeInvalidArgument, "invalid Outline usage observation time")
+			}
+			value.ObservedAt = observed.AsTime()
+		}
+		if expires := reading.GetExpiresAt(); expires != nil {
+			if err := expires.CheckValid(); err != nil {
+				return nil, connect.NewError(connect.CodeInvalidArgument, "invalid Outline subscription expiry")
+			}
+			value.ExpiresAt = expires.AsTime()
+		}
+		readings[name] = value
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-s.src.Ready():
+	}
+	if err := s.src.ApplyOutlineUsage(readings); err != nil {
+		return nil, connect.NewError(connect.CodeInternal, "could not apply Outline usage")
+	}
+	return &emptypb.Empty{}, nil
 }
 
 // streamSnapshots sends next's snapshot once ready is closed and then every
@@ -127,7 +162,7 @@ func snapshot(now time.Time, clientMTU int, st daemon.Status, tr traffic.Snapsho
 			Name: u.Name, Kind: upstreamKind(u.Kind), Geo: u.Geo, Provider: u.Provider,
 			State: upstreamState(u), Latency: duration(u.Latency), LastHandshake: timestamp(u.LastHandshake),
 			Routed: uint32(u.Routed), Active: uint32(u.Active), Traffic: trafficOf(t, ok), Speed: speed(u.Speed),
-			Incidents: incidentKinds(u.Incidents), ExpiresAt: timestamp(u.ExpiresAt),
+			Incidents: incidentKinds(u.Incidents), ExpiresAt: timestamp(u.ExpiresAt), RoutingBlock: routingBlock(u.RoutingBlock),
 		})
 	}
 	for _, p := range st.Peers {
@@ -181,6 +216,19 @@ func upstreamKind(kind string) lotsmanv1.UpstreamKind {
 
 // upstreamState folds the transfer probes into the state, as `lotsman
 // upstream status` does: degraded is an up upstream failing them.
+func routingBlock(reason daemon.RoutingBlock) lotsmanv1.RoutingBlock {
+	switch reason {
+	case daemon.SubscriptionExpired:
+		return lotsmanv1.RoutingBlock_ROUTING_BLOCK_SUBSCRIPTION_EXPIRED
+	case daemon.QuotaExhausted:
+		return lotsmanv1.RoutingBlock_ROUTING_BLOCK_QUOTA_EXHAUSTED
+	case daemon.RoutingUnavailable:
+		return lotsmanv1.RoutingBlock_ROUTING_BLOCK_UNAVAILABLE
+	default:
+		return lotsmanv1.RoutingBlock_ROUTING_BLOCK_UNSPECIFIED
+	}
+}
+
 func upstreamState(u daemon.UpstreamStatus) lotsmanv1.UpstreamState {
 	switch u.State {
 	case health.Unknown:

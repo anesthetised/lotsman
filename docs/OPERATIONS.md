@@ -145,7 +145,9 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 Set a subscription expiry with `lotsman upstream expiry ac-nl 2030-02-03T12:34:56+02:00`.
 Pass `clear` to remove it, or omit the timestamp to show the stored value. The
 date is stored in SQLite and appears in the operator panel without a restart.
-It does not affect routing or health checks.
+At the deadline the gateway excludes the upstream from client routing and drops
+its pinned flows. Renewal makes it eligible again under the existing health and
+route rules. No expiry means no time restriction.
 
 | Key | Meaning |
 |---|---|
@@ -805,6 +807,12 @@ The same response includes the subscription expiry. The provider sends a wall-cl
 date, so set `outline_usage.expiration_time_zone` to its named time zone if it differs
 from the web process's `TZ`. When an automatic date is unavailable, the panel uses the
 upstream's stored expiry, if present.
+The gateway excludes an Outline upstream when the API reports zero remaining
+data or its subscription expires. It applies the last confirmed reading during
+API outages, including across restarts. Unknown values impose no restriction,
+and editing the mapping for an upstream invalidates the previous key's reading.
+The operator sees the reason. In the device form the exit is temporarily
+unavailable and remains selectable for use when it returns.
 
 ### Operators and passkeys
 
