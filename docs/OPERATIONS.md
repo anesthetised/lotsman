@@ -142,9 +142,10 @@ directory's mode is yours to set (the unit uses `StateDirectoryMode=0700`).
 
 `/etc/lotsman/lotsman.yaml` — see `deploy/lotsman.example.yaml` for a commented example.
 
-An upstream can have an optional `expires_at` timestamp such as
-`2030-02-03T12:34:56+02:00`. It appears in the operator panel and can be
-reloaded without replacing the link. It does not change routing or health checks.
+Set a subscription expiry with `lotsman upstream expiry ac-nl 2030-02-03T12:34:56+02:00`.
+Pass `clear` to remove it, or omit the timestamp to show the stored value. The
+date is stored in SQLite and appears in the operator panel without a restart.
+It does not affect routing or health checks.
 
 | Key | Meaning |
 |---|---|
@@ -803,7 +804,7 @@ returned quota data for an upstream, its quota is shown as unavailable.
 The same response includes the subscription expiry. The provider sends a wall-clock
 date, so set `outline_usage.expiration_time_zone` to its named time zone if it differs
 from the web process's `TZ`. When an automatic date is unavailable, the panel uses the
-upstream's configured `expires_at`, if present.
+upstream's stored expiry, if present.
 
 ### Operators and passkeys
 

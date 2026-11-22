@@ -110,6 +110,7 @@ type Daemon struct {
 	transfers map[*Upstream]*transferState // throughput health while health.transfer is set
 	speeds    map[*Upstream]*speedState    // speed tests while health.speed is set
 	incidents map[incidentKey]*openIncident
+	expiries  map[string]time.Time // operator subscription metadata, refreshed on reconcile
 
 	// Monotonic counters for metrics.
 	probes   map[string]*[2]uint64 // upstream → {ok, fail}
@@ -488,7 +489,6 @@ func (d *Daemon) Reload(ctx context.Context, cfg *config.Config) error {
 			// upstream down.
 			if err != nil {
 				errs = append(errs, err)
-				u.ExpiresAt = old.ExpiresAt
 			}
 			// Labels and limits apply live. Keep the settings of the
 			// running link when a replacement fails.
@@ -1217,6 +1217,11 @@ func (d *Daemon) reconcile() error {
 		exits[u.Name] = u.Rights.Exits
 	}
 	var errs []error
+	if expiries, err := d.store.UpstreamExpiries(); err == nil {
+		d.expiries = expiries
+	} else {
+		errs = append(errs, fmt.Errorf("read upstream subscription expiries: %w", err))
+	}
 	wanted := map[awgconf.Key]bool{}
 	for _, p := range peers {
 		wanted[p.PublicKey] = true
@@ -1348,7 +1353,7 @@ type UpstreamStatus struct {
 	Kind          string
 	Geo           string
 	Provider      string
-	ExpiresAt     time.Time
+	ExpiresAt     time.Time `json:"-"` // only included in the live operator API
 	Interface     string
 	State         health.State
 	Degraded      bool // reachable, but failing its transfer probes
@@ -1395,7 +1400,7 @@ func (d *Daemon) Status() Status {
 		return cmp.Or(strings.Compare(a.User, b.User), strings.Compare(a.Device, b.Device))
 	})
 	for _, u := range d.ups {
-		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Geo: u.Geo, Provider: u.Provider, ExpiresAt: u.ExpiresAt, Interface: u.InterfaceName(), State: u.Tracker.State(), Degraded: d.degraded(u),
+		s := UpstreamStatus{Name: u.Name, Kind: u.Kind, Geo: u.Geo, Provider: u.Provider, ExpiresAt: d.expiries[u.Name], Interface: u.InterfaceName(), State: u.Tracker.State(), Degraded: d.degraded(u),
 			Latency: u.Tracker.Latency(), Routed: routed[u.Name], Active: active[u.Name], Speed: d.speedOf(u), Incidents: d.openKinds(u.Name)}
 		if peer := u.link.Stats().Peer; peer != nil {
 			s.LastHandshake = peer.LastHandshake

@@ -53,11 +53,14 @@ test("subscription expiry appears before traffic in the server's time zone", asy
   const firstRate = await page.getByRole("columnheader", { name: "Down", exact: true }).evaluate((th: HTMLTableCellElement) => th.cellIndex);
   expect(index).toBeLessThan(firstRate);
   const row = (name: string) => page.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) });
-  await expect(row("nl-1").locator(":scope > *").nth(index)).toHaveText(/5:34:56 AM EST/);
+  await expect(row("nl-1").locator(":scope > *").nth(index)).toHaveText("02/03/2030, 05:34:56");
   await expect(row("lv-1").locator(":scope > *").nth(index)).toHaveText("—");
   await page.getByRole("link", { name: "nl-1", exact: true }).click();
   await expect(page.getByText("Subscription expires", { exact: true })).toBeVisible();
-  await expect(page.getByText(/5:34:56 AM EST/)).toBeVisible();
+  await expect(page.getByText("02/03/2030, 05:34:56", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Language" }).click();
+  await page.getByRole("menuitemradio", { name: "Русский" }).click();
+  await expect(page.getByText("03.02.2030, 05:34:56", { exact: true })).toBeVisible();
 });
 
 test("the gateway totals and an upstream's page", async ({ page }) => {

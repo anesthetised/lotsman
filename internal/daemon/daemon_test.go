@@ -644,23 +644,26 @@ func TestReload(t *testing.T) {
 		t.Errorf("health state lost on no-op reload: %v -> %v", before[0].State, after[0].State)
 	}
 
-	same.Upstreams[0].ExpiresAt = time.Date(2030, 2, 3, 10, 34, 56, 0, time.UTC)
-	if err := h.d.Reload(ctx, same); err != nil {
+	expiry := time.Date(2030, 2, 3, 10, 34, 56, 0, time.UTC)
+	if err := h.st.SetUpstreamExpiry("nl", expiry); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.d.Reconcile(); err != nil {
 		t.Fatal(err)
 	}
 	h.d.mu.Lock()
 	sameDevice = h.d.ups[0].link == nlDevice
 	h.d.mu.Unlock()
-	if !sameDevice || !h.d.Status().Upstreams[0].ExpiresAt.Equal(same.Upstreams[0].ExpiresAt) {
-		t.Error("subscription expiry should reload without replacing the link")
+	if !sameDevice || !h.d.Status().Upstreams[0].ExpiresAt.Equal(expiry) {
+		t.Error("subscription expiry should update without replacing the link")
 	}
 	broken, _ := config.Parse([]byte(fmt.Sprintf(harnessConfig, h.dir, h.dir, h.dir)))
 	broken.Upstreams[0].Conf = filepath.Join(h.dir, "missing.conf")
 	if err := h.d.Reload(ctx, broken); err == nil {
 		t.Fatal("missing replacement config was accepted")
 	}
-	if got := h.d.Status().Upstreams[0].ExpiresAt; !got.Equal(same.Upstreams[0].ExpiresAt) {
-		t.Errorf("expiry of retained upstream = %v, want %v", got, same.Upstreams[0].ExpiresAt)
+	if got := h.d.Status().Upstreams[0].ExpiresAt; !got.Equal(expiry) {
+		t.Errorf("expiry of retained upstream = %v, want %v", got, expiry)
 	}
 
 	// Settings that need a restart reject the reload as a whole.

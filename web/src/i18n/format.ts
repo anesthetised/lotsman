@@ -46,7 +46,10 @@ export function formatters(locale: string, timeZone?: string): Formatters {
   const relative = new Intl.RelativeTimeFormat(locale, { numeric: "auto" });
   const percent = new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 });
   const dateTime = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "short", timeZone });
-  const preciseDateTime = new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeStyle: "long", timeZone });
+  const preciseDateTime = new Intl.DateTimeFormat(locale, {
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZone,
+  });
   const time = new Intl.DateTimeFormat(locale, { timeStyle: "medium", timeZone });
   const count = new Intl.NumberFormat(locale);
   const regions = new Intl.DisplayNames(locale, { type: "region", fallback: "code" });

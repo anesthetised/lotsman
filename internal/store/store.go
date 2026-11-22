@@ -187,6 +187,10 @@ var migrations = []string{
 		devices  INTEGER NOT NULL
 	);
 	CREATE UNIQUE INDEX incidents_open ON incidents (upstream, kind) WHERE ended IS NULL;`,
+	`CREATE TABLE upstream_subscriptions (
+		upstream   TEXT NOT NULL PRIMARY KEY,
+		expires_at TEXT NOT NULL
+	) WITHOUT ROWID;`,
 }
 
 type User struct {

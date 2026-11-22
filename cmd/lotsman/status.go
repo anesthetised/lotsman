@@ -78,6 +78,46 @@ func upstreamStatus(configPath string) error {
 	return w.Flush()
 }
 
+func upstreamExpiry(configPath string, args []string) error {
+	if len(args) < 1 || len(args) > 2 {
+		return fmt.Errorf("usage: upstream expiry NAME [TIME|clear]")
+	}
+	var expiry time.Time
+	if len(args) == 2 && args[1] != "clear" {
+		var err error
+		expiry, err = time.Parse(time.RFC3339, args[1])
+		if err != nil {
+			return fmt.Errorf("expiry must be an RFC 3339 timestamp: %w", err)
+		}
+	}
+	e, err := openEnv(configPath)
+	if err != nil {
+		return err
+	}
+	defer e.store.Close()
+	name := args[0]
+	if !slices.ContainsFunc(e.cfg.Upstreams, func(u config.Upstream) bool { return u.Name == name }) {
+		return fmt.Errorf("unknown upstream %q", name)
+	}
+	if len(args) == 1 {
+		expiries, err := e.store.UpstreamExpiries()
+		if err != nil {
+			return err
+		}
+		if expiry := expiries[name]; !expiry.IsZero() {
+			fmt.Println(expiry.Format(time.RFC3339Nano))
+		} else {
+			fmt.Println("-")
+		}
+		return nil
+	}
+	if err := e.store.SetUpstreamExpiry(name, expiry); err != nil {
+		return err
+	}
+	nudgeDaemon(e)
+	return nil
+}
+
 // speedText is a speed test's rates as down/up in megabits per second, or
 // "-" before the first test.
 func speedText(s health.Speed) string {

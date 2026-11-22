@@ -40,21 +40,6 @@ func TestParseAppliesDefaults(t *testing.T) {
 	}
 }
 
-func TestUpstreamExpiresAt(t *testing.T) {
-	yaml := strings.Replace(minimal, "    geo: NL", "    expires_at: 2030-02-03T12:34:56+02:00\n    geo: NL", 1)
-	cfg, err := Parse([]byte(yaml))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := time.Date(2030, 2, 3, 10, 34, 56, 0, time.UTC)
-	if !cfg.Upstreams[0].ExpiresAt.Equal(want) || !cfg.Upstreams[1].ExpiresAt.IsZero() {
-		t.Fatalf("expiry = %v, %v", cfg.Upstreams[0].ExpiresAt, cfg.Upstreams[1].ExpiresAt)
-	}
-	if _, err := Parse([]byte(strings.Replace(yaml, "2030-02-03T12:34:56+02:00", "invalid", 1))); err == nil {
-		t.Fatal("invalid expiry accepted")
-	}
-}
-
 func TestDisableUDPGSOOnlyForAWG(t *testing.T) {
 	for _, kind := range []string{KindAWG, KindOutline, KindVLESS} {
 		t.Run(kind, func(t *testing.T) {
