@@ -71,9 +71,14 @@ func (s *Store) CloseOpenIncidents(ended time.Time, note string) error {
 // Incidents returns up to limit incidents of the upstream, or of every
 // upstream when it is "": the open ones first, then the newest.
 func (s *Store) Incidents(upstream string, limit int) ([]Incident, error) {
+	return s.IncidentsPage(upstream, limit, 0)
+}
+
+// IncidentsPage skips offset incidents in the same order as Incidents.
+func (s *Store) IncidentsPage(upstream string, limit, offset int) ([]Incident, error) {
 	rows, err := s.db.Query(`SELECT id, upstream, kind, started, ended, detail, devices FROM incidents
 		WHERE ?1 = '' OR upstream = ?1
-		ORDER BY ended IS NOT NULL, started DESC, id DESC LIMIT ?2`, upstream, limit)
+		ORDER BY ended IS NOT NULL, started DESC, id DESC LIMIT ?2 OFFSET ?3`, upstream, limit, offset)
 	if err != nil {
 		return nil, err
 	}

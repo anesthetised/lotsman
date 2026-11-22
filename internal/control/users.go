@@ -36,21 +36,34 @@ type Users interface {
 // userService is the operator's: any user, no limits.
 type userService struct{ users Users }
 
-func (s userService) List(context.Context, *lotsmanv1.ListUsersRequest) (*lotsmanv1.ListUsersResponse, error) {
+func (s userService) List(_ context.Context, req *lotsmanv1.ListUsersRequest) (*lotsmanv1.ListUsersResponse, error) {
 	st := s.users.Store()
-	users, err := st.ListUsers()
+	limit := int(req.GetLimit())
+	if limit > 200 || (limit == 0 && req.GetOffset() != 0) {
+		return nil, connect.NewError(connect.CodeInvalidArgument, "pagination requires a limit from 1 to 200")
+	}
+	var users []store.User
+	var peers []store.Peer
+	var err error
+	switch {
+	case limit > 0:
+		users, peers, err = st.UsersPage(req.GetUser(), limit+1, int(req.GetOffset()))
+	case req.GetUser() != "":
+		users, peers, err = st.UsersPage(req.GetUser(), 1, 0)
+	default:
+		peers, users, err = st.PeersAndUsers()
+	}
 	if err != nil {
 		return nil, internal(err)
 	}
-	peers, err := st.ListPeers()
-	if err != nil {
-		return nil, internal(err)
+	res := &lotsmanv1.ListUsersResponse{HasMore: limit > 0 && len(users) > limit}
+	if res.HasMore {
+		users = users[:limit]
 	}
 	byUser := map[string][]store.Peer{}
 	for _, p := range peers {
 		byUser[p.User] = append(byUser[p.User], p)
 	}
-	res := &lotsmanv1.ListUsersResponse{}
 	for _, u := range users {
 		res.Users = append(res.Users, userMessage(u, byUser[u.Name]))
 	}

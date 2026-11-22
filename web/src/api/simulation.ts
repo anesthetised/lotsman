@@ -412,11 +412,11 @@ export class Simulation {
    * The incident log, of one upstream or (empty) of all: open ones first,
    * then newest, at most `limit` (0: 200), as IncidentService.List answers.
    */
-  listIncidents(upstream = "", limit = 0): Incident[] {
+  listIncidents(upstream = "", limit = 200, offset = 0): Incident[] {
     return this.incidents
       .filter((i) => !upstream || i.upstream === upstream)
       .sort((a, b) => Number(!b.ended) - Number(!a.ended) || b.started - a.started)
-      .slice(0, limit || 200)
+      .slice(offset, offset + limit)
       .map((i) =>
         create(IncidentSchema, {
           id: i.id,

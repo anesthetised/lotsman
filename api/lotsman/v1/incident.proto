@@ -37,7 +37,9 @@ message Incident {
 message ListIncidentsRequest {
   string upstream = 1; // empty: every upstream
   uint32 limit = 2; // 0: 200
+  uint32 offset = 3;
 }
 message ListIncidentsResponse {
   repeated Incident incidents = 1;
+  bool has_more = 2;
 }

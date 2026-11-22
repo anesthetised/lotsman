@@ -43,7 +43,7 @@ function allowedExits(upstreams: readonly UpstreamStatus[], rights: Rights): Ups
 function Detail(props: { name: string }) {
   const { t, c } = useConsoleI18n();
   const navigate = useNavigate();
-  const list = createMemo(() => admin.users.list({}));
+  const list = createMemo(() => admin.users.list({ user: props.name }));
   const snapshot = createLive((signal) => api.status.watch({}, { signal }));
   const user = () => list().users.find((u) => u.name === props.name);
   return (

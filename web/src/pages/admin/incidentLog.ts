@@ -43,17 +43,6 @@ export function worstLevel(kinds: readonly IncidentKind[]): Level {
   return kinds.some((k) => incidentLevel(k) === "bad") ? "bad" : "warn";
 }
 
-/** Open incidents first, then newest; ties in a fixed order by id. The input is untouched. */
-export function sortIncidents(list: readonly Incident[]): Incident[] {
-  const started = (i: Incident) => (i.started ? timestampMs(i.started) : 0);
-  return [...list].sort((a, b) => {
-    const open = Number(b.ended === undefined) - Number(a.ended === undefined);
-    if (open !== 0) return open;
-    const newer = started(b) - started(a);
-    return newer !== 0 ? newer : a.id.localeCompare(b.id);
-  });
-}
-
 /** How many incidents are open across the upstreams of a snapshot. */
 export function openCount(upstreams: readonly UpstreamStatus[]): number {
   return upstreams.reduce((n, u) => n + u.incidents.length, 0);

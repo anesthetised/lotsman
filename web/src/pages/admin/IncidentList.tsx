@@ -3,7 +3,7 @@
 // incidents on the overview and its own page.
 
 import { timestampDate } from "@bufbuild/protobuf/wkt";
-import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js";
+import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js";
 import { admin } from "../../api/admin";
 import type { IncidentKind } from "../../gen/lotsman/v1/incident_pb";
 import { useI18n } from "../../i18n";
@@ -12,7 +12,8 @@ import { buttonClass } from "../../ui/button";
 import { WarningIcon } from "../../ui/icons";
 import { StateBadge } from "../../ui/StateBadge";
 import { LiveError } from "../LiveError";
-import { incidentDuration, incidentKind, incidentLevel, incidentsPath, sortIncidents, worstLevel } from "./incidentLog";
+import { incidentDuration, incidentKind, incidentLevel, incidentsPath, worstLevel } from "./incidentLog";
+import { pageSize, Pagination } from "./Pagination";
 
 export interface IncidentLogProps {
   /** One upstream's incidents, or (empty) every upstream's. */
@@ -31,7 +32,9 @@ export function IncidentLog(props: IncidentLogProps) {
   return (
     <Errored fallback={(error, reset) => <LiveError error={error()} retry={reset} />}>
       <Loading fallback={<p class="text-muted">{t.common.connecting}</p>}>
-        <IncidentTable {...props} />
+        <For each={[JSON.stringify([props.upstream, props.openKey])]} keyed={(key) => key}>
+          {() => <IncidentTable {...props} />}
+        </For>
       </Loading>
     </Errored>
   );
@@ -39,10 +42,10 @@ export function IncidentLog(props: IncidentLogProps) {
 
 function IncidentTable(props: IncidentLogProps) {
   const { fmt, c } = useConsoleI18n();
+  const [page, setPage] = createSignal(0);
   const list = createMemo(async () => {
-    void props.openKey; // tracked: fetch again when an incident opens or closes
-    const res = await admin.incidents.list({ upstream: props.upstream });
-    return { incidents: sortIncidents(res.incidents), fetched: new Date() };
+    const res = await admin.incidents.list({ upstream: props.upstream, limit: pageSize, offset: page() * pageSize });
+    return { incidents: res.incidents, hasMore: res.hasMore, fetched: new Date() };
   });
   const rows = () => list().incidents;
   const open = () => rows().filter((i) => i.ended === undefined).length;
@@ -59,7 +62,7 @@ function IncidentTable(props: IncidentLogProps) {
         when={rows().length > 0}
         fallback={
           <p class="rounded-lg border border-line bg-surface p-4 text-muted">
-            {props.upstream ? c.incidents.emptyFor(props.upstream) : c.incidents.empty}
+            {page() > 0 ? c.pagination.empty : props.upstream ? c.incidents.emptyFor(props.upstream) : c.incidents.empty}
           </p>
         }
       >
@@ -122,6 +125,7 @@ function IncidentTable(props: IncidentLogProps) {
           </table>
         </div>
       </Show>
+      <Pagination page={page()} hasMore={list().hasMore} onPage={setPage} />
     </div>
   );
 }

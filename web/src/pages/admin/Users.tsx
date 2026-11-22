@@ -12,6 +12,7 @@ import { Dialog } from "../../ui/Dialog";
 import { LiveError } from "../LiveError";
 import { ApiError } from "./ApiError";
 import { rightsSummary, userPath } from "./devices";
+import { pageSize, Pagination } from "./Pagination";
 
 export default function Users() {
   const { t } = useI18n();
@@ -26,7 +27,8 @@ export default function Users() {
 
 function UserList() {
   const { t, fmt, c } = useConsoleI18n();
-  const list = createMemo(() => admin.users.list({}));
+  const [page, setPage] = createSignal(0);
+  const list = createMemo(() => admin.users.list({ limit: pageSize, offset: page() * pageSize }));
   const users = () => list().users;
   return (
     <div class="space-y-4">
@@ -34,7 +36,10 @@ function UserList() {
         <h1 class="text-lg font-semibold">{c.users.title}</h1>
         <AddUser />
       </div>
-      <Show when={users().length > 0} fallback={<p class="rounded-lg border border-line bg-surface p-4 text-muted">{c.users.empty}</p>}>
+      <Show
+        when={users().length > 0}
+        fallback={<p class="rounded-lg border border-line bg-surface p-4 text-muted">{page() === 0 ? c.users.empty : c.pagination.empty}</p>}
+      >
         <div class="overflow-x-auto rounded-lg border border-line bg-surface">
           <table class="w-full min-w-[40rem]">
             <thead class="text-left text-xs text-muted">
@@ -70,6 +75,7 @@ function UserList() {
           </table>
         </div>
       </Show>
+      <Pagination page={page()} hasMore={list().hasMore} onPage={setPage} />
     </div>
   );
 }

@@ -9,6 +9,13 @@ function plural(n: number, one: string, few: string, many: string): string {
 }
 
 export const consoleRu: ConsoleDict = {
+  pagination: {
+    label: "Страницы",
+    previous: "Предыдущая страница",
+    next: "Следующая страница",
+    page: (number: string) => `Страница ${number}`,
+    empty: "На этой странице нет записей.",
+  },
   failed: (message: string) => `Не получилось: ${message}`,
   overview: {
     totals: "Шлюз",
@@ -53,7 +60,7 @@ export const consoleRu: ConsoleDict = {
     devicesHint: "Шли через выход, когда инцидент начался",
     detail: "Подробности",
     caption: "Инциденты: сначала открытые, затем новые",
-    summary: (open: number, total: number) => `открытых: ${open} · всего в журнале: ${total}`,
+    summary: (open: number, total: number) => `открытых: ${open} · всего на странице: ${total}`,
     empty: "Инцидентов нет: проверки не нашли неполадок.",
     emptyFor: (name: string) => `У ${name} инцидентов нет.`,
     refresh: "Обновить",

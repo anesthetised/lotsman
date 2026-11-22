@@ -252,7 +252,7 @@ test("the incident log: the count in the navigation, open ones first, a filter b
   await expect(rows.nth(3)).toContainText("Send errors");
   await expect(rows.nth(3)).toContainText("7 min");
   await expect(rows.nth(3)).toContainText("sendmmsg: message too long");
-  await expect(page.getByText("2 open · 6 in the log")).toBeVisible();
+  await expect(page.getByText("2 open · 6 on this page")).toBeVisible();
 
   // Refresh fetches it again.
   const updated = page.getByText(/^updated /);

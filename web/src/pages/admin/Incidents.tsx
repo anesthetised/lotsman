@@ -30,7 +30,7 @@ function LiveIncidents() {
   const [params, setParams] = useSearchParams<{ upstream: string }>();
   const upstream = () => params.upstream ?? "";
   const status = createLive((signal) => api.status.watch({}, { signal }));
-  const key = createMemo(() => openKey(status().upstreams));
+  const key = createMemo(() => openKey(status().upstreams.filter((u) => !upstream() || u.name === upstream())));
   const now = () => (status().time ? timestampDate(status().time!) : new Date());
   // The gateway's upstreams, and the one asked for even when it has gone
   // from the config: its incidents stay in the log.

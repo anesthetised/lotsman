@@ -382,7 +382,29 @@ func (s *Store) DeleteUser(name string) error {
 }
 
 func (s *Store) ListUsers() ([]User, error) {
-	return queryUsers(s.db, "")
+	return queryUsers(s.db, "ORDER BY u.name")
+}
+
+// UsersPage reads the selected users and only their peers, in one snapshot.
+// An empty name includes every user. A limit of -1 includes every match.
+func (s *Store) UsersPage(name string, limit, offset int) ([]User, []Peer, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, nil, err
+	}
+	defer tx.Rollback()
+	clause := "ORDER BY u.name LIMIT ? OFFSET ?"
+	args := []any{limit, offset}
+	if name != "" {
+		clause = "WHERE u.name = ? " + clause
+		args = []any{name, limit, offset}
+	}
+	users, err := queryUsers(tx, clause, args...)
+	if err != nil || len(users) == 0 {
+		return users, nil, err
+	}
+	peers, err := queryPeers(tx, "WHERE p.user_id IN (SELECT u.id FROM users u "+clause+")", args...)
+	return users, peers, err
 }
 
 // User returns the user of that name; ErrNotFound if there is none.
@@ -397,10 +419,10 @@ func (s *Store) User(name string) (User, error) {
 	return users[0], nil
 }
 
-func queryUsers(q querier, where string, args ...any) ([]User, error) {
+func queryUsers(q querier, clause string, args ...any) ([]User, error) {
 	rows, err := q.Query(`SELECT u.id, u.name, u.created_at, u.edit_routes, u.show_providers, u.exits,
 		EXISTS (SELECT 1 FROM user_links l WHERE l.user_id = u.id AND l.revoked_at IS NULL)
-		FROM users u `+where+` ORDER BY u.name`, args...)
+		FROM users u `+clause, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -560,7 +582,7 @@ func (s *Store) PeersAndUsers() ([]Peer, []User, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	users, err := queryUsers(tx, "")
+	users, err := queryUsers(tx, "ORDER BY u.name")
 	if err != nil {
 		return nil, nil, err
 	}

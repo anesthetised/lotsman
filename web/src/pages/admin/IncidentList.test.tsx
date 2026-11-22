@@ -5,7 +5,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@solidjs/te
 import { createSignal } from "solid-js";
 import { afterEach, expect, test, vi } from "vitest";
 import { admin } from "../../api/admin";
-import { IncidentKind } from "../../gen/lotsman/v1/incident_pb";
+import { create } from "@bufbuild/protobuf";
+import { IncidentKind, ListIncidentsResponseSchema } from "../../gen/lotsman/v1/incident_pb";
 import { IncidentBadge, IncidentLog } from "./IncidentList";
 
 afterEach(() => {
@@ -25,7 +26,7 @@ test("lists every upstream's incidents, open first, then newest", async () => {
   expect(rows[2]!.textContent).toContain("7 min");
   expect(rows[2]!.textContent).not.toContain("Ongoing");
   expect(within(rows[0]!).getByRole("link", { name: "nl-1" }).getAttribute("href")).toBe("/admin/upstreams/nl-1");
-  expect(screen.getByText("2 open · 6 in the log")).toBeTruthy();
+  expect(screen.getByText("2 open · 6 on this page")).toBeTruthy();
 });
 
 test("one upstream's incidents leave out the upstream column; none reads as such", async () => {
@@ -60,4 +61,30 @@ test("fetches the list again when an incident opens or closes, and on Refresh", 
   fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
   await waitFor(() => expect(list).toHaveBeenCalledTimes(3));
   expect(list.mock.calls.every(([req]) => req.upstream === "")).toBe(true);
+});
+
+test("switches pages, fetches the selected page again and starts over when the filter changes", async () => {
+  const list = vi.spyOn(admin.incidents, "list").mockImplementation(async (req) =>
+    create(ListIncidentsResponseSchema, {
+      hasMore: !req.offset && !req.upstream,
+      incidents: [{ id: String(req.offset), upstream: req.upstream || "nl-1", detail: req.offset ? "Older entry" : "First entry" }],
+    }),
+  );
+  const [upstream, setUpstream] = createSignal("");
+  render(() => <IncidentLog upstream={upstream()} openKey="" now={new Date()} showUpstream />);
+  await screen.findByText("First entry");
+  fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  await screen.findByText("Older entry");
+  expect(screen.getByText("Page 2")).toBeTruthy();
+  expect(list).toHaveBeenLastCalledWith({ upstream: "", limit: 25, offset: 25 });
+  expect((screen.getByRole("button", { name: "Next page" }) as HTMLButtonElement).disabled).toBe(true);
+
+  fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+  await waitFor(() => expect(list).toHaveBeenCalledTimes(3));
+  expect(list).toHaveBeenLastCalledWith({ upstream: "", limit: 25, offset: 25 });
+
+  setUpstream("nl-1");
+  await screen.findByText("First entry");
+  expect(list).toHaveBeenLastCalledWith({ upstream: "nl-1", limit: 25, offset: 0 });
+  expect(screen.queryByRole("navigation", { name: "Pagination" })).toBeNull();
 });
