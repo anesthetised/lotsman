@@ -196,10 +196,12 @@ test("the connections table updates live, sorts and filters by peer", async ({ p
   await expect(table.getByRole("row")).toHaveCount(26); // header + the fake's cap of 25
   await expect(page.getByRole("status")).toHaveText("Only the 25 fastest are shown; the gateway left the rest out.");
   await expect(table.getByRole("columnheader", { name: "Down rate" })).toHaveAttribute("aria-sort", "descending");
+  await expect(table.getByRole("columnheader", { name: "Last traffic" })).toBeVisible();
 
   // Rates arrive from the second update and keep changing.
   const first = table.getByRole("row").nth(1);
   await expect(first).not.toContainText(/\s0 bit\/s\s+0 bit\/s/, { timeout: 5000 });
+  await expect(first.locator("time")).toHaveAttribute("datetime", /T\d{2}:\d{2}:\d{2}/);
   const before = await table.textContent();
   await expect(table).not.toHaveText(before!, { timeout: 5000 });
 

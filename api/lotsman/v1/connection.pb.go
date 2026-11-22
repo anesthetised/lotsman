@@ -199,6 +199,7 @@ type Connection struct {
 	Upstream      string                 `protobuf:"bytes,5,opt,name=upstream,proto3" json:"upstream,omitempty"`
 	Started       *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=started,proto3" json:"started,omitempty"`
 	Traffic       *Traffic               `protobuf:"bytes,7,opt,name=traffic,proto3" json:"traffic,omitempty"`
+	LastTraffic   *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_traffic,json=lastTraffic,proto3" json:"last_traffic,omitempty"` // latest snapshot with new bytes on this watch; unset until observed
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -282,6 +283,13 @@ func (x *Connection) GetTraffic() *Traffic {
 	return nil
 }
 
+func (x *Connection) GetLastTraffic() *timestamppb.Timestamp {
+	if x != nil {
+		return x.LastTraffic
+	}
+	return nil
+}
+
 var File_lotsman_v1_connection_proto protoreflect.FileDescriptor
 
 const file_lotsman_v1_connection_proto_rawDesc = "" +
@@ -294,7 +302,7 @@ const file_lotsman_v1_connection_proto_rawDesc = "" +
 	"\x12ConnectionSnapshot\x12.\n" +
 	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x128\n" +
 	"\vconnections\x18\x02 \x03(\v2\x16.lotsman.v1.ConnectionR\vconnections\x12\x1c\n" +
-	"\ttruncated\x18\x03 \x01(\bR\ttruncated\"\x92\x02\n" +
+	"\ttruncated\x18\x03 \x01(\bR\ttruncated\"\xd1\x02\n" +
 	"\n" +
 	"Connection\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x120\n" +
@@ -303,7 +311,8 @@ const file_lotsman_v1_connection_proto_rawDesc = "" +
 	"\vdestination\x18\x04 \x01(\tR\vdestination\x12\x1a\n" +
 	"\bupstream\x18\x05 \x01(\tR\bupstream\x124\n" +
 	"\astarted\x18\x06 \x01(\v2\x1a.google.protobuf.TimestampR\astarted\x12-\n" +
-	"\atraffic\x18\a \x01(\v2\x13.lotsman.v1.TrafficR\atraffic*[\n" +
+	"\atraffic\x18\a \x01(\v2\x13.lotsman.v1.TrafficR\atraffic\x12=\n" +
+	"\flast_traffic\x18\b \x01(\v2\x1a.google.protobuf.TimestampR\vlastTraffic*[\n" +
 	"\bProtocol\x12\x18\n" +
 	"\x14PROTOCOL_UNSPECIFIED\x10\x00\x12\x10\n" +
 	"\fPROTOCOL_TCP\x10\x01\x12\x10\n" +
@@ -342,13 +351,14 @@ var file_lotsman_v1_connection_proto_depIdxs = []int32{
 	0, // 3: lotsman.v1.Connection.protocol:type_name -> lotsman.v1.Protocol
 	5, // 4: lotsman.v1.Connection.started:type_name -> google.protobuf.Timestamp
 	6, // 5: lotsman.v1.Connection.traffic:type_name -> lotsman.v1.Traffic
-	1, // 6: lotsman.v1.ConnectionService.Watch:input_type -> lotsman.v1.WatchConnectionsRequest
-	2, // 7: lotsman.v1.ConnectionService.Watch:output_type -> lotsman.v1.ConnectionSnapshot
-	7, // [7:8] is the sub-list for method output_type
-	6, // [6:7] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	5, // 6: lotsman.v1.Connection.last_traffic:type_name -> google.protobuf.Timestamp
+	1, // 7: lotsman.v1.ConnectionService.Watch:input_type -> lotsman.v1.WatchConnectionsRequest
+	2, // 8: lotsman.v1.ConnectionService.Watch:output_type -> lotsman.v1.ConnectionSnapshot
+	8, // [8:9] is the sub-list for method output_type
+	7, // [7:8] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_lotsman_v1_connection_proto_init() }

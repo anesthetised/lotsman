@@ -66,6 +66,7 @@ type Flow struct {
 	Destination netip.AddrPort
 	Upstream    string
 	Started     time.Time // zero when unknown
+	LastTraffic time.Time // zero until this meter sees new bytes
 	DownBytes   uint64    // since the flow started
 	UpBytes     uint64
 	DownRate    uint64 // bytes per second since the previous snapshot
@@ -103,6 +104,7 @@ type record struct {
 	orig, reply uint64
 	start       time.Time // from the kernel
 	started     time.Time // reported: the kernel's start, else when first seen
+	lastTraffic time.Time // latest snapshot that saw new bytes
 }
 
 // Snapshot reads the table and returns the current flows of clients that are
@@ -142,6 +144,7 @@ func (m *Meter) Snapshot() (Snapshot, error) {
 		case known && cur.orig >= prev.orig && cur.reply >= prev.reply && cur.start.Equal(prev.start):
 			up, down = cur.orig-prev.orig, cur.reply-prev.reply
 			cur.started = prev.started
+			cur.lastTraffic = prev.lastTraffic
 		case !m.polled.IsZero():
 			// New since the previous snapshot, or the tuple was reused by a
 			// new flow (counters went back or the start moved): all of its
@@ -151,10 +154,13 @@ func (m *Meter) Snapshot() (Snapshot, error) {
 				cur.started = now
 			}
 		}
+		if up > 0 || down > 0 {
+			cur.lastTraffic = now
+		}
 		seen[k] = cur
 		out = append(out, Flow{
 			PeerID: p.ID, Protocol: e.Protocol, Source: e.Source, Destination: e.Destination,
-			Upstream: p.Upstream, Started: cur.started,
+			Upstream: p.Upstream, Started: cur.started, LastTraffic: cur.lastTraffic,
 			DownBytes: e.ReplyBytes, UpBytes: e.OrigBytes,
 			DownRate: rate(down, elapsed), UpRate: rate(up, elapsed),
 		})
