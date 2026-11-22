@@ -108,10 +108,10 @@ func (d *Daemon) routedTo(upstream string) int {
 	return n
 }
 
-// Incidents lists up to limit incidents of the upstream, or of every
+// IncidentsPage lists up to limit incidents of the upstream, or of every
 // upstream when it is "": the open ones first, then the newest.
-func (d *Daemon) Incidents(upstream string, limit int) ([]store.Incident, error) {
-	return d.store.Incidents(upstream, limit)
+func (d *Daemon) IncidentsPage(upstream string, limit, offset int) ([]store.Incident, error) {
+	return d.store.IncidentsPage(upstream, limit, offset)
 }
 
 // deviceErrors counts the errors an AWG upstream's device logs, such as

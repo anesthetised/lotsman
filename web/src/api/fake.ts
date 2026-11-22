@@ -64,7 +64,17 @@ export function createFakeTransport(options: FakeOptions = {}): Transport {
       },
     });
     service(UserService, {
-      list: () => (operator(), { users: sim.listUsers() }),
+      list: (req) => {
+        operator();
+        if (req.limit > 200 || (req.limit === 0 && req.offset !== 0)) {
+          throw new ConnectError("pagination requires a limit from 1 to 200", Code.InvalidArgument);
+        }
+        const users = sim.listUsers().filter((u) => !req.user || u.name === req.user);
+        if (!req.limit) return { users };
+        users.sort((a, b) => a.name === b.name ? 0 : a.name < b.name ? -1 : 1);
+        const end = req.offset + req.limit;
+        return { users: users.slice(req.offset, end), hasMore: end < users.length };
+      },
       addUser: (req) => (operator(), sim.addUser(req.user)),
       setRights: (req) => {
         operator();
@@ -85,7 +95,12 @@ export function createFakeTransport(options: FakeOptions = {}): Transport {
       peer: (req) => (operator(), history("peer", req)),
     });
     service(IncidentService, {
-      list: (req) => (operator(), { incidents: sim.listIncidents(req.upstream, req.limit) }),
+      list: (req) => {
+        operator();
+        const limit = req.limit || 200;
+        const rows = sim.listIncidents(req.upstream, limit + 1, req.offset);
+        return { incidents: rows.slice(0, limit), hasMore: rows.length > limit };
+      },
     });
   }, { transport: { interceptors: options.interceptors } });
 }

@@ -179,6 +179,7 @@ type ListIncidentsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Upstream      string                 `protobuf:"bytes,1,opt,name=upstream,proto3" json:"upstream,omitempty"` // empty: every upstream
 	Limit         uint32                 `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"`      // 0: 200
+	Offset        uint32                 `protobuf:"varint,3,opt,name=offset,proto3" json:"offset,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -227,9 +228,17 @@ func (x *ListIncidentsRequest) GetLimit() uint32 {
 	return 0
 }
 
+func (x *ListIncidentsRequest) GetOffset() uint32 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
 type ListIncidentsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Incidents     []*Incident            `protobuf:"bytes,1,rep,name=incidents,proto3" json:"incidents,omitempty"`
+	HasMore       bool                   `protobuf:"varint,2,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -271,6 +280,13 @@ func (x *ListIncidentsResponse) GetIncidents() []*Incident {
 	return nil
 }
 
+func (x *ListIncidentsResponse) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
+}
+
 var File_lotsman_v1_incident_proto protoreflect.FileDescriptor
 
 const file_lotsman_v1_incident_proto_rawDesc = "" +
@@ -284,12 +300,14 @@ const file_lotsman_v1_incident_proto_rawDesc = "" +
 	"\astarted\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\astarted\x120\n" +
 	"\x05ended\x18\x05 \x01(\v2\x1a.google.protobuf.TimestampR\x05ended\x12\x16\n" +
 	"\x06detail\x18\x06 \x01(\tR\x06detail\x12\x18\n" +
-	"\adevices\x18\a \x01(\rR\adevices\"H\n" +
+	"\adevices\x18\a \x01(\rR\adevices\"`\n" +
 	"\x14ListIncidentsRequest\x12\x1a\n" +
 	"\bupstream\x18\x01 \x01(\tR\bupstream\x12\x14\n" +
-	"\x05limit\x18\x02 \x01(\rR\x05limit\"K\n" +
+	"\x05limit\x18\x02 \x01(\rR\x05limit\x12\x16\n" +
+	"\x06offset\x18\x03 \x01(\rR\x06offset\"f\n" +
 	"\x15ListIncidentsResponse\x122\n" +
-	"\tincidents\x18\x01 \x03(\v2\x14.lotsman.v1.IncidentR\tincidents*\x9a\x01\n" +
+	"\tincidents\x18\x01 \x03(\v2\x14.lotsman.v1.IncidentR\tincidents\x12\x19\n" +
+	"\bhas_more\x18\x02 \x01(\bR\ahasMore*\x9a\x01\n" +
 	"\fIncidentKind\x12\x1d\n" +
 	"\x19INCIDENT_KIND_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12INCIDENT_KIND_DOWN\x10\x01\x12\x1a\n" +

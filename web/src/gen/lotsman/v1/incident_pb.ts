@@ -15,7 +15,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file lotsman/v1/incident.proto.
  */
 export const file_lotsman_v1_incident: GenFile = /*@__PURE__*/
-  fileDesc("Chlsb3RzbWFuL3YxL2luY2lkZW50LnByb3RvEgpsb3RzbWFuLnYxIskBCghJbmNpZGVudBIKCgJpZBgBIAEoCRIQCgh1cHN0cmVhbRgCIAEoCRImCgRraW5kGAMgASgOMhgubG90c21hbi52MS5JbmNpZGVudEtpbmQSKwoHc3RhcnRlZBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKQoFZW5kZWQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg4KBmRldGFpbBgGIAEoCRIPCgdkZXZpY2VzGAcgASgNIjcKFExpc3RJbmNpZGVudHNSZXF1ZXN0EhAKCHVwc3RyZWFtGAEgASgJEg0KBWxpbWl0GAIgASgNIkAKFUxpc3RJbmNpZGVudHNSZXNwb25zZRInCglpbmNpZGVudHMYASADKAsyFC5sb3RzbWFuLnYxLkluY2lkZW50KpoBCgxJbmNpZGVudEtpbmQSHQoZSU5DSURFTlRfS0lORF9VTlNQRUNJRklFRBAAEhYKEklOQ0lERU5UX0tJTkRfRE9XThABEhoKFklOQ0lERU5UX0tJTkRfRE9XTkxPQUQQAhIYChRJTkNJREVOVF9LSU5EX1VQTE9BRBADEh0KGUlOQ0lERU5UX0tJTkRfU0VORF9FUlJPUlMQBDJeCg9JbmNpZGVudFNlcnZpY2USSwoETGlzdBIgLmxvdHNtYW4udjEuTGlzdEluY2lkZW50c1JlcXVlc3QaIS5sb3RzbWFuLnYxLkxpc3RJbmNpZGVudHNSZXNwb25zZUI6WjhnaXRodWIuY29tL2FuZXN0aGV0aXNlZC9sb3RzbWFuL2FwaS9sb3RzbWFuL3YxO2xvdHNtYW52MWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("Chlsb3RzbWFuL3YxL2luY2lkZW50LnByb3RvEgpsb3RzbWFuLnYxIskBCghJbmNpZGVudBIKCgJpZBgBIAEoCRIQCgh1cHN0cmVhbRgCIAEoCRImCgRraW5kGAMgASgOMhgubG90c21hbi52MS5JbmNpZGVudEtpbmQSKwoHc3RhcnRlZBgEIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKQoFZW5kZWQYBSABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wEg4KBmRldGFpbBgGIAEoCRIPCgdkZXZpY2VzGAcgASgNIkcKFExpc3RJbmNpZGVudHNSZXF1ZXN0EhAKCHVwc3RyZWFtGAEgASgJEg0KBWxpbWl0GAIgASgNEg4KBm9mZnNldBgDIAEoDSJSChVMaXN0SW5jaWRlbnRzUmVzcG9uc2USJwoJaW5jaWRlbnRzGAEgAygLMhQubG90c21hbi52MS5JbmNpZGVudBIQCghoYXNfbW9yZRgCIAEoCCqaAQoMSW5jaWRlbnRLaW5kEh0KGUlOQ0lERU5UX0tJTkRfVU5TUEVDSUZJRUQQABIWChJJTkNJREVOVF9LSU5EX0RPV04QARIaChZJTkNJREVOVF9LSU5EX0RPV05MT0FEEAISGAoUSU5DSURFTlRfS0lORF9VUExPQUQQAxIdChlJTkNJREVOVF9LSU5EX1NFTkRfRVJST1JTEAQyXgoPSW5jaWRlbnRTZXJ2aWNlEksKBExpc3QSIC5sb3RzbWFuLnYxLkxpc3RJbmNpZGVudHNSZXF1ZXN0GiEubG90c21hbi52MS5MaXN0SW5jaWRlbnRzUmVzcG9uc2VCOlo4Z2l0aHViLmNvbS9hbmVzdGhldGlzZWQvbG90c21hbi9hcGkvbG90c21hbi92MTtsb3RzbWFudjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
 
 /**
  * One stretch of one kind of trouble with one upstream. At most one of each
@@ -90,6 +90,11 @@ export type ListIncidentsRequest = Message<"lotsman.v1.ListIncidentsRequest"> & 
    * @generated from field: uint32 limit = 2;
    */
   limit: number;
+
+  /**
+   * @generated from field: uint32 offset = 3;
+   */
+  offset: number;
 };
 
 /**
@@ -107,6 +112,11 @@ export type ListIncidentsResponse = Message<"lotsman.v1.ListIncidentsResponse"> 
    * @generated from field: repeated lotsman.v1.Incident incidents = 1;
    */
   incidents: Incident[];
+
+  /**
+   * @generated from field: bool has_more = 2;
+   */
+  hasMore: boolean;
 };
 
 /**

@@ -2,6 +2,13 @@
 // that only the console's chunks carry them (the user page never loads them).
 // Like en.ts, this one is the source of truth for the shape.
 export const consoleEn = {
+  pagination: {
+    label: "Pagination",
+    previous: "Previous page",
+    next: "Next page",
+    page: (number: string) => `Page ${number}`,
+    empty: "No entries on this page.",
+  },
   failed: (message: string) => `It did not work: ${message}`,
   overview: {
     totals: "Gateway",
@@ -46,7 +53,7 @@ export const consoleEn = {
     devicesHint: "Routed through the upstream when it started",
     detail: "Detail",
     caption: "Incidents, open first, then newest",
-    summary: (open: number, total: number) => `${open} open · ${total} in the log`,
+    summary: (open: number, total: number) => `${open} open · ${total} on this page`,
     empty: "No incidents: the checks have found no trouble.",
     emptyFor: (name: string) => `No incidents for ${name}.`,
     refresh: "Refresh",

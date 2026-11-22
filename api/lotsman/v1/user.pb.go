@@ -411,6 +411,9 @@ func (x *DeviceConfig) GetConfig() string {
 
 type ListUsersRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limit         uint32                 `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`   // 0: all users; maximum for a page: 200
+	Offset        uint32                 `protobuf:"varint,2,opt,name=offset,proto3" json:"offset,omitempty"` // requires a nonzero limit
+	User          string                 `protobuf:"bytes,3,opt,name=user,proto3" json:"user,omitempty"`      // empty: all users; otherwise an exact name
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -445,9 +448,31 @@ func (*ListUsersRequest) Descriptor() ([]byte, []int) {
 	return file_lotsman_v1_user_proto_rawDescGZIP(), []int{6}
 }
 
+func (x *ListUsersRequest) GetLimit() uint32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListUsersRequest) GetOffset() uint32 {
+	if x != nil {
+		return x.Offset
+	}
+	return 0
+}
+
+func (x *ListUsersRequest) GetUser() string {
+	if x != nil {
+		return x.User
+	}
+	return ""
+}
+
 type ListUsersResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Users         []*User                `protobuf:"bytes,1,rep,name=users,proto3" json:"users,omitempty"`
+	HasMore       bool                   `protobuf:"varint,2,opt,name=has_more,json=hasMore,proto3" json:"has_more,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -487,6 +512,13 @@ func (x *ListUsersResponse) GetUsers() []*User {
 		return x.Users
 	}
 	return nil
+}
+
+func (x *ListUsersResponse) GetHasMore() bool {
+	if x != nil {
+		return x.HasMore
+	}
+	return false
 }
 
 type AddUserRequest struct {
@@ -1117,10 +1149,14 @@ const file_lotsman_v1_user_proto_rawDesc = "" +
 	"\tproviders\x18\x02 \x03(\tR\tproviders\"?\n" +
 	"\fDeviceConfig\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x12\x16\n" +
-	"\x06config\x18\x02 \x01(\tR\x06config\"\x12\n" +
-	"\x10ListUsersRequest\";\n" +
+	"\x06config\x18\x02 \x01(\tR\x06config\"T\n" +
+	"\x10ListUsersRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\rR\x05limit\x12\x16\n" +
+	"\x06offset\x18\x02 \x01(\rR\x06offset\x12\x12\n" +
+	"\x04user\x18\x03 \x01(\tR\x04user\"V\n" +
 	"\x11ListUsersResponse\x12&\n" +
-	"\x05users\x18\x01 \x03(\v2\x10.lotsman.v1.UserR\x05users\"$\n" +
+	"\x05users\x18\x01 \x03(\v2\x10.lotsman.v1.UserR\x05users\x12\x19\n" +
+	"\bhas_more\x18\x02 \x01(\bR\ahasMore\"$\n" +
 	"\x0eAddUserRequest\x12\x12\n" +
 	"\x04user\x18\x01 \x01(\tR\x04user\"R\n" +
 	"\x10SetRightsRequest\x12\x12\n" +

@@ -16,7 +16,7 @@ import (
 // incidentsOf lists what the store holds for the upstream, open first.
 func incidentsOf(t *testing.T, h *harness, upstream string) []store.Incident {
 	t.Helper()
-	got, err := h.d.Incidents(upstream, 100)
+	got, err := h.d.IncidentsPage(upstream, 100, 0)
 	if err != nil {
 		t.Fatal(err)
 	}

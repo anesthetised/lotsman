@@ -11,7 +11,7 @@ import { IncidentKind, type Incident, IncidentSchema } from "../../gen/lotsman/v
 import { UpstreamStatusSchema } from "../../gen/lotsman/v1/status_pb";
 import { consoleRu } from "../../i18n/console.ru";
 import { historyRanges, meanOf, rateSeries, speedSeries } from "./history";
-import { incidentDuration, incidentKind, incidentLevel, incidentsPath, openCount, openKey, sortIncidents, worstLevel } from "./incidentLog";
+import { incidentDuration, incidentKind, incidentLevel, incidentsPath, openCount, openKey, worstLevel } from "./incidentLog";
 
 function conn(source: string, downRate: number, upRate = 0, downBytes = 0): Connection {
   return create(ConnectionSchema, {
@@ -85,12 +85,6 @@ function incident(id: string, startedMin: number, endedMin?: number): Incident {
     ended: endedMin === undefined ? undefined : timestampFromMs(endedMin * 60_000),
   });
 }
-
-test("incidents: open ones first, then newest, ties by id", () => {
-  const list = [incident("a", 10, 20), incident("b", 5), incident("c", 30, 31), incident("d", 1), incident("e", 30, 40)];
-  expect(sortIncidents(list).map((i) => i.id)).toEqual(["b", "d", "c", "e", "a"]);
-  expect(list.map((i) => i.id)).toEqual(["a", "b", "c", "d", "e"]); // untouched
-});
 
 test("an incident lasts until it ended, or until now while open", () => {
   const now = new Date(90 * 60_000);

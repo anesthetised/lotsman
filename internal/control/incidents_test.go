@@ -24,10 +24,11 @@ type fakeIncidents struct {
 	err       error
 	upstream  string
 	limit     int
+	offset    int
 }
 
-func (f *fakeIncidents) Incidents(upstream string, limit int) ([]store.Incident, error) {
-	f.upstream, f.limit = upstream, limit
+func (f *fakeIncidents) IncidentsPage(upstream string, limit, offset int) ([]store.Incident, error) {
+	f.upstream, f.limit, f.offset = upstream, limit, offset
 	return f.incidents, f.err
 }
 
@@ -62,12 +63,13 @@ func TestIncidentList(t *testing.T) {
 	if diff := cmp.Diff(want, got, protocmp.Transform()); diff != "" {
 		t.Errorf("response (-want +got):\n%s", diff)
 	}
-	if f.upstream != "" || f.limit != DefaultIncidents {
+	if f.upstream != "" || f.limit != DefaultIncidents+1 || f.offset != 0 {
 		t.Errorf("asked for %q, limit %d; want every upstream, the default limit", f.upstream, f.limit)
 	}
 
-	if _, err := client.List(t.Context(), &lotsmanv1.ListIncidentsRequest{Upstream: "nl", Limit: 5}); err != nil || f.upstream != "nl" || f.limit != 5 {
-		t.Errorf("asked for %q, limit %d, %v", f.upstream, f.limit, err)
+	page, err := client.List(t.Context(), &lotsmanv1.ListIncidentsRequest{Upstream: "nl", Limit: 2, Offset: 2})
+	if err != nil || f.upstream != "nl" || f.limit != 3 || f.offset != 2 || !page.GetHasMore() || len(page.GetIncidents()) != 2 {
+		t.Errorf("asked for %q, limit %d, offset %d, response %v, error %v", f.upstream, f.limit, f.offset, page, err)
 	}
 
 	// The store's error stays inside the daemon.

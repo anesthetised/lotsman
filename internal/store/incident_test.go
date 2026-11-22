@@ -16,6 +16,18 @@ func mustOpenIncident(t *testing.T, s *Store, upstream string, kind IncidentKind
 	return id
 }
 
+func TestIncidentPagesKeepTiesInIDOrder(t *testing.T) {
+	s := open(t)
+	olderID := mustOpenIncident(t, s, "nl", IncidentDown, at(1, 0), "", 0)
+	newerID := mustOpenIncident(t, s, "nl", IncidentUpload, at(1, 0), "", 0)
+	for offset, want := range []int64{newerID, olderID} {
+		page, err := s.IncidentsPage("nl", 1, offset)
+		if err != nil || len(page) != 1 || page[0].ID != want {
+			t.Errorf("page at offset %d = %+v, %v; want incident %d", offset, page, err, want)
+		}
+	}
+}
+
 func TestIncidents(t *testing.T) {
 	s := open(t)
 	down := mustOpenIncident(t, s, "nl", IncidentDown, at(1, 0), "probe failed", 3)
@@ -57,6 +69,9 @@ func TestIncidents(t *testing.T) {
 	}
 	if got, _ := s.Incidents("", 2); len(got) != 2 || got[1].Kind != IncidentUpload {
 		t.Errorf("limit 2 = %+v", got)
+	}
+	if page, err := s.IncidentsPage("nl", 2, 1); err != nil || !cmp.Equal(page, want[1:3]) {
+		t.Errorf("second page of nl incidents = %+v, %v; want %+v", page, err, want[1:3])
 	}
 	if !want[0].Open() || want[2].Open() {
 		t.Error("Open is wrong")

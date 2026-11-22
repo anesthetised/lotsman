@@ -67,9 +67,14 @@ message DeviceConfig {
   string config = 2; // the AmneziaWG client config text; the UI renders the QR
 }
 
-message ListUsersRequest {}
+message ListUsersRequest {
+  uint32 limit = 1; // 0: all users; maximum for a page: 200
+  uint32 offset = 2; // requires a nonzero limit
+  string user = 3; // empty: all users; otherwise an exact name
+}
 message ListUsersResponse {
   repeated User users = 1;
+  bool has_more = 2;
 }
 message AddUserRequest {
   string user = 1;

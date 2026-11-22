@@ -17,7 +17,7 @@ const DefaultIncidents = 200
 // IncidentSource is what IncidentService reads: the daemon, or a fake in
 // tests.
 type IncidentSource interface {
-	Incidents(upstream string, limit int) ([]store.Incident, error)
+	IncidentsPage(upstream string, limit, offset int) ([]store.Incident, error)
 }
 
 type incidentService struct{ src IncidentSource }
@@ -27,11 +27,14 @@ func (s incidentService) List(_ context.Context, req *lotsmanv1.ListIncidentsReq
 	if limit == 0 {
 		limit = DefaultIncidents
 	}
-	incidents, err := s.src.Incidents(req.GetUpstream(), limit)
+	incidents, err := s.src.IncidentsPage(req.GetUpstream(), limit+1, int(req.GetOffset()))
 	if err != nil {
 		return nil, connect.NewError(connect.CodeInternal, "incidents are unavailable")
 	}
-	out := &lotsmanv1.ListIncidentsResponse{}
+	out := &lotsmanv1.ListIncidentsResponse{HasMore: len(incidents) > limit}
+	if out.HasMore {
+		incidents = incidents[:limit]
+	}
 	for _, in := range incidents {
 		out.Incidents = append(out.Incidents, &lotsmanv1.Incident{
 			Id: IncidentID(in.ID), Upstream: in.Upstream, Kind: incidentKind(in.Kind),

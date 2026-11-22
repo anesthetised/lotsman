@@ -143,6 +143,25 @@ func TestUserService(t *testing.T) {
 	if diff := cmp.Diff(want, list.Users, protocmp.Transform()); diff != "" {
 		t.Errorf("List (-want +got):\n%s", diff)
 	}
+	for _, tc := range []struct {
+		req     *lotsmanv1.ListUsersRequest
+		name    string
+		devices int
+		more    bool
+	}{
+		{&lotsmanv1.ListUsersRequest{Limit: 1}, "alice", 2, true},
+		{&lotsmanv1.ListUsersRequest{Limit: 1, Offset: 1}, "bob", 1, true},
+		{&lotsmanv1.ListUsersRequest{Limit: 1, Offset: 2}, "carol", 0, false},
+		{&lotsmanv1.ListUsersRequest{User: "bob"}, "bob", 1, false},
+	} {
+		page, err := ops.List(ctx, tc.req)
+		rows := page.GetUsers()
+		if err != nil || len(rows) != 1 || rows[0].Name != tc.name || len(rows[0].Devices) != tc.devices || page.GetHasMore() != tc.more {
+			t.Errorf("List %v = %v, %v; want only %s with %d devices, has_more=%v", tc.req, page, err, tc.name, tc.devices, tc.more)
+		}
+	}
+	_, err = ops.List(ctx, &lotsmanv1.ListUsersRequest{Offset: 1})
+	wantCode(t, "List offset without limit", err, connect.CodeInvalidArgument)
 
 	// SetRoute keeps the device, so its config; the route is checked as on AddDevice.
 	before := users.Applied()
