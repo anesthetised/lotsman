@@ -41,4 +41,5 @@ message Connection {
   string upstream = 5;
   google.protobuf.Timestamp started = 6;
   Traffic traffic = 7;
+  google.protobuf.Timestamp last_traffic = 8; // latest snapshot with new bytes on this watch; unset until observed
 }

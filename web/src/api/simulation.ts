@@ -82,6 +82,7 @@ interface Flow {
   source: string;
   destination: string;
   started: number; // ms since the epoch, 0 = open before anyone watched
+  lastTraffic: number; // ms since the epoch, 0 = no bytes observed
   /** Its share of the peer's traffic, relative to the peer's other flows. */
   weight: number;
   down: number;
@@ -311,6 +312,7 @@ export class Simulation {
       for (const f of this.flows) {
         f.down += f.downRate;
         f.up += f.upRate;
+        if (f.downRate > 0 || f.upRate > 0) f.lastTraffic = this.time;
       }
     }
   }
@@ -335,6 +337,7 @@ export class Simulation {
       source: protocol === Protocol.ICMP ? peer.address : `${peer.address}:${sourcePort}`,
       destination: port ? `${ip}:${port}` : ip,
       started,
+      lastTraffic: 0,
       weight: heft * (this.flowRand() ** 2 + 0.01),
       down: heft * this.flowRand() * 5e7,
       up: heft * this.flowRand() * 5e6,
@@ -395,7 +398,7 @@ export class Simulation {
    * The open connections of one peer, or of all, fastest first and at most
    * CONNECTION_CAP of them. NotFound for an unknown peer, as the daemon answers.
    */
-  connections(peerId = ""): ConnectionSnapshot {
+  connections(peerId = "", observedAfter?: number): ConnectionSnapshot {
     this.advance();
     if (peerId && !this.peers.some((p) => p.id === peerId)) throw new ConnectError(`peer ${peerId} not found`, Code.NotFound);
     const flows = this.flows
@@ -403,7 +406,7 @@ export class Simulation {
       .sort((a, b) => b.downRate + b.upRate - (a.downRate + a.upRate));
     return create(ConnectionSnapshotSchema, {
       time: timestampFromMs(this.time),
-      connections: flows.slice(0, CONNECTION_CAP).map((f) => connection(f)),
+      connections: flows.slice(0, CONNECTION_CAP).map((f) => connection(f, observedAfter)),
       truncated: flows.length > CONNECTION_CAP,
     });
   }
@@ -666,7 +669,7 @@ export class Simulation {
   }
 }
 
-function connection(f: Flow): Connection {
+function connection(f: Flow, observedAfter?: number): Connection {
   return create(ConnectionSchema, {
     peerId: f.peer.id,
     protocol: f.protocol,
@@ -674,6 +677,7 @@ function connection(f: Flow): Connection {
     destination: f.destination,
     upstream: f.peer.upstream,
     started: f.started ? timestampFromMs(f.started) : undefined,
+    lastTraffic: observedAfter !== undefined && f.lastTraffic > observedAfter ? timestampFromMs(f.lastTraffic) : undefined,
     traffic: traffic(f.down, f.up, f.downRate, f.upRate),
   });
 }

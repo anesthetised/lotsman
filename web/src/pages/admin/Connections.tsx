@@ -133,6 +133,7 @@ function ConnectionTable(props: { peer: string; peers: ReadonlyMap<string, PeerS
                 <th scope="col" class="px-3 py-2 font-medium">{c.connections.destination}</th>
                 <th scope="col" class="px-3 py-2 font-medium">{c.connections.upstream}</th>
                 <th scope="col" class="px-3 py-2 font-medium">{c.connections.started}</th>
+                <th scope="col" class="px-3 py-2 font-medium whitespace-nowrap">{c.connections.lastTraffic}</th>
                 <SortHeader key="downRate" label={c.connections.downRate} />
                 <SortHeader key="upRate" label={c.connections.upRate} />
                 <SortHeader key="downBytes" label={c.connections.downBytes} />
@@ -151,6 +152,14 @@ function ConnectionTable(props: { peer: string; peers: ReadonlyMap<string, PeerS
                     <td class="px-3 py-1 whitespace-nowrap">
                       <Show when={c().started} fallback="—">
                         {(s) => <>{fmt.ago(timestampDate(s()), time())}</>}
+                      </Show>
+                    </td>
+                    <td class="px-3 py-1 whitespace-nowrap">
+                      <Show when={c().lastTraffic} fallback="—">
+                        {(s) => {
+                          const last = () => timestampDate(s());
+                          return <time datetime={last().toISOString()} title={fmt.dateTime(last())}>{fmt.ago(last(), time())}</time>;
+                        }}
                       </Show>
                     </td>
                     <td class="px-3 py-1 text-right tabular-nums">{fmt.rate(num(c().traffic?.downRate))}</td>

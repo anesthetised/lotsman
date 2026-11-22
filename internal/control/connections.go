@@ -112,7 +112,7 @@ func connectionSnapshot(s flows.Snapshot) *lotsmanv1.ConnectionSnapshot {
 	for _, f := range s.Flows {
 		out.Connections = append(out.Connections, &lotsmanv1.Connection{
 			PeerId: f.PeerID, Protocol: protocol(f.Protocol), Source: endpoint(f.Source), Destination: endpoint(f.Destination),
-			Upstream: f.Upstream, Started: timestamp(f.Started),
+			Upstream: f.Upstream, Started: timestamp(f.Started), LastTraffic: timestamp(f.LastTraffic),
 			Traffic: &lotsmanv1.Traffic{DownBytes: f.DownBytes, UpBytes: f.UpBytes, DownRate: f.DownRate, UpRate: f.UpRate},
 		})
 	}

@@ -276,6 +276,7 @@ test("ConnectionService.Watch streams the fastest connections, rates from the se
   expect(first.connections).toHaveLength(CONNECTION_CAP);
   expect(first.truncated).toBe(true);
   expect(first.connections.every((c) => c.traffic?.downRate === 0n && c.traffic.upRate === 0n)).toBe(true);
+  expect(first.connections.every((c) => c.lastTraffic === undefined)).toBe(true);
   expect(first.connections.some((c) => (c.traffic?.downBytes ?? 0n) > 0n)).toBe(true);
 
   const pending = next(stream);
@@ -283,6 +284,7 @@ test("ConnectionService.Watch streams the fastest connections, rates from the se
   const second = await pending;
   const rates = second.connections.map((c) => Number((c.traffic?.downRate ?? 0n) + (c.traffic?.upRate ?? 0n)));
   expect(rates.some((r) => r > 0)).toBe(true);
+  expect(second.connections.some((c) => c.lastTraffic !== undefined)).toBe(true);
   expect(rates).toEqual([...rates].sort((a, b) => b - a));
   expect(new Set(second.connections.map((c) => c.upstream))).not.toContain("");
   await stream.return?.();

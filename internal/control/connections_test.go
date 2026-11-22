@@ -99,10 +99,11 @@ func watchConnections(t *testing.T, client lotsmanv1connect.ConnectionServiceCli
 func TestConnectionSnapshot(t *testing.T) {
 	now := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
 	started := now.Add(-time.Minute)
+	lastTraffic := now.Add(-time.Second)
 	s := flows.Snapshot{Time: now, Truncated: true, Flows: []flows.Flow{
 		// Every traffic field differs, so a swapped direction shows.
 		{PeerID: "p_7", Protocol: flows.TCP, Source: netip.MustParseAddrPort("10.77.0.2:40000"), Destination: netip.MustParseAddrPort("1.1.1.1:443"),
-			Upstream: "nl", Started: started, DownBytes: 1, UpBytes: 2, DownRate: 3, UpRate: 4},
+			Upstream: "nl", Started: started, LastTraffic: lastTraffic, DownBytes: 1, UpBytes: 2, DownRate: 3, UpRate: 4},
 		{PeerID: "p_7", Protocol: flows.UDP, Source: netip.MustParseAddrPort("10.77.0.2:5353"), Destination: netip.MustParseAddrPort("8.8.8.8:53"), Upstream: "nl"},
 		// ICMP has no ports: bare addresses.
 		{PeerID: "p_12", Protocol: flows.ICMP, Source: netip.AddrPortFrom(bobAddr, 0), Destination: netip.MustParseAddrPort("9.9.9.9:0")},
@@ -110,8 +111,9 @@ func TestConnectionSnapshot(t *testing.T) {
 	}}
 	want := &lotsmanv1.ConnectionSnapshot{Time: timestamppb.New(now), Truncated: true, Connections: []*lotsmanv1.Connection{
 		{PeerId: "p_7", Protocol: lotsmanv1.Protocol_PROTOCOL_TCP, Source: "10.77.0.2:40000", Destination: "1.1.1.1:443", Upstream: "nl",
-			Started: timestamppb.New(started), Traffic: &lotsmanv1.Traffic{DownBytes: 1, UpBytes: 2, DownRate: 3, UpRate: 4}},
-		// Start unknown: unset.
+			Started: timestamppb.New(started), LastTraffic: timestamppb.New(lastTraffic),
+			Traffic: &lotsmanv1.Traffic{DownBytes: 1, UpBytes: 2, DownRate: 3, UpRate: 4}},
+		// Start and last traffic unknown: unset.
 		{PeerId: "p_7", Protocol: lotsmanv1.Protocol_PROTOCOL_UDP, Source: "10.77.0.2:5353", Destination: "8.8.8.8:53", Upstream: "nl",
 			Traffic: &lotsmanv1.Traffic{}},
 		{PeerId: "p_12", Protocol: lotsmanv1.Protocol_PROTOCOL_ICMP, Source: "10.77.0.3", Destination: "9.9.9.9", Traffic: &lotsmanv1.Traffic{}},
@@ -161,6 +163,8 @@ func TestConnectionsWatch(t *testing.T) {
 	}
 	if c := second.Connections; len(c) != 1 || c[0].Traffic.DownBytes != 3000 || c[0].Traffic.DownRate == 0 || c[0].Traffic.DownRate <= c[0].Traffic.UpRate {
 		t.Errorf("second snapshot = %v, want down outrunning up", second)
+	} else if c[0].LastTraffic == nil || !c[0].LastTraffic.AsTime().Equal(second.Time.AsTime()) {
+		t.Errorf("last traffic = %v, want the second snapshot timestamp", c[0].LastTraffic)
 	}
 
 	cancel()

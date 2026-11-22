@@ -142,7 +142,7 @@ export const consoleEn = {
     peer: "Peer",
     allPeers: "All peers",
     intro:
-      "Live from the gateway's connection table and never stored. Destinations are numeric; the first update has no rates yet.",
+      "Live from the gateway's connection table and never stored. Destinations are numeric. Last traffic appears when the gateway sees new bytes during this view.",
     count: (n: number) => (n === 1 ? "1 connection" : `${n} connections`),
     updated: (time: string) => `updated ${time}`,
     truncated: (n: number) => `Only the ${n} fastest are shown; the gateway left the rest out.`,
@@ -153,6 +153,7 @@ export const consoleEn = {
     destination: "Destination",
     upstream: "Upstream",
     started: "Started",
+    lastTraffic: "Last traffic",
     downRate: "Down rate",
     upRate: "Up rate",
     downBytes: "Down total",

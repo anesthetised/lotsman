@@ -70,6 +70,7 @@ func TestRates(t *testing.T) {
 	*now = now.Add(2 * time.Second)
 	src.entries = []Entry{tcp(alice, 40000, "1.1.1.1:443", 300, 5000)}
 	want[0].UpBytes, want[0].DownBytes, want[0].UpRate, want[0].DownRate = 300, 5000, 100, 2000
+	want[0].LastTraffic = *now
 	if diff := cmp.Diff(want, snapshot(t, m).Flows, addrs); diff != "" {
 		t.Errorf("second snapshot (-want +got):\n%s", diff)
 	}
@@ -83,11 +84,11 @@ func TestRates(t *testing.T) {
 	if len(flows) != 2 {
 		t.Fatalf("flows = %+v", flows)
 	}
-	if f := flows[0]; f.Protocol != UDP || f.UpRate != 60 || f.DownRate != 120 || !f.Started.Equal(*now) {
+	if f := flows[0]; f.Protocol != UDP || f.UpRate != 60 || f.DownRate != 120 || !f.Started.Equal(*now) || !f.LastTraffic.Equal(*now) {
 		t.Errorf("new flow = %+v", f)
 	}
-	if f := flows[1]; f.UpRate != 0 || f.DownRate != 0 || !f.Started.IsZero() {
-		t.Errorf("idle flow = %+v, want no rate and an unknown start", f)
+	if f := flows[1]; f.UpRate != 0 || f.DownRate != 0 || !f.Started.IsZero() || !f.LastTraffic.Equal(want[0].LastTraffic) {
+		t.Errorf("idle flow = %+v, want no rate, an unknown start and the previous activity time", f)
 	}
 }
 
@@ -140,6 +141,12 @@ func TestCounterReset(t *testing.T) {
 	src.entries = []Entry{e}
 	if f := snapshot(t, m).Flows[0]; f.UpRate != 100 || f.DownRate != 100 || !f.Started.Equal(start) {
 		t.Errorf("same start = %+v", f)
+	}
+	*now = now.Add(time.Second)
+	e.OrigBytes, e.ReplyBytes = 0, 0
+	src.entries = []Entry{e}
+	if f := snapshot(t, m).Flows[0]; !f.LastTraffic.IsZero() {
+		t.Errorf("new flow without counted bytes inherited last traffic at %s", f.LastTraffic)
 	}
 }
 
