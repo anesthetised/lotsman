@@ -133,8 +133,8 @@ function LiveUser(props: { token: string }) {
                 {t.user.devices}
               </h2>
               <IssuedConfig />
-              <Devices />
               <AddDevice />
+              <Devices />
             </section>
           </div>
           <div class="space-y-4">
