@@ -7,6 +7,7 @@ import { createMemo, Errored, Loading, onSettled, Show } from "solid-js";
 import { redirectToSignIn } from "../../api/auth";
 import { api, auth } from "../../api/client";
 import { createLive } from "../../api/live";
+import { DisplayPreferences } from "../../ui/DisplayPreferences";
 import { useI18n } from "../../i18n";
 import { buttonClass } from "../../ui/button";
 import { LiveError } from "../LiveError";
@@ -71,7 +72,7 @@ function Shell(props: { name: string; children?: JSX.Element }) {
   };
   // A section's link is current on its own page and on the pages under it
   // (an upstream's page belongs to the overview, a user's to the users).
-  const link = (href: string, label: string, under?: string, extra?: JSX.Element) => {
+  const link = (href: string, label: () => string, under?: string, extra?: JSX.Element) => {
     const current = () => location.pathname === href || (under !== undefined && location.pathname.startsWith(under));
     return (
       <a
@@ -79,7 +80,7 @@ function Shell(props: { name: string; children?: JSX.Element }) {
         aria-current={current() ? "page" : undefined}
         class="rounded px-2 py-1 whitespace-nowrap text-muted hover:text-fg aria-[current]:font-medium aria-[current]:text-fg"
       >
-        {label}
+        {label()}
         {extra}
       </a>
     );
@@ -91,13 +92,14 @@ function Shell(props: { name: string; children?: JSX.Element }) {
         <div class="mx-auto flex min-h-11 max-w-7xl flex-wrap items-center gap-x-6 gap-y-1 px-4 py-1">
           <span class="font-semibold">{t.app.name}</span>
           <nav aria-label={t.admin.nav} class="flex flex-wrap gap-1">
-            {link("/admin", t.admin.upstreams, "/admin/upstreams/")}
-            {link("/admin/users", t.admin.users, "/admin/users/")}
-            {link("/admin/connections", t.admin.connections)}
-            {link("/admin/incidents", t.admin.incidents, undefined, <OpenIncidents />)}
-            {link("/admin/passkeys", t.admin.passkeys)}
+            {link("/admin", () => t.admin.upstreams, "/admin/upstreams/")}
+            {link("/admin/users", () => t.admin.users, "/admin/users/")}
+            {link("/admin/connections", () => t.admin.connections)}
+            {link("/admin/incidents", () => t.admin.incidents, undefined, <OpenIncidents />)}
+            {link("/admin/passkeys", () => t.admin.passkeys)}
           </nav>
-          <div class="ml-auto flex items-center gap-6">
+          <div class="ml-auto flex flex-wrap items-center gap-x-3 gap-y-1">
+            <DisplayPreferences />
             <span class="hidden text-muted sm:inline">{t.auth.signedInAs(props.name)}</span>
             <button type="button" class={buttonClass("ghost")} onClick={signOut}>
               {t.auth.signOut}

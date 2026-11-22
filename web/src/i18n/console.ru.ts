@@ -23,6 +23,13 @@ export const consoleRu: ConsoleDict = {
     clientMtu: "MTU клиентов",
     blocked: (n: number) => `${plural(n, "заблокирован", "заблокированы", "заблокированы")}: нет подходящего выхода`,
   },
+  outlineUsage: {
+    title: "Остаток трафика",
+    remaining: (remaining: string, limit: string) => `${remaining} из ${limit}`,
+    unavailable: "Данные о трафике недоступны",
+    stale: "Данные устарели",
+    updated: (time: string) => `Данные обновлены ${time}`,
+  },
   upstream: {
     title: (name: string) => `Выход ${name}`,
     missing: "У шлюза нет выхода с таким именем.",

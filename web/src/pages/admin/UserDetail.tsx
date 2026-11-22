@@ -14,6 +14,7 @@ import { useI18n } from "../../i18n";
 import { useConsoleI18n } from "../../i18n/console";
 import { buttonClass } from "../../ui/button";
 import { Dialog } from "../../ui/Dialog";
+import { downloadConfig } from "../../ui/downloadConfig";
 import { QrCode } from "../../ui/QrCode";
 import { Chip, SwitchField } from "../../ui/Toggles";
 import { LiveError } from "../LiveError";
@@ -21,7 +22,7 @@ import { DEFAULT_ROUTE, routeSummary } from "../route";
 import { createNewRoute, RouteEditor, RouteFields } from "../RouteEditor";
 import { ApiError, errorMessage } from "./ApiError";
 import { Confirm } from "./Confirm";
-import { configFileName, download, userLink } from "./devices";
+import { configFileName, userLink } from "./devices";
 
 export default function UserDetail() {
   const { t } = useI18n();
@@ -163,7 +164,7 @@ function UserView(props: { user: User; snapshot: StatusSnapshot; onChanged: () =
                     props.onChanged();
                     return undefined;
                   } catch (e) {
-                    return c.failed(errorMessage(e));
+                    return () => c.failed(errorMessage(e));
                   }
                 }}
               />
@@ -452,7 +453,7 @@ function ConfigView(props: { config: string; file: string; label: string }) {
           <button type="button" class={buttonClass()} onClick={copy}>
             {copied() ? t.admin.copied : t.admin.copy}
           </button>
-          <button type="button" class={buttonClass()} onClick={() => download(props.file, props.config)}>
+          <button type="button" class={buttonClass()} onClick={() => downloadConfig(props.config, props.file)}>
             {c.users.download(props.file)}
           </button>
         </div>

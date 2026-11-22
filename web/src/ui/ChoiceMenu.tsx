@@ -10,11 +10,13 @@ import { CheckIcon, ChevronDownIcon } from "./icons";
 export interface Choice<T extends string> {
   value: T;
   label: string;
+  lang?: string;
 }
 
 export interface ChoiceMenuProps<T extends string> {
-  /** Content of the trigger button; it should name the setting and its value. */
+  /** Trigger label. With an icon, it is visually hidden. */
   label: JSX.Element;
+  icon?: JSX.Element;
   value: T;
   choices: readonly Choice<T>[];
   onChange: (value: T) => void;
@@ -22,10 +24,13 @@ export interface ChoiceMenuProps<T extends string> {
 
 export function ChoiceMenu<T extends string>(props: ChoiceMenuProps<T>) {
   return (
-    <DropdownMenu>
-      <DropdownMenu.Trigger class={buttonClass()}>
-        {props.label}
-        <ChevronDownIcon />
+    <DropdownMenu placement={props.icon ? "bottom-end" : undefined}>
+      <DropdownMenu.Trigger
+        class={props.icon ? [...buttonClass("ghost"), "size-11 cursor-pointer data-[expanded]:bg-bg data-[expanded]:text-fg"] : buttonClass()}
+        title={props.icon && typeof props.label === "string" ? props.label : undefined}
+      >
+        <span class={props.icon ? "sr-only" : undefined}>{props.label}</span>
+        {props.icon ?? <ChevronDownIcon />}
       </DropdownMenu.Trigger>
       <DropdownMenu.Portal>
         <DropdownMenu.Content class="z-50 min-w-36 rounded-md border border-line bg-surface p-1 shadow-lg">
@@ -35,14 +40,17 @@ export function ChoiceMenu<T extends string>(props: ChoiceMenuProps<T>) {
                 <DropdownMenu.RadioItem
                   value={choice.value}
                   closeOnSelect
-                  class="flex cursor-default items-center gap-2 rounded px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-fg"
+                  class={[
+                    "flex cursor-default items-center gap-2 rounded px-2 py-1.5 text-sm outline-none data-[highlighted]:bg-accent data-[highlighted]:text-accent-fg",
+                    props.icon && "min-h-11",
+                  ]}
                 >
                   <span class="size-4">
                     <DropdownMenu.ItemIndicator>
                       <CheckIcon />
                     </DropdownMenu.ItemIndicator>
                   </span>
-                  <DropdownMenu.ItemLabel>{choice.label}</DropdownMenu.ItemLabel>
+                  <DropdownMenu.ItemLabel lang={choice.lang}>{choice.label}</DropdownMenu.ItemLabel>
                 </DropdownMenu.RadioItem>
               )}
             </For>

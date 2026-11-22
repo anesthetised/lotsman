@@ -18,8 +18,7 @@ import (
 	"github.com/anesthetised/lotsman/internal/proxy"
 )
 
-const proxyConfig = `
-endpoint: 203.0.113.10:51820
+const proxyConfig = harnessListen + `endpoint: 203.0.113.10:51820
 state_dir: %[1]s
 upstreams:
   - {name: nl, conf: %[1]s/nl.conf, geo: NL, provider: acme}

@@ -14,15 +14,3 @@ export function confFilename(device: string): string {
     .replace(/-+$/, "");
   return `${name || "lotsman"}.conf`;
 }
-
-/** Saves `text` as a file through a temporary link: no request leaves the page. */
-export function saveAsFile(text: string, filename: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.append(link);
-  link.click();
-  link.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 10_000);
-}

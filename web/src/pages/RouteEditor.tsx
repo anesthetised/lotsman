@@ -43,8 +43,8 @@ export interface RouteEditorProps {
   readOnly?: boolean;
   /** Another change is under way; Apply waits for it. */
   busy?: boolean;
-  /** Stores the route; resolves to the failure in words, or undefined once stored. */
-  apply: (route: Route) => Promise<string | undefined>;
+  /** Stores the route; resolves to a localized failure message accessor, or undefined once stored. */
+  apply: (route: Route) => Promise<(() => string) | undefined>;
 }
 
 const action = [...buttonClass(), "min-h-11 px-4"];
@@ -52,13 +52,15 @@ const action = [...buttonClass(), "min-h-11 px-4"];
 export function RouteEditor(props: RouteEditorProps) {
   const { t, fmt } = useI18n();
   // The exits change every second; the draft only resets when the countries or providers on offer do.
-  const offer = createMemo(() => offerOf(props.exits, fmt.country, props.providers), { equals: sameOffer });
+  // Keep the draft’s country order when only its display language changes.
+  const countryName = fmt.country;
+  const offer = createMemo(() => offerOf(props.exits, countryName, props.providers), { equals: sameOffer });
   const saved = createMemo(() => props.route ?? DEFAULT_ROUTE, { equals: (a, b) => equals(RouteSchema, a, b) });
   // The edits, until the stored route changes.
   const [draft, setDraft] = createSignal(() => draftOf(saved(), offer()));
   const dirty = createMemo(() => changed(draft(), saved(), offer()));
   const [applying, setApplying] = createSignal(false);
-  const [failure, setFailure] = createSignal<string>();
+  const [failure, setFailure] = createSignal<() => string>();
 
   const cancel = () => {
     setDraft(draftOf(saved(), offer()));
@@ -69,7 +71,7 @@ export function RouteEditor(props: RouteEditorProps) {
     setApplying(true);
     const failed = await props.apply(routeOf(draft(), offer()));
     setApplying(false);
-    setFailure(failed);
+    setFailure(() => failed);
   };
 
   return (
@@ -87,7 +89,7 @@ export function RouteEditor(props: RouteEditorProps) {
           <RouteFields draft={draft()} setDraft={setDraft} offer={offer()} exits={props.exits} />
           <Show when={failure()}>
             <p role="alert" class="rounded-md border border-bad p-3">
-              {failure()}
+              {failure()?.()}
             </p>
           </Show>
           <div class="flex flex-wrap justify-end gap-2">
@@ -113,7 +115,8 @@ export function RouteEditor(props: RouteEditorProps) {
  */
 export function createNewRoute(exits: () => readonly UpstreamStatus[], providers: () => boolean) {
   const { fmt } = useI18n();
-  const offer = createMemo(() => offerOf(exits(), fmt.country, providers()), { equals: sameOffer });
+  const countryName = fmt.country;
+  const offer = createMemo(() => offerOf(exits(), countryName, providers()), { equals: sameOffer });
   const [draft, setDraft] = createSignal(() => draftOf(DEFAULT_ROUTE, offer()));
   return {
     offer,
@@ -137,7 +140,7 @@ export interface RouteFieldsProps {
 export function RouteFields(props: RouteFieldsProps) {
   const { t, fmt } = useI18n();
   const id = createUniqueId();
-  const [announcement, setAnnouncement] = createSignal("");
+  const [announcement, setAnnouncement] = createSignal<() => string>();
   const [dragging, setDragging] = createSignal<string>();
   let list: HTMLOListElement | undefined;
 
@@ -152,7 +155,7 @@ export function RouteFields(props: RouteFieldsProps) {
     const to = on.findIndex((c) => c.geo === geo) + by;
     if (to < 0 || to >= on.length) return;
     props.setDraft((d) => moveCountry(d, geo, to));
-    setAnnouncement(t.route.moved(fmt.country(geo), to + 1, on.length));
+    setAnnouncement(() => () => t.route.moved(fmt.country(geo), to + 1, on.length));
     // Moving a keyed row moves its node, which drops focus: restore it once the move is in the DOM.
     flush();
     document.getElementById(handleId(geo))?.focus();
@@ -277,7 +280,7 @@ export function RouteFields(props: RouteFieldsProps) {
         </p>
       </Show>
       <p aria-live="polite" class="sr-only">
-        {announcement()}
+        {announcement()?.()}
       </p>
       <SwitchField
         label={t.route.strict}

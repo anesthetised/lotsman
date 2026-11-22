@@ -54,7 +54,6 @@ export function History() {
     );
     return mergeHistory(new Map(ids.map((id, i) => [id, responses[i]!])));
   });
-  const periods = { day: t.user.history.day, week: t.user.history.week } satisfies Record<Range, string>;
 
   return (
     <Show when={peerIds().length > 0}>
@@ -76,7 +75,7 @@ export function History() {
                   ]}
                   onClick={() => setRange(r)}
                 >
-                  {periods[r]}
+                  {t.user.history[r]}
                 </button>
               )}
             </For>
@@ -84,7 +83,7 @@ export function History() {
         </div>
         <Errored fallback={<p class="text-muted">{t.common.noData}</p>}>
           <Loading fallback={<p class="text-muted">{t.common.connecting}</p>}>
-            <HistoryChart history={history()} period={periods[range()]} />
+            <HistoryChart history={history()} period={t.user.history[range()]} />
           </Loading>
         </Errored>
       </section>

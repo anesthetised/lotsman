@@ -38,13 +38,3 @@ export function configFileName(user: string, device: string): string {
 export function userLink(origin: string, token: string): string {
   return `${origin}/u#${token}`;
 }
-
-/** Hands the browser a text file to save. */
-export function download(name: string, text: string): void {
-  const url = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
-}

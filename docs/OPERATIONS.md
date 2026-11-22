@@ -776,9 +776,19 @@ panel must not read the daemon's config. Keep it `0640 root:lotsman-web`. `lotsm
 | `trusted_proxies` | Addresses or prefixes whose `X-Forwarded-For` the panel believes, such as `[127.0.0.1, "::1"]` for a proxy on the same host. Default none: the client address is the peer's own. Used for rate limits and logs. |
 | `socket` | The daemon's control socket, default `/run/lotsman/control.sock`. |
 | `state_dir` | Where `web.db` lives, default `/var/lib/lotsman-web` (the unit's `StateDirectory=`). |
+| `outline_usage` | Optional quotas for upstreams supplied by the Outline VPN Telegram bot. |
 
 Changes need `systemctl restart lotsman-web`. A bad config stops the panel at start, with the
 key in the journal. The log level follows `-log-level` or `$LOTSMAN_LOG_LEVEL`, as for `serve`.
+
+For Outline VPN quotas, set `outline_usage.upstreams` to a map from upstream names in
+`lotsman.yaml` to access key names in the provider's account. Put the
+[provider API token](https://www.getoutlinevpn.com/api-docs/) in a separate file, set its path
+in `outline_usage.token_file`, and keep the file `0640 root:lotsman-web`. The web panel reads
+the token and refreshes the quotas at startup and every five minutes. It shows the remaining
+data and plan limit on the operator's upstream list and detail pages. If a refresh fails,
+the panel marks the last successful values as out of date. If the provider has never
+returned quota data for an upstream, its quota is shown as unavailable.
 
 ### Operators and passkeys
 

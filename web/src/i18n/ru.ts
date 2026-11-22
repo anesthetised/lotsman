@@ -3,6 +3,12 @@ import type { Dict } from "./en";
 export const ru: Dict = {
   app: {
     name: "Lotsman",
+    language: "Язык",
+    auto: "Авто",
+    theme: "Тема",
+    system: "Системная",
+    light: "Светлая",
+    dark: "Тёмная",
     skipToContent: "К содержимому",
   },
   common: {

@@ -7,7 +7,7 @@ import { useParams } from "@solidjs/router";
 import { createMemo, createSignal, Errored, For, Loading, Show } from "solid-js";
 import { api } from "../../api/client";
 import { appendRow, createLive, num } from "../../api/live";
-import type { PeerStatus, StatusSnapshot, UpstreamStatus } from "../../gen/lotsman/v1/status_pb";
+import { type PeerStatus, type StatusSnapshot, UpstreamKind, type UpstreamStatus } from "../../gen/lotsman/v1/status_pb";
 import { useI18n } from "../../i18n";
 import { useConsoleI18n } from "../../i18n/console";
 import { AvailabilityBar } from "../../ui/AvailabilityBar";
@@ -19,6 +19,7 @@ import { LiveError } from "../LiveError";
 import { kindLabel, stateLabel, stateLevel } from "../upstream";
 import { historyRanges, meanOf, type RangeKey, rateSeries, speedSeries } from "./history";
 import { IncidentBadge, IncidentLog } from "./IncidentList";
+import { OutlineQuota, useOutlineUsage } from "./OutlineQuota";
 
 export default function UpstreamDetail() {
   const { t } = useI18n();
@@ -59,6 +60,7 @@ function LiveUpstream() {
 function Upstream(props: { upstream: UpstreamStatus; snapshot: StatusSnapshot }) {
   const { t, fmt, c } = useConsoleI18n();
   const u = () => props.upstream;
+  const outlineUsage = useOutlineUsage();
   const now = () => (props.snapshot.time ? timestampDate(props.snapshot.time) : new Date());
   // The last five minutes of the live rate.
   const live = createMemo<number[][]>((prev) => {
@@ -85,6 +87,9 @@ function Upstream(props: { upstream: UpstreamStatus; snapshot: StatusSnapshot })
         <span class="text-muted">
           {[kindLabel(u().kind), u().geo, u().provider].filter(Boolean).join(" · ")}
         </span>
+        <Show when={u().kind === UpstreamKind.OUTLINE}>
+          <OutlineQuota quota={outlineUsage()[u().name]} labeled />
+        </Show>
       </div>
 
       <dl class="grid grid-cols-2 gap-3 rounded-lg border border-line bg-surface p-3 sm:grid-cols-4 lg:grid-cols-7">

@@ -3,8 +3,9 @@
 
 import { createMemo, createSignal, Errored, Loading, Show } from "solid-js";
 import { useI18n } from "../../i18n";
+import { downloadConfig } from "../../ui/downloadConfig";
 import { QrCode } from "../../ui/QrCode";
-import { confFilename, saveAsFile } from "./config";
+import { confFilename } from "./config";
 import { useUser } from "./context";
 import { failureOf, failureText } from "./errors";
 import { touchButton } from "./touch";
@@ -59,7 +60,7 @@ export function ConfigView(props: { device: string; config: string }) {
       />
       <p class="text-sm text-muted">{t.user.config.qrHint}</p>
       <div class="flex flex-wrap gap-2">
-        <button type="button" class={touchButton("primary")} onClick={() => saveAsFile(props.config, confFilename(props.device))}>
+        <button type="button" class={touchButton("primary")} onClick={() => downloadConfig(props.config, confFilename(props.device))}>
           {t.user.config.download}
         </button>
         <button type="button" class={touchButton()} onClick={copyText}>

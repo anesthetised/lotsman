@@ -14,6 +14,29 @@ test("the operator overview shows live data", async ({ page }) => {
   await expect(page.getByRole("img", { name: /Availability of lv-1 over 7 days: \d/ })).toBeVisible();
 });
 
+test("Outline quotas follow the upstream name and keep the last value on a provider failure", async ({ page }) => {
+  const quota = { limit: 500, remaining: 464.32, unit: "GB", updatedAt: "2026-11-21T15:00:00Z", stale: true };
+  await page.route("**/api/outline-usage", (route) => route.fulfill({
+    json: { "lv-2": quota, "al-1": null, "lv-1": { ...quota, remaining: 123 } },
+  }));
+  await page.goto("/admin");
+  const row = (name: string) => page.getByRole("row").filter({ has: page.getByRole("link", { name, exact: true }) });
+  await expect(page.getByRole("columnheader", { name: "Data remaining" })).toBeVisible();
+  await expect(row("lv-2").getByRole("cell", { name: /464\.32 of 500 GB/ })).toBeVisible();
+  await expect(row("lv-2")).toContainText("Out of date");
+  await expect(row("al-1")).toContainText("Remaining data unavailable");
+  await expect(row("lv-1")).not.toContainText("123 of 500 GB");
+
+  await page.getByRole("link", { name: "lv-2", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Upstream lv-2" })).toBeVisible();
+  await expect(page.getByText("Data remaining", { exact: true })).toBeVisible();
+  await expect(page.getByText("464.32 of 500 GB", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Language" }).click();
+  await page.getByRole("menuitemradio", { name: "Русский" }).click();
+  await expect(page.getByText("Остаток трафика", { exact: true })).toBeVisible();
+  await expect(page.getByText(/464,32 из 500\sГБ/)).toBeVisible();
+});
+
 test("the gateway totals and an upstream's page", async ({ page }) => {
   await page.goto("/admin");
   const totals = page.getByRole("region", { name: "Gateway" });
@@ -65,4 +88,37 @@ test("Russian, dark and strict CSP", async ({ browser, baseURL }) => {
   const background = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
   expect(background).toBe("rgb(11, 15, 23)");
   await context.close();
+});
+
+test("chart and console follow a manual theme and language without losing the chart window", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.goto("/admin");
+  await page.getByRole("button", { name: "Window: 1 min" }).click();
+  await page.getByRole("menuitemradio", { name: "5 min", exact: true }).click();
+  const gridPixels = (r: number, g: number, b: number) =>
+    page.locator("figure canvas").evaluate((canvas: HTMLCanvasElement, rgb) => {
+      const { data } = canvas.getContext("2d")!.getImageData(0, 0, canvas.width, canvas.height);
+      for (let i = 0; i < data.length; i += 4) {
+        if (data[i] === rgb[0] && data[i + 1] === rgb[1] && data[i + 2] === rgb[2]) return true;
+      }
+      return false;
+    }, [r, g, b]);
+  await expect.poll(() => gridPixels(209, 213, 219)).toBe(true);
+  const theme = page.getByRole("button", { name: "Theme" });
+  await expect(page.getByRole("button", { name: "Window: 5 min" })).toBeFocused();
+  await theme.press("Enter");
+  await expect(page.getByRole("menuitemradio", { name: "System" })).toHaveAttribute("aria-checked", "true");
+  await pressIn(page.getByRole("menu"), "d");
+  await page.keyboard.press("Enter");
+  await expect(theme).toBeFocused();
+  await expect(page.locator("body")).toHaveCSS("background-color", "rgb(11, 15, 23)");
+  await expect.poll(() => gridPixels(51, 65, 85)).toBe(true);
+  await page.getByRole("button", { name: "Language" }).click();
+  await page.getByRole("menuitemradio", { name: "Русский" }).click();
+  await expect(page.getByRole("region", { name: "Шлюз" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Окно: 5 мин" })).toBeVisible();
+  const caption = page.locator("figcaption");
+  await expect(caption).toContainText(/бит/);
+  const before = await caption.innerText();
+  await expect(caption).not.toHaveText(before);
 });

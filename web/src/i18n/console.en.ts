@@ -16,6 +16,13 @@ export const consoleEn = {
     clientMtu: "Client MTU",
     blocked: (n: number) => `${n} blocked: no upstream fits`,
   },
+  outlineUsage: {
+    title: "Data remaining",
+    remaining: (remaining: string, limit: string) => `${remaining} of ${limit}`,
+    unavailable: "Remaining data unavailable",
+    stale: "Out of date",
+    updated: (time: string) => `Data updated ${time}`,
+  },
   upstream: {
     title: (name: string) => `Upstream ${name}`,
     missing: "The gateway has no upstream of this name.",

@@ -4,9 +4,10 @@
 
 import "uplot/dist/uPlot.min.css";
 import type { JSX } from "@solidjs/web";
-import { createEffect, onSettled, untrack } from "solid-js";
+import { createEffect, onSettled } from "solid-js";
 import uPlot from "uplot";
-import { useI18n } from "../i18n";
+import { useI18n, type Locale } from "../i18n";
+import { usePreferences } from "../preferences";
 import { loneValues } from "./loneValues";
 
 export interface ChartSeries {
@@ -33,10 +34,8 @@ export interface LineChartProps {
 }
 
 export function LineChart(props: LineChartProps) {
-  const { locale } = useI18n();
-  const clock = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-  const hours = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" });
-  const days = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" });
+  const lang = useI18n();
+  const prefs = usePreferences();
   // uPlot keeps ticks 40 px apart by default, which crowds 12-hour labels
   // such as "04:29:40 PM" into each other; leave room for the widest one.
   const sample = new Date(2000, 11, 28, 23, 58, 58);
@@ -49,7 +48,10 @@ export function LineChart(props: LineChartProps) {
   let el!: HTMLDivElement;
   let plot: uPlot | undefined;
 
-  const options = (width: number): uPlot.Options => {
+  const options = (width: number, locale: Locale): uPlot.Options => {
+    const clock = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const hours = new Intl.DateTimeFormat(locale, { hour: "2-digit", minute: "2-digit" });
+    const days = new Intl.DateTimeFormat(locale, { month: "short", day: "numeric" });
     const style = getComputedStyle(el);
     const token = (name: string) => style.getPropertyValue(name).trim();
     const axis: uPlot.Axis = {
@@ -89,22 +91,21 @@ export function LineChart(props: LineChartProps) {
     };
   };
 
+  // The canvas captures CSS colours and Intl tick formats at construction.
+  // Rebuild only the plot on a display change, retaining the live data window.
+  createEffect(
+    () => [lang.locale, prefs.theme()] as const,
+    ([locale]) => {
+      const current = new uPlot(options(el.clientWidth, locale), props.data as uPlot.AlignedData, el);
+      plot = current;
+      return () => current.destroy();
+    },
+  );
+
   onSettled(() => {
-    // Colours come from CSS, so a theme switch rebuilds the plot.
-    const dark = matchMedia("(prefers-color-scheme: dark)");
-    const build = () => {
-      plot?.destroy();
-      plot = new uPlot(options(el.clientWidth), untrack(() => props.data) as uPlot.AlignedData, el);
-    };
     const resize = new ResizeObserver(() => plot?.setSize({ width: el.clientWidth, height: props.height ?? 200 }));
-    build();
     resize.observe(el);
-    dark.addEventListener("change", build);
-    return () => {
-      resize.disconnect();
-      dark.removeEventListener("change", build);
-      plot?.destroy();
-    };
+    return () => resize.disconnect();
   });
 
   createEffect(

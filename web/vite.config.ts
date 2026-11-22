@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import solid from "@solidjs/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
-import type { Plugin } from "vite";
+import type { Plugin, ViteDevServer } from "vite";
 import { defineConfig } from "vitest/config";
 
 // The CSP the panel sends (internal/web/headers.go), spelled out. `vite
@@ -35,8 +35,22 @@ function keepGitkeep(): Plugin {
   };
 }
 
+function disableOutlineUsage({ middlewares }: Pick<ViteDevServer, "middlewares">) {
+  middlewares.use("/api/outline-usage", (_request, response) => {
+    response.statusCode = 204;
+    response.end();
+  });
+}
+
 export default defineConfig(({ mode }) => ({
-  plugins: [solid(), tailwindcss(), mode === "e2e" ? [] : keepGitkeep()],
+  plugins: [
+    solid(),
+    tailwindcss(),
+    mode === "e2e" ? [] : keepGitkeep(),
+    mode === "e2e" || mode === "development"
+      ? { name: "lotsman:fake-outline-usage", configureServer: disableOutlineUsage, configurePreviewServer: disableOutlineUsage }
+      : [],
+  ],
   build: {
     // The production build goes where the Go side embeds it (internal/web);
     // the e2e build (fake daemon inside) stays local.

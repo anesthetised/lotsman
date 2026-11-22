@@ -10,6 +10,7 @@ import { selfApi } from "../../api/client";
 import { linkToken } from "../../api/link";
 import { createLive, num } from "../../api/live";
 import { RightsSchema } from "../../gen/lotsman/v1/user_pb";
+import { DisplayPreferences } from "../../ui/DisplayPreferences";
 import { useI18n } from "../../i18n";
 import { buttonClass } from "../../ui/button";
 import { SkipLink } from "../SkipLink";
@@ -28,6 +29,12 @@ export default function UserPage() {
   return (
     <div class="min-h-screen">
       <SkipLink />
+      <header class="border-b border-line bg-surface">
+        <div class="mx-auto flex max-w-5xl flex-wrap items-center justify-between gap-2 px-4 py-1">
+          <span class="text-sm font-semibold">{t.app.name}</span>
+          <DisplayPreferences />
+        </div>
+      </header>
       <main id="main" class="mx-auto max-w-5xl space-y-4 px-4 py-6">
         <Show when={token} fallback={<Problem text={t.user.badLink} />}>
           {(token) => (

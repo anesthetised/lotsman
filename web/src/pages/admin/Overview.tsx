@@ -6,7 +6,7 @@ import { durationMs, timestampMs } from "@bufbuild/protobuf/wkt";
 import { createMemo, createSignal, Errored, For, Loading, Show } from "solid-js";
 import { api } from "../../api/client";
 import { appendKeyed, appendRow, createLive, num } from "../../api/live";
-import type { StatusSnapshot, UpstreamStatus } from "../../gen/lotsman/v1/status_pb";
+import { type StatusSnapshot, UpstreamKind, type UpstreamStatus } from "../../gen/lotsman/v1/status_pb";
 import { useI18n } from "../../i18n";
 import { useConsoleI18n } from "../../i18n/console";
 import { ChoiceMenu } from "../../ui/ChoiceMenu";
@@ -17,6 +17,7 @@ import { Availability } from "../Availability";
 import { LiveError } from "../LiveError";
 import { kindLabel, stateLabel, stateLevel } from "../upstream";
 import { IncidentBadge } from "./IncidentList";
+import { OutlineQuota, type OutlineQuotaValue, useOutlineUsage } from "./OutlineQuota";
 
 const windows = ["1", "5", "15"] as const;
 type Window = (typeof windows)[number];
@@ -33,8 +34,12 @@ export default function Overview() {
 }
 
 function LiveOverview() {
-  const { t, fmt } = useI18n();
+  const { t, fmt, c } = useConsoleI18n();
   const snapshot = createLive((signal) => api.status.watch({}, { signal }));
+  const outlineUsage = useOutlineUsage();
+  const showQuota = createMemo(() =>
+    snapshot().upstreams.some((upstream) => upstream.kind === UpstreamKind.OUTLINE && outlineUsage()[upstream.name] !== undefined),
+  );
   const [window, setWindow] = createSignal<Window>("1");
 
   // Keep the longest window; the chart shows its tail.
@@ -96,6 +101,9 @@ function LiveOverview() {
           <thead class="text-left text-xs text-muted">
             <tr>
               <th scope="col" class="px-3 py-2 font-medium">{t.admin.name}</th>
+              <Show when={showQuota()}>
+                <th scope="col" class="px-3 py-2 font-medium">{c.outlineUsage.title}</th>
+              </Show>
               <th scope="col" class="px-3 py-2 font-medium">{t.admin.state}</th>
               <th scope="col" class="px-3 py-2 text-right font-medium">{t.admin.latency}</th>
               <th scope="col" class="px-3 py-2 font-medium">{t.admin.peers}</th>
@@ -107,7 +115,14 @@ function LiveOverview() {
           </thead>
           <tbody>
             <For each={snapshot().upstreams} keyed={(u) => u.name}>
-              {(u) => <UpstreamRow upstream={u()} trend={trends()[u().name] ?? []} />}
+              {(u) => (
+                <UpstreamRow
+                  upstream={u()}
+                  trend={trends()[u().name] ?? []}
+                  showQuota={showQuota()}
+                  quota={outlineUsage()[u().name]}
+                />
+              )}
             </For>
           </tbody>
         </table>
@@ -146,7 +161,12 @@ function Totals(props: { snapshot: StatusSnapshot }) {
   );
 }
 
-function UpstreamRow(props: { upstream: UpstreamStatus; trend: readonly number[] }) {
+function UpstreamRow(props: {
+  upstream: UpstreamStatus;
+  trend: readonly number[];
+  showQuota: boolean;
+  quota?: OutlineQuotaValue | null;
+}) {
   const { t, fmt } = useI18n();
   const u = () => props.upstream;
   return (
@@ -159,6 +179,13 @@ function UpstreamRow(props: { upstream: UpstreamStatus; trend: readonly number[]
           {kindLabel(u().kind)} · {u().geo}
         </div>
       </th>
+      <Show when={props.showQuota}>
+        <td class="px-3 py-1.5">
+          <Show when={u().kind === UpstreamKind.OUTLINE && props.quota !== undefined} fallback={<span class="text-muted">—</span>}>
+            <OutlineQuota quota={props.quota} />
+          </Show>
+        </td>
+      </Show>
       <td class="px-3 py-1.5">
         <div class="flex flex-col items-start gap-1">
           <StateBadge level={stateLevel(u().state)} label={stateLabel(t, u().state)} />
