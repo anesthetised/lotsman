@@ -13,5 +13,5 @@ export function subscriptionExpiry(upstream: UpstreamStatus, quota?: OutlineQuot
 
 export function SubscriptionExpiry(props: { date: Date }) {
   const { fmt } = useI18n();
-  return <time datetime={props.date.toISOString()}>{fmt.dateTime(props.date, true)}</time>;
+  return <time class="whitespace-nowrap" datetime={props.date.toISOString()}>{fmt.dateTime(props.date, true)}</time>;
 }
