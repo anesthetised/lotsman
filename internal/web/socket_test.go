@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,7 +28,6 @@ import (
 // connection and history services. Its users are nil unless a test sets
 // them.
 type fakeSource struct {
-	control.ConnectionSource
 	control.HistorySource
 	control.IncidentSource
 	*controltest.Users
@@ -38,7 +38,9 @@ func (fakeSource) Ready() <-chan struct{} {
 	close(ready)
 	return ready
 }
-func (fakeSource) ClientMTU() int { return 1280 }
+func (fakeSource) ClientMTU() int                              { return 1280 }
+func (fakeSource) Subnet() netip.Prefix                        { return netip.Prefix{} }
+func (fakeSource) PeerRoutes() map[netip.Addr]daemon.PeerRoute { return nil }
 func (fakeSource) Status() daemon.Status {
 	return daemon.Status{Upstreams: []daemon.UpstreamStatus{{Name: "nl", Kind: "awg"}}}
 }

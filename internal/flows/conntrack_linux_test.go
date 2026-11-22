@@ -174,19 +174,20 @@ func TestConntrackFlows(t *testing.T) {
 	})
 	t.Cleanup(func() { tcp.Close(); udp.Close() })
 
-	m := &Meter{
-		Source: Conntrack{},
-		Peers:  fakePeers{netip.MustParseAddr("10.77.0.2"): {ID: "alice", Upstream: "a"}},
-		Subnet: netip.MustParsePrefix("10.77.0.0/24"),
-	}
+	peers := fakePeers{netip.MustParseAddr("10.77.0.2"): {ID: "alice", Upstream: "a"}}
+	subnet := netip.MustParsePrefix("10.77.0.0/24")
+	sampler := NewSampler(Conntrack{}, peers, subnet)
+	m := &Meter{Source: sampler, Peers: peers, Subnet: subnet}
 	exchange(t, tcp, 1000)
 	exchange(t, udp, 100)
+	sampler.sample(time.Now())
 	if _, err := m.Snapshot(); err != nil {
 		t.Fatal(err)
 	}
 	time.Sleep(100 * time.Millisecond)
 	exchange(t, tcp, 1000)
 	exchange(t, udp, 100)
+	sampler.sample(time.Now())
 	s, err := m.Snapshot()
 	if err != nil {
 		t.Fatal(err)
@@ -204,6 +205,15 @@ func TestConntrackFlows(t *testing.T) {
 		// The servers answer with more than they get: down outweighs up.
 		if f.UpBytes == 0 || f.DownBytes <= f.UpBytes || f.UpRate == 0 || f.DownRate <= f.UpRate {
 			t.Errorf("protocol %d: up %d B at %d B/s, down %d B at %d B/s", f.Protocol, f.UpBytes, f.UpRate, f.DownBytes, f.DownRate)
+		}
+	}
+	late := snapshot(t, &Meter{Source: sampler, Peers: peers, Subnet: subnet})
+	if len(late.Flows) != 2 {
+		t.Fatalf("late view = %+v, want both connections", late)
+	}
+	for _, f := range late.Flows {
+		if f.LastTraffic.IsZero() || f.DownRate != 0 || f.UpRate != 0 {
+			t.Errorf("late view flow = %+v, want observed traffic and no rates", f)
 		}
 	}
 }

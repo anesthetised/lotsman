@@ -17,7 +17,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file lotsman/v1/connection.proto.
  */
 export const file_lotsman_v1_connection: GenFile = /*@__PURE__*/
-  fileDesc("Chtsb3RzbWFuL3YxL2Nvbm5lY3Rpb24ucHJvdG8SCmxvdHNtYW4udjEiVwoXV2F0Y2hDb25uZWN0aW9uc1JlcXVlc3QSDwoHcGVlcl9pZBgBIAEoCRIrCghpbnRlcnZhbBgCIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbiJ+ChJDb25uZWN0aW9uU25hcHNob3QSKAoEdGltZRgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKwoLY29ubmVjdGlvbnMYAiADKAsyFi5sb3RzbWFuLnYxLkNvbm5lY3Rpb24SEQoJdHJ1bmNhdGVkGAMgASgIIoECCgpDb25uZWN0aW9uEg8KB3BlZXJfaWQYASABKAkSJgoIcHJvdG9jb2wYAiABKA4yFC5sb3RzbWFuLnYxLlByb3RvY29sEg4KBnNvdXJjZRgDIAEoCRITCgtkZXN0aW5hdGlvbhgEIAEoCRIQCgh1cHN0cmVhbRgFIAEoCRIrCgdzdGFydGVkGAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIkCgd0cmFmZmljGAcgASgLMhMubG90c21hbi52MS5UcmFmZmljEjAKDGxhc3RfdHJhZmZpYxgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAqWwoIUHJvdG9jb2wSGAoUUFJPVE9DT0xfVU5TUEVDSUZJRUQQABIQCgxQUk9UT0NPTF9UQ1AQARIQCgxQUk9UT0NPTF9VRFAQAhIRCg1QUk9UT0NPTF9JQ01QEAMyYwoRQ29ubmVjdGlvblNlcnZpY2USTgoFV2F0Y2gSIy5sb3RzbWFuLnYxLldhdGNoQ29ubmVjdGlvbnNSZXF1ZXN0Gh4ubG90c21hbi52MS5Db25uZWN0aW9uU25hcHNob3QwAUI6WjhnaXRodWIuY29tL2FuZXN0aGV0aXNlZC9sb3RzbWFuL2FwaS9sb3RzbWFuL3YxO2xvdHNtYW52MWIGcHJvdG8z", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_lotsman_v1_status]);
+  fileDesc("Chtsb3RzbWFuL3YxL2Nvbm5lY3Rpb24ucHJvdG8SCmxvdHNtYW4udjEiaQoXV2F0Y2hDb25uZWN0aW9uc1JlcXVlc3QSDwoHcGVlcl9pZBgBIAEoCRIrCghpbnRlcnZhbBgCIAEoCzIZLmdvb2dsZS5wcm90b2J1Zi5EdXJhdGlvbhIQCghwZWVyX2lkcxgDIAMoCSJ+ChJDb25uZWN0aW9uU25hcHNob3QSKAoEdGltZRgBIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASKwoLY29ubmVjdGlvbnMYAiADKAsyFi5sb3RzbWFuLnYxLkNvbm5lY3Rpb24SEQoJdHJ1bmNhdGVkGAMgASgIIoECCgpDb25uZWN0aW9uEg8KB3BlZXJfaWQYASABKAkSJgoIcHJvdG9jb2wYAiABKA4yFC5sb3RzbWFuLnYxLlByb3RvY29sEg4KBnNvdXJjZRgDIAEoCRITCgtkZXN0aW5hdGlvbhgEIAEoCRIQCgh1cHN0cmVhbRgFIAEoCRIrCgdzdGFydGVkGAYgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIkCgd0cmFmZmljGAcgASgLMhMubG90c21hbi52MS5UcmFmZmljEjAKDGxhc3RfdHJhZmZpYxgIIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAqWwoIUHJvdG9jb2wSGAoUUFJPVE9DT0xfVU5TUEVDSUZJRUQQABIQCgxQUk9UT0NPTF9UQ1AQARIQCgxQUk9UT0NPTF9VRFAQAhIRCg1QUk9UT0NPTF9JQ01QEAMyYwoRQ29ubmVjdGlvblNlcnZpY2USTgoFV2F0Y2gSIy5sb3RzbWFuLnYxLldhdGNoQ29ubmVjdGlvbnNSZXF1ZXN0Gh4ubG90c21hbi52MS5Db25uZWN0aW9uU25hcHNob3QwAUI6WjhnaXRodWIuY29tL2FuZXN0aGV0aXNlZC9sb3RzbWFuL2FwaS9sb3RzbWFuL3YxO2xvdHNtYW52MWIGcHJvdG8z", [file_google_protobuf_duration, file_google_protobuf_timestamp, file_lotsman_v1_status]);
 
 /**
  * @generated from message lotsman.v1.WatchConnectionsRequest
@@ -32,6 +32,13 @@ export type WatchConnectionsRequest = Message<"lotsman.v1.WatchConnectionsReques
    * @generated from field: google.protobuf.Duration interval = 2;
    */
   interval?: Duration | undefined;
+
+  /**
+   * union with peer_id; both empty = all peers
+   *
+   * @generated from field: repeated string peer_ids = 3;
+   */
+  peerIds: string[];
 };
 
 /**
@@ -114,7 +121,7 @@ export type Connection = Message<"lotsman.v1.Connection"> & {
   traffic?: Traffic | undefined;
 
   /**
-   * latest snapshot with new bytes on this watch; unset until observed
+   * latest gateway sample with new bytes; unset until observed
    *
    * @generated from field: google.protobuf.Timestamp last_traffic = 8;
    */

@@ -54,13 +54,12 @@ export function createFakeTransport(options: FakeOptions = {}): Transport {
       watch: (req, ctx) => {
         operator();
         // Like the daemon, each stream meters on its own: its first snapshot has bytes but no rates.
-        let observedAfter: number | undefined;
+        let first = true;
+        const ids = req.peerId ? [...req.peerIds, req.peerId] : req.peerIds;
         return watch(req.interval, ctx.signal, () => {
-          const s = sim.connections(req.peerId, observedAfter);
-          if (observedAfter === undefined) {
-            withoutRates(s);
-            observedAfter = s.time ? timestampMs(s.time) : clock();
-          }
+          const s = sim.connections(ids);
+          if (first) withoutRates(s);
+          first = false;
           return s;
         });
       },

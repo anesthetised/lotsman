@@ -3,9 +3,8 @@
 //
 // Forwarding happens in the kernel, so the daemon never sees the packets.
 // Conntrack counts the bytes of every flow in each direction (with
-// net.netfilter.nf_conntrack_acct=1); a Meter polls it and turns the
-// counters into rates from the deltas between polls. Nothing here is stored
-// or logged: a snapshot lives as long as its caller keeps it.
+// net.netfilter.nf_conntrack_acct=1). A Sampler observes the open flows
+// in memory, and a Meter turns their counters into rates for each viewer.
 package flows
 
 import (
@@ -37,6 +36,9 @@ type Entry struct {
 	OrigBytes   uint64    // sent in the original direction
 	ReplyBytes  uint64    // sent back
 	Start       time.Time // zero unless net.netfilter.nf_conntrack_timestamp is on
+
+	sampled              bool
+	started, lastTraffic time.Time
 }
 
 // Source lists the current conntrack entries.
@@ -66,7 +68,7 @@ type Flow struct {
 	Destination netip.AddrPort
 	Upstream    string
 	Started     time.Time // zero when unknown
-	LastTraffic time.Time // zero until this meter sees new bytes
+	LastTraffic time.Time // zero until new bytes have been observed
 	DownBytes   uint64    // since the flow started
 	UpBytes     uint64
 	DownRate    uint64 // bytes per second since the previous snapshot
@@ -83,18 +85,19 @@ type Snapshot struct {
 // own Meter, since rates are deltas between that viewer's snapshots. It is
 // not safe for concurrent use.
 type Meter struct {
-	Source Source
-	Peers  Peers
-	Subnet netip.Prefix // the client subnet
-	Peer   string       // only this peer's flows; "" for every peer
-	Limit  int          // DefaultLimit when zero
-	Now    func() time.Time
+	Source  Source
+	Peers   Peers
+	Subnet  netip.Prefix    // the client subnet
+	PeerIDs map[string]bool // empty for every peer
+	Limit   int             // DefaultLimit when zero
+	Now     func() time.Time
 
 	polled time.Time      // of the previous snapshot; zero before the first
 	seen   map[key]record // the flows of the previous snapshot
 }
 
 type key struct {
+	peer        string
 	protocol    Protocol
 	source      netip.AddrPort
 	destination netip.AddrPort
@@ -127,36 +130,13 @@ func (m *Meter) Snapshot() (Snapshot, error) {
 	seen := map[key]record{}
 	var out []Flow
 	for _, e := range entries {
-		// Only flows clients opened into the internet: not the host's own,
-		// not a client's ping to the gateway.
-		if !m.Subnet.Contains(e.Source.Addr()) || m.Subnet.Contains(e.Destination.Addr()) {
+		p, ok := clientFlow(e, m.Subnet, peers)
+		if !ok || (len(m.PeerIDs) != 0 && !m.PeerIDs[p.ID]) {
 			continue
 		}
-		p, ok := peers[e.Source.Addr()]
-		if !ok || (m.Peer != "" && p.ID != m.Peer) {
-			continue
-		}
-		k := key{e.Protocol, e.Source, e.Destination}
-		cur := record{orig: e.OrigBytes, reply: e.ReplyBytes, start: e.Start, started: e.Start}
-		var up, down uint64 // bytes since the previous snapshot
+		k := key{p.ID, e.Protocol, e.Source, e.Destination}
 		prev, known := m.seen[k]
-		switch {
-		case known && cur.orig >= prev.orig && cur.reply >= prev.reply && cur.start.Equal(prev.start):
-			up, down = cur.orig-prev.orig, cur.reply-prev.reply
-			cur.started = prev.started
-			cur.lastTraffic = prev.lastTraffic
-		case !m.polled.IsZero():
-			// New since the previous snapshot, or the tuple was reused by a
-			// new flow (counters went back or the start moved): all of its
-			// bytes are from this interval.
-			up, down = cur.orig, cur.reply
-			if cur.started.IsZero() {
-				cur.started = now
-			}
-		}
-		if up > 0 || down > 0 {
-			cur.lastTraffic = now
-		}
+		cur, up, down := observe(e, prev, known, !m.polled.IsZero(), now)
 		seen[k] = cur
 		out = append(out, Flow{
 			PeerID: p.ID, Protocol: e.Protocol, Source: e.Source, Destination: e.Destination,
@@ -182,6 +162,38 @@ func (m *Meter) Snapshot() (Snapshot, error) {
 		s.Flows, s.Truncated = out[:limit], true
 	}
 	return s, nil
+}
+
+// Only flows clients opened into the internet, including their DNS queries.
+func clientFlow(e Entry, subnet netip.Prefix, peers map[netip.Addr]Peer) (Peer, bool) {
+	p, ok := peers[e.Source.Addr()]
+	return p, ok && subnet.Contains(e.Source.Addr()) && !subnet.Contains(e.Destination.Addr())
+}
+
+// observe returns the current flow record and newly observed bytes, up then
+// down. A reused tuple is a new flow when its counters reset or start moves.
+func observe(e Entry, prev record, known, polled bool, now time.Time) (cur record, up, down uint64) {
+	cur = record{orig: e.OrigBytes, reply: e.ReplyBytes, start: e.Start, started: e.Start}
+	if e.sampled && !e.started.IsZero() {
+		cur.start = e.started // also identifies replacements observed between Watch updates
+	}
+	switch {
+	case known && cur.orig >= prev.orig && cur.reply >= prev.reply && cur.start.Equal(prev.start):
+		up, down = cur.orig-prev.orig, cur.reply-prev.reply
+		cur.started, cur.lastTraffic = prev.started, prev.lastTraffic
+	case polled:
+		up, down = cur.orig, cur.reply
+		if cur.started.IsZero() {
+			cur.started = now
+		}
+	}
+	switch {
+	case e.sampled:
+		cur.started, cur.lastTraffic = e.started, e.lastTraffic
+	case up > 0 || down > 0:
+		cur.lastTraffic = now
+	}
+	return cur, up, down
 }
 
 func rate(bytes uint64, elapsed time.Duration) uint64 {

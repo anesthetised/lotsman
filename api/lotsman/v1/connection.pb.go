@@ -82,6 +82,7 @@ type WatchConnectionsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	PeerId        string                 `protobuf:"bytes,1,opt,name=peer_id,json=peerId,proto3" json:"peer_id,omitempty"`
 	Interval      *durationpb.Duration   `protobuf:"bytes,2,opt,name=interval,proto3" json:"interval,omitempty"`
+	PeerIds       []string               `protobuf:"bytes,3,rep,name=peer_ids,json=peerIds,proto3" json:"peer_ids,omitempty"` // union with peer_id; both empty = all peers
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -126,6 +127,13 @@ func (x *WatchConnectionsRequest) GetPeerId() string {
 func (x *WatchConnectionsRequest) GetInterval() *durationpb.Duration {
 	if x != nil {
 		return x.Interval
+	}
+	return nil
+}
+
+func (x *WatchConnectionsRequest) GetPeerIds() []string {
+	if x != nil {
+		return x.PeerIds
 	}
 	return nil
 }
@@ -199,7 +207,7 @@ type Connection struct {
 	Upstream      string                 `protobuf:"bytes,5,opt,name=upstream,proto3" json:"upstream,omitempty"`
 	Started       *timestamppb.Timestamp `protobuf:"bytes,6,opt,name=started,proto3" json:"started,omitempty"`
 	Traffic       *Traffic               `protobuf:"bytes,7,opt,name=traffic,proto3" json:"traffic,omitempty"`
-	LastTraffic   *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_traffic,json=lastTraffic,proto3" json:"last_traffic,omitempty"` // latest snapshot with new bytes on this watch; unset until observed
+	LastTraffic   *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=last_traffic,json=lastTraffic,proto3" json:"last_traffic,omitempty"` // latest gateway sample with new bytes; unset until observed
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -295,10 +303,11 @@ var File_lotsman_v1_connection_proto protoreflect.FileDescriptor
 const file_lotsman_v1_connection_proto_rawDesc = "" +
 	"\n" +
 	"\x1blotsman/v1/connection.proto\x12\n" +
-	"lotsman.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x17lotsman/v1/status.proto\"i\n" +
+	"lotsman.v1\x1a\x1egoogle/protobuf/duration.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x17lotsman/v1/status.proto\"\x84\x01\n" +
 	"\x17WatchConnectionsRequest\x12\x17\n" +
 	"\apeer_id\x18\x01 \x01(\tR\x06peerId\x125\n" +
-	"\binterval\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\binterval\"\x9c\x01\n" +
+	"\binterval\x18\x02 \x01(\v2\x19.google.protobuf.DurationR\binterval\x12\x19\n" +
+	"\bpeer_ids\x18\x03 \x03(\tR\apeerIds\"\x9c\x01\n" +
 	"\x12ConnectionSnapshot\x12.\n" +
 	"\x04time\x18\x01 \x01(\v2\x1a.google.protobuf.TimestampR\x04time\x128\n" +
 	"\vconnections\x18\x02 \x03(\v2\x16.lotsman.v1.ConnectionR\vconnections\x12\x1c\n" +

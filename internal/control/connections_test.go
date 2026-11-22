@@ -27,10 +27,10 @@ import (
 var (
 	aliceAddr = netip.MustParseAddr("10.77.0.2")
 	bobAddr   = netip.MustParseAddr("10.77.0.3")
+	carolAddr = netip.MustParseAddr("10.77.0.4")
 )
 
-// fakeRoutes is a ready daemon with alice (p_7, via nl) and bob (p_12,
-// blocked) in 10.77.0.0/24.
+// fakeRoutes is a ready daemon with three peers in 10.77.0.0/24.
 type fakeRoutes struct{}
 
 func (fakeRoutes) Ready() <-chan struct{} {
@@ -43,6 +43,7 @@ func (fakeRoutes) PeerRoutes() map[netip.Addr]daemon.PeerRoute {
 	return map[netip.Addr]daemon.PeerRoute{
 		aliceAddr: {ID: 7, User: "alice", Device: "phone", Upstream: "nl"},
 		bobAddr:   {ID: 12, User: "bob", Device: "default"},
+		carolAddr: {ID: 13, User: "carol", Device: "tablet", Upstream: "de"},
 	}
 }
 
@@ -81,7 +82,7 @@ func connectionServer(src ConnectionSource, ct flows.Source) (lotsmanv1connect.C
 			return err
 		}
 	})
-	lotsmanv1connect.RegisterConnectionServiceHandler(s, connectionService{src, ct})
+	lotsmanv1connect.RegisterConnectionServiceHandler(s, connectionService{src: src, conntrack: ct})
 	return lotsmanv1connect.NewConnectionServiceClient(connect.NewClient(connectinprocess.New(s))), done
 }
 
@@ -196,6 +197,23 @@ func TestConnectionsWatchEveryPeer(t *testing.T) {
 	}
 }
 
+func TestConnectionsWatchSeveralPeers(t *testing.T) {
+	ct := &fakeConntrack{}
+	ct.set(tcpEntry(aliceAddr, 100, 1000), tcpEntry(bobAddr, 1, 1), tcpEntry(carolAddr, 100, 2500))
+	client, _ := connectionServer(fakeRoutes{}, ct)
+	got, err := watchConnections(t, client, &lotsmanv1.WatchConnectionsRequest{PeerId: "p_7", PeerIds: []string{"p_12", "p_7"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []string
+	for _, c := range got.Connections {
+		ids = append(ids, c.PeerId)
+	}
+	if diff := cmp.Diff([]string{"p_7", "p_12"}, ids); diff != "" {
+		t.Errorf("filtered peers (-want +got):\n%s", diff)
+	}
+}
+
 func TestConnectionsWatchErrors(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -206,6 +224,7 @@ func TestConnectionsWatchErrors(t *testing.T) {
 		{"invalid interval", &lotsmanv1.WatchConnectionsRequest{Interval: &durationpb.Duration{Seconds: 1, Nanos: -1}}, nil, connect.CodeInvalidArgument},
 		// The store id alone is not a peer id.
 		{"unknown peer", &lotsmanv1.WatchConnectionsRequest{PeerId: "7"}, nil, connect.CodeNotFound},
+		{"unknown peer among several", &lotsmanv1.WatchConnectionsRequest{PeerIds: []string{"p_7", "p_99"}}, nil, connect.CodeNotFound},
 		{"no conntrack", &lotsmanv1.WatchConnectionsRequest{}, fmt.Errorf("conntrack needs Linux: %w", errors.ErrUnsupported), connect.CodeFailedPrecondition},
 		{"conntrack fails", &lotsmanv1.WatchConnectionsRequest{}, errors.New("netlink: operation not permitted"), connect.CodeUnavailable},
 	} {
