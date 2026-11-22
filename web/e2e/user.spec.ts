@@ -38,6 +38,13 @@ test("device cards start collapsed, keep route drafts, and put the add control f
   await expect(phone).toContainText(/Down .+ · Up /);
   await expect(phone).toContainText("Now: Latvia · provider-a");
   await expect(phone.getByRole("region", { name: "Route phone" })).toBeHidden();
+  if (info.project.name === "desktop") {
+    for (const colorScheme of ["dark", "light"] as const) {
+      await page.emulateMedia({ colorScheme });
+      await toggle.hover();
+      await expect(toggle).toHaveCSS("background-color", "rgba(0, 0, 0, 0)");
+    }
+  }
 
   await toggle.press("Enter");
   await expect(toggle).toHaveAttribute("aria-expanded", "true");

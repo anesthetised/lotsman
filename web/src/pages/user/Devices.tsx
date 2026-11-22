@@ -86,7 +86,7 @@ function DeviceCard(props: { device: Device }) {
   };
   return (
     <li class="rounded-xl border border-line bg-surface p-4">
-      <div class="relative grid gap-3">
+      <div class="group/device-summary relative grid gap-3">
         <div>
           <div class="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
             <h3 id={title()} class="min-w-0 flex-1 break-words text-lg font-medium">{props.device.name}</h3>
@@ -94,7 +94,7 @@ function DeviceCard(props: { device: Device }) {
               <Show when={exit()} fallback={<StateBadge level="bad" label={t.user.blocked} />}>
                 {(u) => <StateBadge level={stateLevel(u().state, u().routingBlock)} label={stateLabel(t, u().state, u().routingBlock)} />}
               </Show>
-              <span class={["text-muted", { "rotate-180": expanded() }]}><ChevronDownIcon /></span>
+              <span class={["text-muted group-hover/device-summary:text-fg", { "rotate-180": expanded() }]}><ChevronDownIcon /></span>
             </div>
           </div>
           <p class="mt-0.5 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted">
@@ -118,7 +118,7 @@ function DeviceCard(props: { device: Device }) {
         </p>
         <button
           type="button"
-          class="absolute inset-0 w-full cursor-pointer rounded-lg hover:bg-fg/5"
+          class="absolute inset-0 w-full cursor-pointer rounded-lg"
           aria-labelledby={title()}
           aria-controls={details()}
           aria-expanded={expanded() ? "true" : "false"}
