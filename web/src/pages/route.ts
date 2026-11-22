@@ -133,13 +133,13 @@ function usable(u: UpstreamStatus): boolean {
   return u.state === UpstreamState.UP || u.state === UpstreamState.DEGRADED;
 }
 
-function serves(c: Pick<CountryChoice, "geo" | "providers">, u: UpstreamStatus): boolean {
+export function matchesCountry(c: Pick<CountryChoice, "geo" | "providers">, u: Pick<UpstreamStatus, "geo" | "provider">): boolean {
   return u.geo === c.geo && (c.providers.length === 0 || c.providers.includes(u.provider));
 }
 
 /** A country of the draft now: whether a chosen provider has a usable exit, and the lowest latency among those. */
 export function countryNow(c: Pick<CountryChoice, "geo" | "providers">, exits: readonly UpstreamStatus[]): { available: boolean; latencyMs?: number } {
-  const live = exits.filter((u) => serves(c, u) && usable(u));
+  const live = exits.filter((u) => matchesCountry(c, u) && usable(u));
   const latencies = live.flatMap((u) => (u.latency ? [durationMs(u.latency)] : []));
   return { available: live.length > 0, latencyMs: latencies.length > 0 ? Math.min(...latencies) : undefined };
 }

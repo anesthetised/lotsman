@@ -15,6 +15,7 @@ import { buttonClass } from "../../ui/button";
 import { ChoiceMenu } from "../../ui/ChoiceMenu";
 import { LineChart } from "../../ui/LineChart";
 import { StateBadge } from "../../ui/StateBadge";
+import { availabilityHistory } from "../Availability";
 import { LiveError } from "../LiveError";
 import { kindLabel, stateLabel, stateLevel } from "../upstream";
 import { historyRanges, meanOf, type RangeKey, rateSeries, speedSeries } from "./history";
@@ -184,14 +185,18 @@ function History(props: { name: string }) {
 
 function HistoryCharts(props: { name: string; range: RangeKey }) {
   const { t, fmt, c } = useConsoleI18n();
-  const history = createMemo(() => {
+  const bounds = createMemo(() => {
     const r = historyRanges.find((x) => x.key === props.range)!;
     const to = Date.now();
+    return { from: to - r.span, to, step: r.step };
+  });
+  const history = createMemo(() => {
+    const { from, to, step } = bounds();
     return api.history.upstream({
       name: props.name,
-      from: timestampFromMs(to - r.span),
+      from: timestampFromMs(from),
       to: timestampFromMs(to),
-      step: durationFromMs(r.step),
+      step: durationFromMs(step),
     });
   });
   const step = () => (history().step ? durationMs(history().step!) : 60_000);
@@ -200,8 +205,14 @@ function HistoryCharts(props: { name: string; range: RangeKey }) {
     history().samples.map((s) => (s.time ? timestampMs(s.time) / 1000 : 0)),
     history().samples.map((s) => (s.latency ? durationMs(s.latency) : null)),
   ]);
-  const ratios = createMemo(() => history().samples.map((s) => s.upRatio));
-  const availability = () => ratios().reduce((a, b) => a + b, 0) / Math.max(ratios().length, 1);
+  const availability = createMemo(() => {
+    const { from, to, step } = bounds();
+    return availabilityHistory(history(), from, to, step);
+  });
+  const availabilityLabel = () => {
+    const average = availability().average;
+    return c.upstream.availability(c.upstream.ranges[props.range], average === undefined ? t.common.noData : fmt.percent(average));
+  };
   const total = (i: 1 | 2) => history().samples.reduce((sum, s) => sum + num(i === 1 ? s.downBytes : s.upBytes), 0);
   const speed = createMemo(() => speedSeries(history().samples));
   const meanSpeed = (i: 1 | 2) => {
@@ -210,12 +221,11 @@ function HistoryCharts(props: { name: string; range: RangeKey }) {
   };
   const latencies = () => latency()[1]!.filter((v): v is number => v !== null);
   const meanLatency = () => latencies().reduce((a, b) => a + b, 0) / Math.max(latencies().length, 1);
-  const rangeLabel = () => c.upstream.ranges[props.range];
   return (
     <div class="space-y-4">
       <div class="space-y-1">
-        <p class="text-xs text-muted">{c.upstream.availability(rangeLabel(), fmt.percent(availability()))}</p>
-        <AvailabilityBar ratios={ratios()} label={`${c.upstream.availability(rangeLabel(), fmt.percent(availability()))}`} />
+        <p class="text-xs text-muted">{availabilityLabel()}</p>
+        <AvailabilityBar ratios={availability().ratios} label={availabilityLabel()} />
       </div>
       <Show when={history().samples.length > 0} fallback={<p class="text-muted">{t.common.noData}</p>}>
         <div class="grid gap-4 lg:grid-cols-2">

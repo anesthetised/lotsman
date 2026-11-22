@@ -190,6 +190,7 @@ export const en = {
     },
     exits: "Exits",
     exitsIntro: "The exits you may use, and which of your devices go through them now.",
+    otherExits: (count: number) => `Other exits (${count})`,
     unused: "No device uses it now",
     usedBy: (devices: string) => `Used by ${devices}`,
     latency: "Latency",
