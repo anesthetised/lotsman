@@ -58,6 +58,7 @@ export function RouteEditor(props: RouteEditorProps) {
   const saved = createMemo(() => props.route ?? DEFAULT_ROUTE, { equals: (a, b) => equals(RouteSchema, a, b) });
   // The edits, until the stored route changes.
   const [draft, setDraft] = createSignal(() => draftOf(saved(), offer()));
+  const canApply = createMemo(() => chosen(draft()).length > 0);
   const dirty = createMemo(() => changed(draft(), saved(), offer()));
   const [applying, setApplying] = createSignal(false);
   const [failure, setFailure] = createSignal<() => string>();
@@ -67,6 +68,7 @@ export function RouteEditor(props: RouteEditorProps) {
     setFailure(undefined);
   };
   const apply = async () => {
+    if (!canApply()) return;
     setFailure(undefined);
     setApplying(true);
     const failed = await props.apply(routeOf(draft(), offer()));
@@ -98,7 +100,7 @@ export function RouteEditor(props: RouteEditorProps) {
             <button type="button" class={action} disabled={!dirty() || applying()} onClick={cancel}>
               {t.route.cancel}
             </button>
-            <button type="button" class={[...buttonClass("primary"), "min-h-11 px-4"]} disabled={!dirty() || applying() || props.busy} onClick={apply}>
+            <button type="button" class={[...buttonClass("primary"), "min-h-11 px-4"]} disabled={!canApply() || !dirty() || applying() || props.busy} onClick={apply}>
               {t.route.apply}
             </button>
           </div>
@@ -124,6 +126,7 @@ export function createNewRoute(exits: () => readonly UpstreamStatus[], providers
     offer,
     draft,
     setDraft,
+    canSubmit: () => offer().size === 0 || chosen(draft()).length > 0,
     route: (): Route | undefined => (changed(draft(), DEFAULT_ROUTE, offer()) ? routeOf(draft(), offer()) : undefined),
     reset: () => setDraft(draftOf(DEFAULT_ROUTE, offer())),
   };
@@ -219,8 +222,8 @@ export function RouteFields(props: RouteFieldsProps) {
             </button>
           </Show>
         </Show>
-        <div class={["min-w-0 py-1.5", { "opacity-50": !c().on }]}>
-          <p class="flex flex-wrap items-baseline gap-x-2 font-medium">
+        <div class="min-w-0 py-1.5">
+          <p class={["flex flex-wrap items-baseline gap-x-2 font-medium", { "text-muted": !c().on }]}>
             <span class="break-words">{name()}</span>
             <span class="text-xs font-normal tabular-nums text-muted">{latency(c(), props.exits, t, fmt.milliseconds)}</span>
           </p>
@@ -231,9 +234,8 @@ export function RouteFields(props: RouteFieldsProps) {
                   const down = () => !providerAvailable(c().geo, p, props.exits);
                   return (
                     <Chip
-                      pressed={c().providers.includes(p)}
-                      warn={c().on && down()}
-                      disabled={!c().on || (c().providers.length === 1 && c().providers.includes(p))}
+                      pressed={c().on && c().providers.includes(p)}
+                      warn={down()}
                       onChange={() => props.setDraft((d) => toggleProvider(d, c().geo, p, props.offer))}
                     >
                       {p}
@@ -250,7 +252,6 @@ export function RouteFields(props: RouteFieldsProps) {
         <Switch
           checked={c().on}
           label={t.route.use(name())}
-          disabled={c().on && chosen(props.draft).length === 1}
           onChange={() => props.setDraft((d) => toggleCountry(d, c().geo, props.offer))}
         />
       </li>
@@ -290,7 +291,9 @@ export function RouteFields(props: RouteFieldsProps) {
         checked={props.draft.strict}
         onChange={(strict) => props.setDraft((d) => ({ ...d, strict }))}
       />
-      <NoExit draft={props.draft} exits={props.exits} fix />
+      <Show when={chosen(props.draft).length > 0} fallback={<p role="status" class="text-muted">{t.route.chooseExit}</p>}>
+        <NoExit draft={props.draft} exits={props.exits} fix />
+      </Show>
     </>
   );
 }
