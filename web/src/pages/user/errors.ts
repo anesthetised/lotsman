@@ -9,6 +9,8 @@ import type { Dict } from "../../i18n/en";
 export type Failure =
   /** The link no longer resolves to a user: it was rotated or revoked. */
   | { kind: "revoked" }
+  /** The browser could not complete the request to the panel. */
+  | { kind: "connection" }
   /** The panel cannot reach the daemon, or the call timed out. */
   | { kind: "unavailable" }
   /** Not allowed: `users.max_devices` is 0, or the operator sets the user's routes. */
@@ -28,6 +30,14 @@ export type Failure =
 
 export function failureOf(error: unknown): Failure {
   const e = ConnectError.from(error);
+  // Connect wraps fetch's TypeError as Unknown and preserves it as the cause.
+  if (
+    e.code === Code.Unknown &&
+    e.cause instanceof TypeError &&
+    /^(Failed to fetch|Load failed|NetworkError when attempting to fetch resource\.?)$/.test(e.rawMessage)
+  ) {
+    return { kind: "connection" };
+  }
   switch (e.code) {
     case Code.Unauthenticated:
       return { kind: "revoked" };
@@ -66,6 +76,8 @@ export function failureText(t: Dict, failure: Failure): string {
   switch (failure.kind) {
     case "revoked":
       return t.user.revoked;
+    case "connection":
+      return text.connection;
     case "unavailable":
       return text.unavailable;
     case "denied":

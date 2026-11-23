@@ -41,8 +41,20 @@ describe("failureOf", () => {
   test("a refused name carries the daemon's reason; anything else its message", () => {
     expect(failure(Code.InvalidArgument, "route: no exit in country FI")).toEqual({ kind: "invalid", message: "route: no exit in country FI" });
     expect(failure(Code.Internal, "users: internal error")).toEqual({ kind: "other", message: "users: internal error" });
-    expect(failureOf(new TypeError("Failed to fetch")).kind).toBe("other");
+    expect(failure(Code.Unknown, "Failed to fetch")).toEqual({ kind: "other", message: "Failed to fetch" });
+    expect(failureOf(new TypeError("Unexpected result"))).toEqual({ kind: "other", message: "Unexpected result" });
   });
+
+  test.each(["Failed to fetch", "Load failed", "NetworkError when attempting to fetch resource."])(
+    "a browser connection failure gets a localized retry message (%s)",
+    (message) => {
+      const browserError = new TypeError(message);
+      const result = failureOf(ConnectError.from(browserError));
+      expect(failureOf(browserError)).toEqual(result);
+      expect(failureText(ru, result)).toBe("Не удалось связаться с сайтом. Проверьте подключение к интернету и попробуйте ещё раз.");
+      expect(failureText(en, result)).toBe("Couldn’t reach the site. Check your internet connection and try again.");
+    },
+  );
 
   test("every failure has words in both languages", () => {
     const kinds = [
