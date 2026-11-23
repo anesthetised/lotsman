@@ -398,7 +398,7 @@ func TestCLIRejectsInvalidEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, endpoint := range []string{":51820", "vpn.example.org:51820", "203.0.113.10:banana", "203.0.113.10:0", "203.0.113.10:65536"} {
+	for _, endpoint := range []string{":51820", "-vpn.example.org:51820", "203.0.113.10:banana", "203.0.113.10:0", "203.0.113.10:65536"} {
 		t.Run(endpoint, func(t *testing.T) {
 			invalid := strings.Replace(string(original), "endpoint: 203.0.113.10:51820", "endpoint: '"+endpoint+"'", 1)
 			if err := os.WriteFile(path, []byte(invalid), 0o600); err != nil {
@@ -427,10 +427,19 @@ func TestCLIRejectsInvalidEndpoint(t *testing.T) {
 	}
 }
 
-// Client configs depend on provider MTU and S4 only, so device commands must work
-// while DNS fails. config check still resolves provider endpoints.
+// Device commands render the configured client endpoint and need only provider
+// MTU and S4, so they must work while DNS fails. config check resolves provider endpoints.
 func TestUserCommandsWithoutDNS(t *testing.T) {
 	path := testConfig(t)
+	const clientEndpoint = "vpn.example.org:51820"
+	config, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	withHostname := strings.Replace(string(config), "203.0.113.10:51820", clientEndpoint, 1)
+	if err := os.WriteFile(path, []byte(withHostname), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	providerPath := filepath.Join(filepath.Dir(path), "nl.conf")
 	provider, err := os.ReadFile(providerPath)
 	if err != nil {
@@ -456,8 +465,12 @@ func TestUserCommandsWithoutDNS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if client, err := awgconf.Parse(strings.NewReader(added)); err != nil || client.Interface.MTU != 1400 {
-		t.Errorf("device add output is not a config with MTU 1400: %v\n%s", err, added)
+	client, err := awgconf.Parse(strings.NewReader(added))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.Interface.MTU != 1400 || client.Peers[0].Endpoint != clientEndpoint {
+		t.Errorf("device add gave MTU %d and endpoint %q, want 1400 and %q", client.Interface.MTU, client.Peers[0].Endpoint, clientEndpoint)
 	}
 	shown, err := capture(t, "-config", path, "device", "show", "alice/phone")
 	if err != nil || shown != added {
