@@ -139,7 +139,7 @@ func TestProxyUpstream(t *testing.T) {
 	if !h.dp.HasUpstream(dataplane.Interface{Name: "lm-up-ol", Addr: netip.MustParsePrefix("192.0.0.8/32")}) {
 		t.Errorf("dataplane upstreams = %+v", h.dp.Ups)
 	}
-	if got := h.d.ClientMTU(); got != 1392 { // min(1500-80-S4, 1400-8), as without ol
+	if got := h.d.ClientMTU(); got != 1400 { // nl's interface MTU still limits the client
 		t.Errorf("ClientMTU = %d", got)
 	}
 

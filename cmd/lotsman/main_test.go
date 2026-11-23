@@ -127,8 +127,8 @@ func TestConfigCheckRejectsUnsafeUpstream(t *testing.T) {
 	for _, tc := range []struct {
 		name, old, replacement, wantError string
 	}{
-		{"negative MTU", "MTU = 1400", "MTU = -1", "MTU minus S4 must be at least 68"},
-		{"padding exhausts MTU", "S4 = 8", "S4 = 1333", "MTU minus S4 must be at least 68"},
+		{"negative MTU", "MTU = 1400", "MTU = -1", "MTU must be at least 68"},
+		{"padding exhausts outer budget", "S4 = 8", "S4 = 1353", "leave less than 68 bytes in the outer path budget"},
 		{"oversized wire MTU", "MTU = 1400", "MTU = 65468", "MTU plus S4 and transport overhead"},
 		{"oversized IPv4 junk", "S4 = 8", "S4 = 8\nJc = 1\nJmin = 65508\nJmax = 65508", "junk packet size must not exceed 65507"},
 		{"inverted junk", "S4 = 8", "S4 = 8\nJc = 1\nJmin = 70\nJmax = 40", "Jmin must not exceed Jmax"},
@@ -174,7 +174,7 @@ func TestCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("device add output is not a config: %v\n%s", err, out)
 	}
-	if client.Interface.MTU != 1392 || client.Interface.Addresses[0].String() != "10.77.0.2/32" || client.Peers[0].Endpoint != "203.0.113.10:51820" {
+	if client.Interface.MTU != 1400 || client.Interface.Addresses[0].String() != "10.77.0.2/32" || client.Peers[0].Endpoint != "203.0.113.10:51820" {
 		t.Errorf("client config = %+v", client)
 	}
 	if _, err := capture(t, "-config", cfg, "device", "add", "alice/laptop"); err == nil {
@@ -456,8 +456,8 @@ func TestUserCommandsWithoutDNS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if client, err := awgconf.Parse(strings.NewReader(added)); err != nil || client.Interface.MTU != 1392 {
-		t.Errorf("device add output is not a config with MTU 1392: %v\n%s", err, added)
+	if client, err := awgconf.Parse(strings.NewReader(added)); err != nil || client.Interface.MTU != 1400 {
+		t.Errorf("device add output is not a config with MTU 1400: %v\n%s", err, added)
 	}
 	shown, err := capture(t, "-config", path, "device", "show", "alice/phone")
 	if err != nil || shown != added {

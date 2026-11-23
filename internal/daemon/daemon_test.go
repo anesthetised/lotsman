@@ -434,10 +434,10 @@ func TestDaemon(t *testing.T) {
 	eventually(t, "initial routing", func() bool {
 		return routedVia(nlPeer.IP, "lm-up-nl")() && routedVia(euPeer.IP, "lm-up-nl")()
 	})
-	if h.dp.MTU != 1392 || h.dp.Down.Name != DownstreamInterface || len(h.dp.Ups) != 2 {
+	if h.dp.MTU != 1400 || h.dp.Down.Name != DownstreamInterface || len(h.dp.Ups) != 2 {
 		t.Errorf("dataplane setup = %+v", h.dp)
 	}
-	if got := h.d.ClientMTU(); got != 1392 { // min(1500-80-S4, 1400-8, 1420-8)
+	if got := h.d.ClientMTU(); got != 1400 { // nl's interface MTU is the limiting hop
 		t.Errorf("ClientMTU = %d", got)
 	}
 	if peers, _ := h.d.down.Peers(); len(peers) != 2 {
@@ -460,7 +460,7 @@ func TestDaemon(t *testing.T) {
 	if _, ok := metric(m, "lotsman_peer_last_handshake_timestamp_seconds", metrics.Label{Name: "device", Value: "nl"}); !ok {
 		t.Error("per-peer handshake metric missing")
 	}
-	if v, ok := metric(m, "lotsman_client_mtu"); !ok || v != 1392 {
+	if v, ok := metric(m, "lotsman_client_mtu"); !ok || v != 1400 {
 		t.Errorf("client_mtu = %v, %v", v, ok)
 	}
 	if v, _ := metric(m, "lotsman_build_info", metrics.Label{Name: "version", Value: "test"}); v != 1 {
@@ -703,8 +703,8 @@ health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 1, up_after: 1}
 	if len(st.Upstreams) != 2 || st.Upstreams[0].Name != "de" || st.Upstreams[1].Name != "fi" || st.Upstreams[1].Routed != 1 {
 		t.Errorf("status after reload = %+v", st.Upstreams)
 	}
-	// de: 1420-8; fi: 1420-8; downstream 1500-80-S4 with a random S4 of 8..16 can be smaller.
-	if want := min(1412, 1500-80-int(h.d.id.Params.S4)); h.dp.MTU != want {
+	// Both upstreams leave 1412 bytes before 16-byte alignment.
+	if want := min(1408, 1500-80-int(h.d.id.Params.S4)); h.dp.MTU != want {
 		t.Errorf("mtu after reload = %d, want %d", h.dp.MTU, want)
 	}
 
@@ -715,8 +715,8 @@ health: {interval: 30ms, probe: 1.1.1.1:443, down_after: 1, up_after: 1}
 		t.Fatal(err)
 	}
 	eventually(t, "still routed after replacing fi", routedVia("lm-up-fi"))
-	if h.dp.MTU != 1292 {
-		t.Errorf("mtu after replacing fi = %d", h.dp.MTU)
+	if h.dp.MTU != 1300 {
+		t.Errorf("mtu after replacing fi = %d, want 1300", h.dp.MTU)
 	}
 
 	// Removing the last upstream a route names is no error: the route

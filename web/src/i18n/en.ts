@@ -212,6 +212,7 @@ export const en = {
       step5: "Each device needs its own config. Never share one, and remove a device here when you lose it.",
     },
     failure: {
+      connection: "Couldn’t reach the site. Check your internet connection and try again.",
       unavailable: "The gateway cannot be reached right now. Try again in a minute.",
       denied: "The operator has turned this off for you. Ask them.",
       maxDevices: (limit: number) => `You already have the most devices allowed (${limit}). Remove one first, or ask the operator for more.`,

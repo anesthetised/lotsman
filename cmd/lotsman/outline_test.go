@@ -71,7 +71,7 @@ func TestConfigCheckOutline(t *testing.T) {
 		t.Fatal(err)
 	}
 	client, err := awgconf.Parse(strings.NewReader(out))
-	if err != nil || client.Interface.MTU != 1392 {
+	if err != nil || client.Interface.MTU != 1400 {
 		t.Errorf("client MTU = %d, %v", client.Interface.MTU, err)
 	}
 }

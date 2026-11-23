@@ -217,17 +217,14 @@ func loadAWG(source []byte) (*Upstream, error) {
 	if m == 0 {
 		m = mtu.DefaultWireGuard
 	}
-	// Linux TUN needs at least 68 bytes, including for the client MTU after
-	// subtracting S4 and ContentPaddingAddition. Compare thresholds to avoid
-	// overflowing on a huge MTU.
-	s4 := int(conf.Interface.S4)
-	padding := conf.Interface.ContentPaddingAddition
-	if padding.IsZero() && m < 68+s4 {
-		return nil, fmt.Errorf("[Interface] MTU minus S4 must be at least 68 (MTU %d, S4 %d)", m, s4)
+	if m < mtu.MinimumIPv4 {
+		return nil, fmt.Errorf("[Interface] MTU must be at least %d (MTU %d)", mtu.MinimumIPv4, m)
 	}
-	if int64(m) < 68+int64(s4)+int64(padding.Hi) {
-		return nil, fmt.Errorf("[Interface] MTU minus S4 and ContentPaddingAddition must be at least 68 (MTU %d, S4 %d, ContentPaddingAddition %s)",
-			m, s4, padding)
+	s4 := int(conf.Interface.S4)
+	up := &Upstream{Conf: conf, Endpoint: peer.Endpoint, Addr: addr, MTU: m}
+	if up.MTULimit().PacketLimit() < mtu.MinimumIPv4 {
+		return nil, fmt.Errorf("[Interface] S4 and ContentPaddingAddition leave less than %d bytes in the outer path budget (S4 %d, ContentPaddingAddition %s)",
+			mtu.MinimumIPv4, s4, conf.Interface.ContentPaddingAddition)
 	}
 	// AWG reserves a 16-byte transport header and 16-byte authentication tag.
 	// Its default content padding clamps to the positive TUN MTU, without
@@ -238,13 +235,13 @@ func loadAWG(source []byte) (*Upstream, error) {
 	if m > payloadMax-32-s4 {
 		return nil, fmt.Errorf("[Interface] MTU plus S4 and transport overhead exceeds UDP payload limit %d for endpoint %s", payloadMax, peer.Endpoint)
 	}
-	return &Upstream{Conf: conf, Endpoint: peer.Endpoint, Addr: addr, MTU: m}, nil
+	return up, nil
 }
 
 // MTULimit is what the upstream contributes to the client MTU.
 func (u *Upstream) MTULimit() mtu.Upstream {
 	if u.Conf == nil {
-		return mtu.Upstream{MTU: u.MTU}
+		return mtu.Upstream{MTU: u.MTU, Proxy: true}
 	}
 	iface := u.Conf.Interface
 	return mtu.Upstream{MTU: u.MTU, S4: iface.S4, ContentPadding: iface.ContentPaddingAddition.Hi}
