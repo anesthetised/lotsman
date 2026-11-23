@@ -67,7 +67,7 @@ export interface ChipProps {
   pressed: boolean;
   onChange: (pressed: boolean) => void;
   children: JSX.Element;
-  /** Marks a pressed chip as not working now; the children should say so in words too. */
+  /** Marks an unavailable option, with a stronger outline when selected. */
   warn?: boolean;
   disabled?: boolean;
   mono?: boolean;
@@ -87,11 +87,13 @@ export function Chip(props: ChipProps) {
         class={[
           "rounded-md border px-2 py-0.5 text-xs group-disabled:opacity-60",
           { "font-mono": props.mono },
-          props.pressed
-            ? props.warn
-              ? "border-bad bg-accent/10 text-bad"
-              : "border-accent bg-accent/10 text-fg"
-            : "border-line text-muted group-hover:text-fg",
+          props.warn
+            ? props.pressed
+              ? "border-bad bg-bad/10 text-bad"
+              : "border-bad/45 text-muted group-hover:text-fg"
+            : props.pressed
+              ? "border-accent bg-accent/10 text-fg"
+              : "border-line text-muted group-hover:text-fg",
         ]}
       >
         {props.children}

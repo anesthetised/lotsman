@@ -96,14 +96,16 @@ describe("editing", () => {
     expect(rows(toggleCountry(toggleCountry(on, "LV", offer), "LV", offer))).toEqual(["+NL:provider-c", "+AL:provider-b", "+LV:provider-a|provider-b", "DE"]);
   });
 
-  test("the last chosen country and the last provider of a country stay", () => {
+  test("the last country or provider can be turned off before choosing a replacement", () => {
     const one = toggleCountry(start, "NL", offer);
-    expect(toggleCountry(one, "LV", offer)).toBe(one);
+    expect(chosen(toggleCountry(one, "LV", offer))).toEqual([]);
     const narrowed = toggleProvider(start, "LV", "provider-a", offer);
     expect(chosen(narrowed)[0]?.providers).toEqual(["provider-b"]);
-    expect(toggleProvider(narrowed, "LV", "provider-b", offer)).toBe(narrowed);
+    const deselected = toggleProvider(narrowed, "LV", "provider-b", offer);
+    expect(chosen(deselected).map((c) => c.geo)).toEqual(["NL"]);
+    expect(chosen(toggleProvider(deselected, "LV", "provider-a", offer)).at(-1)?.providers).toEqual(["provider-a"]);
     expect(chosen(toggleProvider(narrowed, "LV", "provider-a", offer))[0]?.providers).toEqual(["provider-a", "provider-b"]); // the offer's order
-    expect(toggleProvider(start, "AL", "provider-b", offer)).toBe(start); // off: nothing to choose
+    expect(chosen(toggleProvider(start, "AL", "provider-b", offer)).at(-1)).toEqual({ geo: "AL", on: true, providers: ["provider-b"] });
   });
 
   test("moving keeps the others in order and refuses what is out of range", () => {

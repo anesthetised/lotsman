@@ -105,6 +105,7 @@ export const en = {
     noExitFix: "Select another available country or provider.",
     fallbackAvailable: "The device can use another allowed exit while the selected exits are unavailable.",
     noAllowedExit: "No allowed exit is currently available for this device.",
+    chooseExit: "Choose at least one exit to save the route.",
     readOnly: "Only the operator changes this route.",
     noExits: "No exits are available.",
     now: "Now",

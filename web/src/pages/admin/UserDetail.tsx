@@ -314,6 +314,7 @@ function AddDevice(props: { user: User; exits: readonly UpstreamStatus[]; onAdde
   };
   const submit = async (e: SubmitEvent) => {
     e.preventDefault();
+    if (!route.canSubmit()) return;
     setBusy(true);
     setError(undefined);
     const name = device().trim();
@@ -372,7 +373,7 @@ function AddDevice(props: { user: User; exits: readonly UpstreamStatus[]; onAdde
               <button type="button" class={buttonClass()} onClick={() => setOpen(false)}>
                 {t.admin.cancel}
               </button>
-              <button type="submit" class={buttonClass("primary")} disabled={busy()}>
+              <button type="submit" class={buttonClass("primary")} disabled={busy() || !route.canSubmit()}>
                 {c.users.add}
               </button>
             </div>

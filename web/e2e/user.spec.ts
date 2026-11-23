@@ -234,6 +234,9 @@ test("adding a device shows its config and QR code at once, with the route chose
   await expect(add.getByRole("button", { name: "Fastest" })).toHaveAttribute("aria-pressed", "true");
   await add.getByRole("button", { name: "In order" }).click();
   for (const country of ["Albania", "Germany", "Netherlands"]) await add.getByRole("switch", { name: `Use ${country}` }).click();
+  await add.getByRole("switch", { name: "Use Latvia" }).click();
+  await expect(add.getByRole("button", { name: "Create" })).toBeDisabled();
+  await add.getByRole("switch", { name: "Use Latvia" }).click();
   await add.getByRole("button", { name: "Create" }).click();
 
   const issued = page.getByRole("region", { name: "tablet added" });
@@ -319,6 +322,35 @@ test("the device form preserves an unavailable provider and explains strict and 
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
     await page.evaluate(() => innerWidth),
   );
+});
+
+test("the last unavailable exit can be turned off before choosing a replacement", async ({ page }, info) => {
+  if (info.project.name === "phone") await page.setViewportSize({ width: 320, height: 820 });
+  await page.goto(link.replace("/u#", "/u?fixture=outline-exhausted#"));
+  const tv = await openCard(page, "tv");
+  const latvia = tv.getByRole("switch", { name: "Use Latvia" });
+  const excluded = tv.getByRole("group", { name: "Providers in Latvia" }).getByRole("button", { name: /provider-b.*unavailable/ });
+  const border = excluded.locator("span").first();
+  const netherlands = tv.getByRole("switch", { name: "Use Netherlands" });
+  await netherlands.click();
+  await expect(tv.getByRole("alert")).toContainText("This route will block traffic");
+  await expect(excluded).toHaveAttribute("aria-pressed", "true");
+  const selectedRed = await border.evaluate((el) => getComputedStyle(el).borderTopColor);
+  await latvia.click();
+  await expect(tv.getByRole("status")).toHaveText("Choose at least one exit to save the route.");
+  await expect(tv.getByRole("button", { name: "Apply" })).toBeDisabled();
+  await expect(excluded).toHaveAttribute("aria-pressed", "false");
+  await expect(border).not.toHaveCSS("border-top-color", selectedRed);
+
+  await excluded.click();
+  await expect(latvia).toHaveAttribute("aria-checked", "true");
+  await expect(excluded).toHaveAttribute("aria-pressed", "true");
+  await excluded.click();
+  await expect(latvia).toHaveAttribute("aria-checked", "false");
+  await netherlands.click();
+  await tv.getByRole("button", { name: "Apply" }).click();
+  await expect(tv.getByRole("button", { name: "Apply" })).toBeDisabled();
+  await expect(tv).toContainText("Now: Netherlands · provider-c");
 });
 
 test("a user whose routes the operator sets sees them read-only", async ({ page }) => {

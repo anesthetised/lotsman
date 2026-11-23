@@ -61,7 +61,7 @@ test("reorders from the keyboard, says where the country went, and applies what 
   );
 });
 
-test("switches countries and providers, keeps the last of each, and Cancel goes back", () => {
+test("switches countries and providers, including the last one, and Cancel goes back", () => {
   render(() => <RouteEditor route={ordered} exits={exits} providers apply={async () => undefined} />);
   const use = (name: string) => screen.getByRole("switch", { name: `Use ${name}` });
   expect(use("Germany").getAttribute("aria-checked")).toBe("false");
@@ -72,12 +72,18 @@ test("switches countries and providers, keeps the last of each, and Cancel goes 
   fireEvent.click(use("Latvia"));
   fireEvent.click(use("Netherlands"));
   flush();
-  // Germany is the only one left: its switch stays on, and its only provider too.
-  expect((use("Germany") as HTMLButtonElement).disabled).toBe(true);
   const providers = within(screen.getByRole("group", { name: "Providers in Germany" }));
-  expect((providers.getByRole("button", { name: /provider-a/ }) as HTMLButtonElement).disabled).toBe(true);
-  // A chosen provider that is down says so in words.
-  expect(providers.getByRole("button").textContent).toBe("provider-a · unavailable");
+  const unavailable = providers.getByRole("button", { name: /provider-a.*unavailable/ });
+  expect((unavailable as HTMLButtonElement).disabled).toBe(false);
+  fireEvent.click(unavailable);
+  flush();
+  expect(use("Germany").getAttribute("aria-checked")).toBe("false");
+  expect(unavailable.getAttribute("aria-pressed")).toBe("false");
+  expect((screen.getByRole("button", { name: "Apply" }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole("status").textContent).toBe("Choose at least one exit to save the route.");
+  fireEvent.click(unavailable);
+  flush();
+  expect(use("Germany").getAttribute("aria-checked")).toBe("true");
 
   fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
   flush();

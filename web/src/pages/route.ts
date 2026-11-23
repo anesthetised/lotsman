@@ -96,26 +96,28 @@ export function chosen(draft: Draft): CountryChoice[] {
 
 /**
  * Turns a country on (it goes last among the chosen, with every provider) or
- * off (it goes back among the others, in the offer's order). The last chosen
- * country stays on: a route of none would mean any exit.
+ * off (it goes back among the others, in the offer's order). An empty
+ * selection is allowed while editing, before choosing what to save.
  */
 export function toggleCountry(draft: Draft, geo: string, offer: Offer): Draft {
   const row = draft.countries.find((c) => c.geo === geo);
-  if (!row || (row.on && chosen(draft).length === 1)) return draft;
+  if (!row) return draft;
   const on = chosen(draft).filter((c) => c.geo !== geo);
   if (!row.on) on.push({ geo, on: true, providers: offer.get(geo) ?? [] });
   const off = [...offer].filter(([g]) => !on.some((c) => c.geo === g)).map(([g, providers]) => ({ geo: g, on: false, providers }));
   return { ...draft, countries: [...on, ...off] };
 }
 
-/** Chooses a provider of a chosen country, or drops it; the last one stays. */
+/** Choosing a provider turns its country on; dropping its last one turns it off. */
 export function toggleProvider(draft: Draft, geo: string, provider: string, offer: Offer): Draft {
   const row = draft.countries.find((c) => c.geo === geo);
-  if (!row?.on) return draft;
-  const has = row.providers.includes(provider);
-  if (has && row.providers.length === 1) return draft;
-  const providers = (offer.get(geo) ?? []).filter((p) => (p === provider ? !has : row.providers.includes(p)));
-  return { ...draft, countries: draft.countries.map((c) => (c.geo === geo ? { ...c, providers } : c)) };
+  const offered = offer.get(geo) ?? [];
+  if (!row || !offered.includes(provider)) return draft;
+  const has = row.on && row.providers.includes(provider);
+  if (has && row.providers.length === 1) return toggleCountry(draft, geo, offer);
+  const active = row.on ? draft : toggleCountry(draft, geo, offer);
+  const providers = row.on ? offered.filter((p) => (p === provider ? !has : row.providers.includes(p))) : [provider];
+  return { ...active, countries: active.countries.map((c) => (c.geo === geo ? { ...c, providers } : c)) };
 }
 
 /** Moves a chosen country to position `to` among the chosen; the same draft when it is there already or `to` is out of range. */

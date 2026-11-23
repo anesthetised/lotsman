@@ -24,6 +24,7 @@ export function AddDevice() {
   const first = () => ctx.user().devices.length === 0;
   const shown = () => open() || first();
   const route = createNewRoute(ctx.exits, () => ctx.rights().showProviders);
+  const routeReady = () => !ctx.rights().editRoutes || route.canSubmit();
 
   const close = () => {
     setOpen(false);
@@ -33,7 +34,7 @@ export function AddDevice() {
   };
   const submit = async (e: SubmitEvent) => {
     e.preventDefault();
-    if (off()) return;
+    if (off() || !routeReady()) return;
     setFailure(undefined);
     setAdding(true);
     const device = name().trim();
@@ -107,7 +108,7 @@ export function AddDevice() {
                 {t.user.add.cancel}
               </button>
             </Show>
-            <button type="submit" class={touchButton("primary")} disabled={ctx.busy() || off()}>
+            <button type="submit" class={touchButton("primary")} disabled={ctx.busy() || off() || !routeReady()}>
               {adding() ? t.user.add.busy : t.user.add.submit}
             </button>
           </div>
