@@ -156,7 +156,11 @@ func TestValidationErrors(t *testing.T) {
 		"missing endpoint":       {"endpoint", "endpoint: ''\n", "endpoint:"},
 		"endpoint without port":  {"endpoint", "endpoint: 203.0.113.10\n", "endpoint:"},
 		"endpoint empty host":    {"endpoint", "endpoint: ':51820'\n", "endpoint: host is required"},
-		"endpoint hostname":      {"endpoint", "endpoint: vpn.example.org:51820\n", `endpoint: "vpn.example.org" must be an IP address, not a hostname`},
+		"endpoint bad hostname":  {"endpoint", "endpoint: -vpn.example.org:51820\n", "must be an IP address or a DNS hostname"},
+		"endpoint invalid IP":    {"endpoint", "endpoint: 192.0.2.999:51820\n", "must be an IP address or a DNS hostname"},
+		"bracketed DNS hostname": {"endpoint", "endpoint: '[vpn.example.org]:51820'\n", "must be an IP address or a DNS hostname"},
+		"endpoint long label":    {"endpoint", "endpoint: " + strings.Repeat("a", 64) + ".example.org:51820\n", "must be an IP address or a DNS hostname"},
+		"endpoint empty label":   {"endpoint", "endpoint: vpn..example.org:51820\n", "must be an IP address or a DNS hostname"},
 		"endpoint service port":  {"endpoint", "endpoint: 203.0.113.10:banana\n", "endpoint: port must be a number from 1 to 65535"},
 		"endpoint empty port":    {"endpoint", "endpoint: '203.0.113.10:'\n", "endpoint: port must be a number from 1 to 65535"},
 		"endpoint zero port":     {"endpoint", "endpoint: 203.0.113.10:0\n", "endpoint: port must be a number from 1 to 65535"},
@@ -196,7 +200,7 @@ func TestValidationErrors(t *testing.T) {
 }
 
 func TestEndpointValidForms(t *testing.T) {
-	for _, endpoint := range []string{"192.0.2.1:1", "192.0.2.1:65535", "192.0.2.1:51820", "[2001:db8::1]:51820"} {
+	for _, endpoint := range []string{"192.0.2.1:1", "192.0.2.1:65535", "192.0.2.1:51820", "[2001:db8::1]:51820", "vpn-1.example.org:51820", "VPN.example.org.:51820"} {
 		t.Run(endpoint, func(t *testing.T) {
 			input := replaceTopLevelField(minimal, "endpoint", "endpoint: '"+endpoint+"'\n")
 			cfg, err := Parse([]byte(input))

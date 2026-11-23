@@ -21,7 +21,7 @@ import (
 type Config struct {
 	Listen    string       `yaml:"listen"`
 	AWG       int          `yaml:"awg"`      // AmneziaWG generation the listener speaks: 2 or 3
-	Endpoint  string       `yaml:"endpoint"` // IP:port that client configs connect to; never a hostname
+	Endpoint  string       `yaml:"endpoint"` // IP address or DNS hostname with a UDP port for client configs
 	Subnet    netip.Prefix `yaml:"subnet"`
 	DNS       []netip.Addr `yaml:"dns"`
 	StateDir  string       `yaml:"state_dir"`
@@ -466,11 +466,8 @@ func httpURL(raw string) bool {
 	return err == nil && (u.Scheme == "http" || u.Scheme == "https") && u.Hostname() != ""
 }
 
-// validateEndpoint checks the address client configs connect to: an IP and
-// a port, never a hostname. A client resolves a name before its tunnel is up,
-// through whatever DNS it has, which may be blocked or poisoned; and a name
-// may well point at a proxy that carries HTTP only, such as a CDN in front of
-// the web panel. Either way the config would silently connect elsewhere.
+// validateEndpoint checks the client endpoint without resolving it.
+// The client resolves hostnames when it starts the tunnel.
 func validateEndpoint(endpoint string) error {
 	host, port, err := net.SplitHostPort(endpoint)
 	if err != nil {
@@ -479,11 +476,26 @@ func validateEndpoint(endpoint string) error {
 	if host == "" {
 		return errors.New("host is required")
 	}
-	if _, err := netip.ParseAddr(host); err != nil {
-		return fmt.Errorf("%q must be an IP address, not a hostname: clients would resolve it outside the tunnel", host)
+	if _, err := netip.ParseAddr(host); err != nil && (strings.HasPrefix(endpoint, "[") || !isEndpointHostname(host)) {
+		return fmt.Errorf("%q must be an IP address or a DNS hostname", host)
 	}
 	if n, err := strconv.ParseUint(port, 10, 16); err != nil || n == 0 {
 		return errors.New("port must be a number from 1 to 65535")
 	}
 	return nil
+}
+
+var dnsLabel = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
+
+func isEndpointHostname(host string) bool {
+	host = strings.TrimSuffix(host, ".")
+	if len(host) > 253 || strings.Trim(host, "0123456789.") == "" {
+		return false
+	}
+	for _, label := range strings.Split(host, ".") {
+		if !dnsLabel.MatchString(label) {
+			return false
+		}
+	}
+	return true
 }

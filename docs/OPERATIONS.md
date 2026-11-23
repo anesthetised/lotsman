@@ -153,7 +153,7 @@ route rules. No expiry means no time restriction.
 |---|---|
 | `listen` | Numeric UDP address and family the downstream device binds to; `0.0.0.0` is IPv4-only and `[::]` is IPv6-only. |
 | `awg` | AmneziaWG generation of the listener, for all clients: `3` (default; header protection and random trailers, Amnezia app 5.0.1.5 or later) or `2` (AWG 2.0). Restart only. Changing it invalidates issued client configs; re-show them with `device show`. |
-| `endpoint` | The IP address and UDP port (1–65535) written into client configs: IPv4 or bracketed IPv6, never a hostname. A client would resolve a name before its tunnel is up, through DNS that may be blocked or poisoned, and a name may point at an HTTP-only proxy such as a CDN in front of the web panel. |
+| `endpoint` | The address and UDP port (1–65535) written into client configs. Accepts IPv4, bracketed IPv6 or a DNS hostname. Clients resolve hostnames before the tunnel starts, so use a DNS-only record that points directly to the gateway and matches the listener’s address family. |
 | `subnet` | Canonical IPv4 network prefix, /24 or larger; the first host address is the gateway. |
 | `dns` | Resolvers written into client configs; queries go through the client's upstream. |
 | `state_dir` | Server identity, SQLite database, pid, status and `serve.lock` files, cached dynamic Outline keys. |
