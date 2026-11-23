@@ -82,11 +82,17 @@ address fixes reply source; wildcard replies follow host routing.
 
 ## MTU
 
-Client tunnel MTU = `min(1500 − 80 − S4_down, min over upstreams (upstream MTU − S4_up))`.
-80 bytes = IPv6 (40) + UDP (8) + WireGuard transport header (16) + Poly1305 tag (16). This is the
-worst case and applies to every client, even with an IPv4 `listen`: the endpoint hostname may also
-resolve over IPv6. The same value is set on `lm0` and written into client configs; nftables
-additionally clamps TCP MSS to the route MTU.
+Lotsman takes the smallest packet limit on the downstream and upstream hops.
+The downstream budget is `1500 − 80 − S4_down`. For an AWG upstream, the limit is the smaller
+of its TUN MTU and the outer path budget `1500 − 80 − S4_up − ContentPaddingAddition.Hi`.
+When the outer budget is smaller and ordinary WireGuard alignment applies, Lotsman rounds
+that budget down to a multiple of 16. Proxy upstreams contribute their TUN MTU.
+
+The 80-byte allowance covers IPv6 (40), UDP (8), WireGuard transport header (16), and Poly1305
+tag (16). Both AWG hops assume a 1500-byte outer path and use the IPv6 allowance for either
+address family. Random trailers depend on the datagrams exchanged with the peer.
+Lotsman sets the resulting MTU on `lm0` and writes it into client configs. nftables also clamps
+TCP MSS to the route MTU.
 
 ## Forwarding authorization and shutdown
 
@@ -933,4 +939,4 @@ Reading: the provider leg is the bottleneck (17 Mbit/s down through the provider
 from the same host); Lotsman adds no measurable limit on top of it. The daemon peaked at 4 % of one
 core during the tests, so userspace double encryption is far from being the constraint at these
 rates. Leg A shows the residential line itself caps downloads below 80 Mbit/s. Client MTU in this
-setup is 1260 because of the provider's own MTU and S4.
+setup was 1260 at the time of measurement.

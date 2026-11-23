@@ -188,16 +188,16 @@ active I signature packets, and the initiation together must fit a 128-packet
 send batch, and each generated junk packet must fit the endpoint's UDP payload
 limit (65507 bytes for IPv4, 65527 for IPv6).
 
-An omitted or zero provider MTU uses 1420. The MTU minus provider `S4` padding
-must be at least 68; MTU plus `S4` and the 32-byte transport header/tag must fit
-the endpoint's UDP payload limit. `config check` rejects these invalid settings
-before a tunnel is started. These checks do not validate I packet lengths or
-the UDP size of S1–S3-padded handshake packets.
+An omitted or zero provider MTU uses 1420. The provider MTU sets the upstream TUN's
+inner packet limit. Lotsman accounts for `S4` and content padding in the budget for the
+outer path, estimated at 1500 bytes. Both limits must allow at least 68 bytes.
+The provider MTU plus `S4` and the 32-byte transport header/tag must also fit the
+endpoint's UDP payload limit. `config check` validates these limits before a tunnel starts.
 
 AmneziaWG 2.0 and 3.x provider exports load as they are. `HeaderProtectionKey` (base64, 32 bytes)
 and `RandomTrailers` must match the provider's server; header protection requires S1–S4 of at least
 12, and an all-zero key disables it. Flags take `on`/`off`, `true`/`false` or `1`/`0`. The upper
-bound of `ContentPaddingAddition` lowers the client MTU like `S4` does. Timings in seconds
+bound of `ContentPaddingAddition` consumes space in the outer path budget alongside `S4`. Timings in seconds
 (`RekeyAfterTime`, `RekeyTimeout`, `RejectAfterTime`, `KeepaliveTimeout`, `MaxHandshakeAttempts`)
 and `[Peer] PersistentKeepalive` take a single value or a range `a-b`; the runtime picks from the
 range each time it uses it, and 0 means its default (keepalive off). Lotsman adds no bounds beyond
@@ -1370,7 +1370,7 @@ usually means packets larger than the host's path to the provider takes; a lower
 provider's config is the first thing to try. Errors on every upstream at once point at the host's
 own uplink.
 
-**Sites open, large downloads or video hang.** MTU. `config check` prints the client MTU; make
+**Sites open, large downloads or video hang.** MTU. `upstream status` prints the live client MTU. Make
 sure clients actually imported the config with that `MTU` line. Try a lower value in a provider
 config's `MTU` if the provider's path is narrower than it claims.
 
